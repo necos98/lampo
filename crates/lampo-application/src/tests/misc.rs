@@ -298,6 +298,25 @@ async fn database_operations_target_the_sites_instance() {
     assert_eq!(err.code, ErrorCode::Cancelled);
 }
 
+#[tokio::test]
+async fn database_operations_refuse_system_schemas_before_reaching_the_server() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", false);
+    let db = DatabaseService::new(w.db.clone(), w.projects.clone(), w.worktrees.clone(), w.settings.clone(), w.installed.clone(), w.service_control.clone());
+    let progress = RecordingProgress::default();
+
+    for name in ["mysql", "SYS", "Information_Schema", "performance_schema"] {
+        let request = DatabaseRequest { site: "shop".into(), name: Some(name.into()) };
+        let err = db.drop_database(&request).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::Validation, "drop {name}");
+        assert!(err.message.contains("system schema"), "{}", err.message);
+        assert_eq!(db.create(&request).await.unwrap_err().code, ErrorCode::Validation, "create {name}");
+        let file_request = DatabaseFileRequest { site: "shop".into(), name: Some(name.into()), file: "D:\\dump.sql".into() };
+        assert_eq!(db.import(&file_request, &progress, &CancelFlag::new()).await.unwrap_err().code, ErrorCode::Validation, "import {name}");
+    }
+    assert!(w.db.calls().is_empty(), "nothing reached the server: {:?}", w.db.calls());
+}
+
 // --- shims -----------------------------------------------------------------------------------
 
 #[test]

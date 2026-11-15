@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use lampo_domain::mysql::DatabaseName;
+use lampo_domain::mysql::{DatabaseName, is_system_schema};
 use lampo_domain::ports::{CommandOutput, CommandRunner, CommandSpec, DatabaseAdmin, MysqlEndpoint, PipedCommand, PipedCommandRunner, ProgressSink};
 use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
 use lampo_domain::{PortError, PortResult};
@@ -14,7 +14,6 @@ use crate::mysql::client_args;
 const STATEMENT_TIMEOUT: Duration = Duration::from_secs(120);
 /// Imports/exports of big databases; the user cancels with the `CancelFlag`.
 const TRANSFER_TIMEOUT: Duration = Duration::from_secs(12 * 60 * 60);
-const SYSTEM_SCHEMAS: [&str; 4] = ["information_schema", "mysql", "performance_schema", "sys"];
 
 /// `DatabaseAdmin` via `mysql.exe` / `mysqldump.exe` of the endpoint's series (no MySQL client
 /// library: works identically for 5.7 and 8.x auth plugins). Import/export/clone stream through
@@ -111,7 +110,7 @@ impl MysqlCliAdmin {
 impl DatabaseAdmin for MysqlCliAdmin {
     async fn list(&self, endpoint: &MysqlEndpoint) -> PortResult<Vec<String>> {
         let out = self.execute_ok(endpoint, "SHOW DATABASES").await?;
-        Ok(out.lines().map(str::trim).filter(|l| !l.is_empty() && !SYSTEM_SCHEMAS.contains(&l.to_ascii_lowercase().as_str())).map(String::from).collect())
+        Ok(out.lines().map(str::trim).filter(|l| !l.is_empty() && !is_system_schema(l)).map(String::from).collect())
     }
 
     async fn create(&self, endpoint: &MysqlEndpoint, name: &DatabaseName) -> PortResult<()> {
@@ -239,6 +238,15 @@ mod tests {
         assert_eq!(args[0], "--no-defaults", "must be the first option");
         assert!(args.contains(&"--host=127.0.0.1".to_string()));
         assert!(args.contains(&"--port=3306".to_string()));
+    }
+
+    #[tokio::test]
+    async fn list_hides_system_schemas_whatever_their_case() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(FakeRunner::default());
+        fake.reply.lock().unwrap().push(CommandOutput { exit_code: Some(0), stdout: "INFORMATION_SCHEMA\nMySQL\nPerformance_Schema\nSYS\nmysql_app\n".into(), stderr: String::new() });
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        assert_eq!(admin.list(&endpoint(dir.path())).await.unwrap(), ["mysql_app"]);
     }
 
     #[tokio::test]

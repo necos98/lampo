@@ -117,6 +117,15 @@ async fn clone_mode_copies_a_parent_database_with_progress() {
 }
 
 #[tokio::test]
+async fn clone_mode_refuses_a_system_schema_as_source() {
+    let w = setup();
+    let err = up(&w, "D:\\wt\\login", DatabaseModeDto::Clone { source: "MySQL".into() }).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Validation);
+    assert!(w.db.calls().is_empty());
+    assert!(w.worktrees.list_all().unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn failed_or_cancelled_clones_leave_nothing_behind() {
     let w = setup();
     let err = up(&w, "D:\\wt\\login", DatabaseModeDto::Clone { source: "missing".into() }).await.unwrap_err();

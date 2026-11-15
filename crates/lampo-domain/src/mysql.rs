@@ -101,7 +101,18 @@ impl From<MysqlSeries> for String {
     }
 }
 
-/// A MySQL schema name.
+/// Schemas MySQL keeps for itself on every instance. An instance is shared by all the projects
+/// of its series, so none of them may be a project's database or the target of an operation.
+pub const SYSTEM_SCHEMAS: [&str; 4] = ["information_schema", "mysql", "performance_schema", "sys"];
+
+/// Whether `name` is one of the [`SYSTEM_SCHEMAS`]. Case-insensitive, like MySQL on Windows.
+pub fn is_system_schema(name: &str) -> bool {
+    let name = name.trim();
+    SYSTEM_SCHEMAS.iter().any(|schema| schema.eq_ignore_ascii_case(name))
+}
+
+/// A MySQL schema name of a project: never one of the [`SYSTEM_SCHEMAS`], so creating, dropping,
+/// importing into or cloning a `DatabaseName` cannot damage the shared instance.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct DatabaseName(String);
@@ -109,8 +120,14 @@ pub struct DatabaseName(String);
 impl DatabaseName {
     pub fn new(name: impl AsRef<str>) -> Result<Self, DomainError> {
         let n = name.as_ref().trim();
-        let ok = !n.is_empty() && n.len() <= 64 && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
-        if ok { Ok(Self(n.to_string())) } else { Err(DomainError::InvalidDatabaseName(name.as_ref().to_string())) }
+        let well_formed = !n.is_empty() && n.len() <= 64 && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+        if !well_formed {
+            Err(DomainError::InvalidDatabaseName(name.as_ref().to_string()))
+        } else if is_system_schema(n) {
+            Err(DomainError::ReservedDatabaseName(n.to_string()))
+        } else {
+            Ok(Self(n.to_string()))
+        }
     }
 
     /// Derives a schema name from a project slug (`my-shop` → `my_shop`).
@@ -179,5 +196,26 @@ mod tests {
         assert_eq!(DatabaseName::from_slug("my-shop").unwrap().as_str(), "my_shop");
         assert!(DatabaseName::new("drop table;").is_err());
         assert!(DatabaseName::new("").is_err());
+    }
+
+    /// Dropping or importing into a system schema breaks the instance shared by every project.
+    #[test]
+    fn system_schemas_are_refused_whatever_their_case() {
+        for name in ["information_schema", "mysql", "performance_schema", "sys", "MySQL", "SYS", " Performance_Schema "] {
+            let err = DatabaseName::new(name).unwrap_err();
+            assert_eq!(err, DomainError::ReservedDatabaseName(name.trim().to_string()), "{name}");
+            assert!(err.to_string().contains("system schema"), "{err}");
+        }
+        assert!(DatabaseName::from_slug("sys").is_err());
+        assert!(serde_json::from_str::<DatabaseName>(r#""mysql""#).is_err());
+        for name in ["mysql_app", "my_sys", "sys1", "shop"] {
+            assert!(DatabaseName::new(name).is_ok(), "{name}");
+        }
+    }
+
+    #[test]
+    fn recognises_system_schemas() {
+        assert!(is_system_schema("Information_Schema"));
+        assert!(!is_system_schema("shop"));
     }
 }
