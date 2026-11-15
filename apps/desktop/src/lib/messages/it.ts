@@ -48,7 +48,9 @@ export const it = {
 		host: 'Host',
 		user: 'Utente',
 		password: 'Password',
-		emptyPassword: '(vuota)'
+		emptyPassword: '(vuota)',
+		openLinkFailed: 'Impossibile aprire il link nel browser',
+		unsupportedLink: 'Lampo apre solo link http e https.'
 	},
 	nav: {
 		label: 'Navigazione principale',
