@@ -55,6 +55,27 @@ mod tests {
         assert!(repo.load().unwrap_err().to_string().contains("settings.toml"));
     }
 
+    /// A file edited by hand into invalid settings does not load (the error names it), and a
+    /// save over it keeps a copy first.
+    #[test]
+    fn invalid_settings_are_an_error_naming_the_file_and_are_backed_up_on_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = paths(&dir);
+        std::fs::create_dir_all(&p.config_root).unwrap();
+        let clash = "apache_port = 3306\n";
+        std::fs::write(p.settings_file(), clash).unwrap();
+        let repo = TomlSettingsRepository::new(p.clone());
+        let err = repo.load().unwrap_err().to_string();
+        assert!(err.contains("settings.toml") && err.contains("port 3306"), "{err}");
+
+        repo.save(&Settings::default()).unwrap();
+        assert_eq!(repo.load().unwrap(), Settings::default());
+        let copies: Vec<_> =
+            std::fs::read_dir(&p.config_root).unwrap().map(|e| e.unwrap().path()).filter(|f| f.file_name().unwrap().to_string_lossy().starts_with("settings.toml.corrupt-")).collect();
+        assert_eq!(copies.len(), 1, "{copies:?}");
+        assert_eq!(std::fs::read_to_string(&copies[0]).unwrap(), clash);
+    }
+
     /// H2: a `settings.toml` written before services became data still loads; saving it
     /// writes the new shape.
     #[test]

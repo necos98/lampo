@@ -5,7 +5,7 @@ use tauri::State;
 use crate::state::AppState;
 
 #[tauri::command]
-pub fn list_projects(state: State<'_, AppState>) -> AppResult<Vec<ProjectDto>> {
+pub fn list_projects(state: State<'_, AppState>) -> AppResult<ProjectListDto> {
     state.project_queries.list()
 }
 

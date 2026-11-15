@@ -234,7 +234,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 		// Projects
 		listProjects: async () => {
 			await sleep(250);
-			return projects.map((p) => attachWorktrees(clone(p)));
+			return { projects: projects.map((p) => attachWorktrees(clone(p))), unreadable: [] };
 		},
 		getProject: async (id) => attachWorktrees(clone(find(id))),
 		suggestAddresses: async (projectId) => {

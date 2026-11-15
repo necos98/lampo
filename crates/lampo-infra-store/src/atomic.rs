@@ -9,8 +9,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use lampo_domain::ports::Clock;
 use lampo_domain::{PortError, PortResult};
 use toml::{Table, Value};
+
+use crate::clock::SystemClock;
 
 /// Current schema number written into every TOML file. 2: services are data
 /// (`environment.services`, `settings.services`); schema-1 files are migrated on read.
@@ -82,25 +85,64 @@ pub fn write_table(path: &Path, table: &Table) -> PortResult<()> {
 
 /// Writes `value` with the `schema` header, keeping keys of the existing file that this version
 /// of the type does not know. Atomic.
+///
+/// An existing file that does not load as `T` (corrupt, or edited into an invalid state) is
+/// copied to `<file>.corrupt-<unix ms>` first: the caller asked to save, but the user's
+/// hand-made content must not vanish with it. A file that cannot even be read is an error.
 pub fn write_toml<T: serde::Serialize + serde::de::DeserializeOwned>(path: &Path, value: &T) -> PortResult<()> {
     let name = path.display().to_string();
     let mut table = to_table(value, &name)?;
     table.insert(SCHEMA_KEY.to_string(), Value::Integer(SCHEMA_VERSION));
-    // A corrupt existing file is simply replaced: the caller explicitly asked to save.
-    // Only a file of this schema or a newer one can hold keys worth keeping: the unknown keys of
-    // an older file are retired ones that were migrated on read (`mysql`/`redis` → `services`),
-    // and keeping them would resurrect the old values on the next read.
-    if let Ok(Some(existing)) = read_table(path)
-        && existing.get(SCHEMA_KEY).and_then(Value::as_integer).unwrap_or(1) >= SCHEMA_VERSION
-    {
-        let existing = Value::Table(existing);
-        if let Ok(parsed) = existing.clone().try_into::<T>()
-            && let Ok(known) = Value::try_from(&parsed)
-        {
-            carry_unknown(&existing, &known, &mut table);
+    match inspect_existing::<T>(path)? {
+        Existing::Missing => {}
+        Existing::Unloadable => back_up_corrupt(path)?,
+        // Only a file of this schema or a newer one can hold keys worth keeping: the unknown keys
+        // of an older file are retired ones that were migrated on read (`mysql`/`redis` →
+        // `services`), and keeping them would resurrect the old values on the next read.
+        Existing::Loadable { raw, known } => {
+            if raw.get(SCHEMA_KEY).and_then(Value::as_integer).unwrap_or(1) >= SCHEMA_VERSION {
+                carry_unknown(&raw, &known, &mut table);
+            }
         }
     }
     write_table(path, &table)
+}
+
+/// What [`write_toml`] finds at the path it is about to replace.
+enum Existing {
+    Missing,
+    /// Malformed TOML, or values `T` rejects.
+    Unloadable,
+    /// The raw file and its round-trip through `T` (what this version understands).
+    Loadable {
+        raw: Value,
+        known: Value,
+    },
+}
+
+fn inspect_existing<T: serde::Serialize + serde::de::DeserializeOwned>(path: &Path) -> PortResult<Existing> {
+    let raw = match read_table(path) {
+        Ok(None) => return Ok(Existing::Missing),
+        Ok(Some(table)) => Value::Table(table),
+        Err(PortError::InvalidData { .. }) => return Ok(Existing::Unloadable),
+        Err(e) => return Err(e),
+    };
+    let Ok(parsed) = raw.clone().try_into::<T>() else { return Ok(Existing::Unloadable) };
+    let known = Value::try_from(&parsed).map_err(|e| PortError::invalid_data(path.display().to_string(), e))?;
+    Ok(Existing::Loadable { raw, known })
+}
+
+/// Marker between a file name and the timestamp of its backup copy (`shop.toml.corrupt-…`).
+/// The copy no longer ends in `.toml`, so listings never read it back as data.
+const CORRUPT_BACKUP_MARKER: &str = ".corrupt-";
+
+/// Copies `path` next to itself as `<name>.corrupt-<unix ms>`.
+fn back_up_corrupt(path: &Path) -> PortResult<()> {
+    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let backup = path.with_file_name(format!("{file_name}{CORRUPT_BACKUP_MARKER}{}", SystemClock.now_unix_ms()));
+    std::fs::copy(path, &backup).map_err(|e| PortError::io(format!("backing up the unreadable {} to {}", path.display(), backup.display()), e))?;
+    tracing::warn!("{} did not load: kept a copy as {} before replacing it", path.display(), backup.display());
+    Ok(())
 }
 
 /// Copies into `out` every key of `raw` that the type did not recognise (absent from `known`, the
@@ -152,17 +194,33 @@ pub fn remove_file_if_exists(path: &Path) -> PortResult<()> {
     }
 }
 
-/// Reads every TOML file in `dir` as `T`, skipping (and logging) the ones that fail to parse.
-pub fn read_all_toml<T: serde::de::DeserializeOwned>(dir: &Path) -> PortResult<Vec<T>> {
-    let mut out = Vec::new();
+/// Every TOML file of a directory, read as `T`.
+pub struct TomlScan<T> {
+    pub loaded: Vec<T>,
+    /// The files that did not load, with the reason (sorted by name). Logged as warnings.
+    pub failed: Vec<(PathBuf, PortError)>,
+}
+
+/// Reads every TOML file in `dir` as `T`; the ones that fail are reported, not fatal.
+pub fn scan_toml<T: serde::de::DeserializeOwned>(dir: &Path) -> PortResult<TomlScan<T>> {
+    let mut scan = TomlScan { loaded: Vec::new(), failed: Vec::new() };
     for file in list_toml_files(dir)? {
         match read_toml::<T>(&file) {
-            Ok(Some(v)) => out.push(v),
+            Ok(Some(v)) => scan.loaded.push(v),
+            // Removed between the listing and the read.
             Ok(None) => {}
-            Err(e) => tracing::warn!("skipping unreadable file: {e}"),
+            Err(e) => {
+                tracing::warn!("skipping unreadable file: {e}");
+                scan.failed.push((file, e));
+            }
         }
     }
-    Ok(out)
+    Ok(scan)
+}
+
+/// Reads every TOML file in `dir` as `T`, skipping (and logging) the ones that fail to parse.
+pub fn read_all_toml<T: serde::de::DeserializeOwned>(dir: &Path) -> PortResult<Vec<T>> {
+    scan_toml(dir).map(|scan| scan.loaded)
 }
 
 #[cfg(test)]
@@ -219,13 +277,56 @@ mod tests {
         assert_eq!(back, Sample { name: "new".into(), inner: Inner { a: 7 }, opt: None });
     }
 
+    fn backups(dir: &Path) -> Vec<(String, String)> {
+        let mut found: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.file_name().unwrap().to_string_lossy().contains(CORRUPT_BACKUP_MARKER))
+            .map(|p| (p.file_name().unwrap().to_string_lossy().into_owned(), std::fs::read_to_string(&p).unwrap()))
+            .collect();
+        found.sort();
+        found
+    }
+
+    /// A save replaces a corrupt file, after keeping a copy of it that no listing reads back.
     #[test]
-    fn corrupt_existing_file_is_replaced_on_save() {
+    fn corrupt_existing_file_is_backed_up_then_replaced_on_save() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("s.toml");
         std::fs::write(&file, "garbage [[[").unwrap();
         write_toml(&file, &Sample { name: "n".into(), inner: Inner::default(), opt: Some(1) }).unwrap();
         assert!(read_toml::<Sample>(&file).unwrap().is_some());
+        let found = backups(dir.path());
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].0.starts_with("s.toml.corrupt-"), "{found:?}");
+        assert_eq!(found[0].1, "garbage [[[");
+        assert_eq!(list_toml_files(dir.path()).unwrap(), std::slice::from_ref(&file), "the copy is not listed as data");
+        // The file is valid now: the next save keeps no further copy.
+        write_toml(&file, &Sample { name: "m".into(), inner: Inner::default(), opt: None }).unwrap();
+        assert_eq!(backups(dir.path()).len(), 1);
+    }
+
+    /// Valid TOML the type rejects is just as unloadable: it is backed up too.
+    #[test]
+    fn a_file_the_type_rejects_is_backed_up_on_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("s.toml");
+        std::fs::write(&file, "schema = 2\nname = 5\n").unwrap();
+        write_toml(&file, &Sample { name: "n".into(), inner: Inner::default(), opt: None }).unwrap();
+        assert_eq!(backups(dir.path()).iter().map(|(_, text)| text.as_str()).collect::<Vec<_>>(), ["schema = 2\nname = 5\n"]);
+    }
+
+    #[test]
+    fn a_scan_reports_the_files_that_do_not_load() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.toml"), "name = \"a\"").unwrap();
+        std::fs::write(dir.path().join("b.toml"), "name = [").unwrap();
+        std::fs::write(dir.path().join("c.toml"), "name = 1").unwrap();
+        let scan = scan_toml::<Sample>(dir.path()).unwrap();
+        assert_eq!(scan.loaded.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["a"]);
+        let failed: Vec<_> = scan.failed.iter().map(|(p, e)| (p.file_name().unwrap().to_string_lossy().into_owned(), e.to_string())).collect();
+        assert_eq!(failed.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["b.toml", "c.toml"]);
+        assert!(failed.iter().all(|(n, e)| e.contains(n.as_str())), "{failed:?}");
     }
 
     #[test]

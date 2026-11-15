@@ -126,7 +126,7 @@ impl WorktreeEnvironment {
     /// The database the environment's code should use.
     pub fn database_name<'a>(&'a self, parent: &'a Project) -> Option<&'a DatabaseName> {
         match &self.database {
-            WorktreeDatabase::Shared => parent.database.as_ref(),
+            WorktreeDatabase::Shared => parent.database(),
             WorktreeDatabase::Own { name, .. } => Some(name),
         }
     }
@@ -171,7 +171,7 @@ fn unique_slug(existing: &[WorktreeEnvironment], base: WorktreeSlug) -> Worktree
 
 /// `<parent db>_wt_<slug>`, truncated to MySQL's 64-character limit.
 pub fn own_database_name(parent: &Project, slug: &WorktreeSlug) -> Result<DatabaseName, DomainError> {
-    let base = parent.database.as_ref().map(|d| d.to_string()).unwrap_or_else(|| parent.id.as_str().replace('-', "_"));
+    let base = parent.database().map(|d| d.to_string()).unwrap_or_else(|| parent.id.as_str().replace('-', "_"));
     let mut name = format!("{base}_wt_{}", slug.as_str().replace('-', "_"));
     name.truncate(64);
     DatabaseName::new(name)
@@ -206,7 +206,7 @@ impl Default for PortRange {
 
 /// Every loopback port already assigned to a project address or a worktree environment.
 pub fn used_loopback_ports(projects: &[Project], worktrees: &[WorktreeEnvironment]) -> BTreeSet<u16> {
-    projects.iter().flat_map(|p| p.addresses.iter().filter_map(SiteAddress::loopback)).chain(worktrees.iter().map(|w| w.loopback_port)).collect()
+    projects.iter().flat_map(|p| p.addresses().iter().filter_map(SiteAddress::loopback)).chain(worktrees.iter().map(|w| w.loopback_port)).collect()
 }
 
 /// Lowest port of the configured range that is not assigned and not a service port.

@@ -121,6 +121,9 @@ export const it = {
 		exported: 'Configurazione esportata.',
 		imported: 'Progetto importato.',
 		notFound: 'Progetto non trovato.',
+		unreadableTitle: (n: number) => (n === 1 ? '1 progetto illeggibile' : `${n} progetti illeggibili`),
+		unreadableHelp:
+			'Questi file di configurazione non si caricano (forse modificati a mano): i progetti restano nascosti finché non correggi il file. Le loro porte restano riservate; se salvi un nuovo progetto con lo stesso id, Lampo conserva prima una copia «.corrupt-…» del file.',
 		backToList: 'Torna ai progetti',
 		deleteTitle: 'Eliminare il progetto?',
 		deleteBody: (name: string) => `«${name}» verrà rimosso da Lampo, con i suoi ambienti worktree. I file nella cartella non vengono toccati.`,

@@ -57,22 +57,22 @@ impl PatchProjectEnvironment {
             if patch.database.is_some() {
                 require_mysql_for_database(&env)?;
             }
-            let mut addresses = project.addresses.clone();
+            let mut addresses = project.addresses().to_vec();
             patch.apply_addresses(&mut addresses, free_port)?;
             let hosts_before: BTreeSet<String> = project.hosts_file_names().map(ToString::to_string).collect();
-            let before = (project.name.clone(), project.addresses.clone(), project.environment.clone(), project.database.clone());
+            let before = (project.name.clone(), project.addresses().to_vec(), project.environment.clone(), project.database().cloned());
             project.set_addresses(addresses)?;
             let hosts_after: BTreeSet<String> = project.hosts_file_names().map(ToString::to_string).collect();
             let touched: Vec<String> = hosts_before.symmetric_difference(&hosts_after).cloned().collect();
             require_hosts_elevation(ctx, &touched, "this address change", "nothing was changed")?;
             project.set_environment(env)?;
             if let Some(db) = &patch.database {
-                project.database = Some(db.clone());
+                project.set_database_name(db.clone());
             }
             if let Some(name) = &patch.name {
                 project.name = name.clone();
             }
-            Ok((project.name.clone(), project.addresses.clone(), project.environment.clone(), project.database.clone()) != before)
+            Ok((project.name.clone(), project.addresses().to_vec(), project.environment.clone(), project.database().cloned()) != before)
         };
         let project = if patch.wants_free_port() {
             self.writer.modify_with_free_port(&request.project_id, |project, snap, port| change(project, snap, Some(port))).await?

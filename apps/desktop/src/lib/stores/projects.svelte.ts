@@ -4,7 +4,9 @@ import type {
 	ExportProjectRequest,
 	ImportProjectRequest,
 	Project,
+	ProjectList,
 	RelinkProjectRequest,
+	UnreadableProject,
 	UpdateProjectRequest
 } from '../api/index.js';
 import type { Backend } from '../backend/ports.js';
@@ -15,7 +17,7 @@ import type { CommandRunner } from './runner.js';
 const EVENT_COALESCE_MS = 150;
 
 export class ProjectsStore {
-	readonly list: Resource<Project[]>;
+	readonly list: Resource<ProjectList>;
 	/** Projects whose active toggle is being applied. */
 	toggling = $state<Record<string, boolean>>({});
 
@@ -31,6 +33,16 @@ export class ProjectsStore {
 
 	load = () => this.list.load();
 
+	/** The projects that load (empty until the first load). */
+	get all(): Project[] {
+		return this.list.data?.projects ?? [];
+	}
+
+	/** Project files that do not load: their projects are hidden until the file is repaired. */
+	get unreadable(): UnreadableProject[] {
+		return this.list.data?.unreadable ?? [];
+	}
+
 	/** Default addresses and a free loopback port for `id`, from the backend (`null` if it failed). */
 	async suggestAddresses(id: string): Promise<AddressSuggestions | null> {
 		try {
@@ -41,12 +53,12 @@ export class ProjectsStore {
 	}
 
 	get(id: string): Project | null {
-		return this.list.data?.find((p) => p.id === id) ?? null;
+		return this.all.find((p) => p.id === id) ?? null;
 	}
 
 	async setActive(id: string, active: boolean) {
 		this.toggling[id] = true;
-		this.list.patch((all) => all.map((p) => (p.id === id ? { ...p, active } : p)));
+		this.list.patch((list) => ({ ...list, projects: list.projects.map((p) => (p.id === id ? { ...p, active } : p)) }));
 		const result = await this.#runner.run(() => this.#backend.commands.setProjectActive({ projectId: id, active }));
 		delete this.toggling[id];
 		// On failure (or a pending elevation) the backend state is the truth.

@@ -73,8 +73,8 @@ impl ImportProject {
                 let id = unique_project_id(&snap.projects, &project.id);
                 if id != project.id {
                     project.set_addresses(SiteAddress::defaults_for(id.as_str(), &snap.settings.tld)?)?;
-                    if project.database.is_some() {
-                        project.database = Some(DatabaseName::from_slug(id.as_str())?);
+                    if project.database().is_some() {
+                        project.set_database_name(DatabaseName::from_slug(id.as_str())?);
                     }
                     project.id = id;
                 }

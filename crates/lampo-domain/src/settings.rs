@@ -56,7 +56,7 @@ impl ServiceInstanceSettings {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(from = "SettingsFile")]
+#[serde(try_from = "SettingsFile")]
 pub struct Settings {
     /// PHP used by the CLI shims outside any project folder. `None` until a PHP is installed.
     pub default_php: Option<PhpMinor>,
@@ -135,8 +135,12 @@ impl Default for SettingsFile {
     }
 }
 
-impl From<SettingsFile> for Settings {
-    fn from(f: SettingsFile) -> Self {
+/// Migrates the legacy fields, then validates: a file edited by hand into an invalid state
+/// (two services on one port, no always-on MySQL, …) does not load.
+impl TryFrom<SettingsFile> for Settings {
+    type Error = DomainError;
+
+    fn try_from(f: SettingsFile) -> Result<Self, Self::Error> {
         let mut services = f.services.unwrap_or_else(|| Settings::default().services);
         if let Some(legacy) = f.mysql_instances {
             services.retain(|s| s.service.kind() != &ServiceKind::MYSQL);
@@ -151,7 +155,7 @@ impl From<SettingsFile> for Settings {
             }
         }
         add_missing_builtins(&mut services, f.apache_port);
-        Self {
+        let settings = Self {
             default_php: f.default_php,
             tld: f.tld,
             apache_port: f.apache_port,
@@ -159,7 +163,9 @@ impl From<SettingsFile> for Settings {
             loopback_ports: f.loopback_ports,
             close_to_tray: f.close_to_tray,
             first_run_completed: f.first_run_completed,
-        }
+        };
+        settings.validate()?;
+        Ok(settings)
     }
 }
 
@@ -306,6 +312,18 @@ mod tests {
         let s: Settings = serde_json::from_str(r#"{"apache_port": 8080}"#).unwrap();
         assert_eq!(s.apache_port, 8080);
         assert_eq!(s.services, Settings::default().services);
+    }
+
+    /// A file edited by hand into an invalid state does not load: `validate` runs on read.
+    #[test]
+    fn invalid_files_are_rejected_on_read() {
+        let clash = r#"{"apache_port": 3306}"#;
+        let err = serde_json::from_str::<Settings>(clash).unwrap_err();
+        assert!(err.to_string().contains("port 3306"), "{err}");
+        let no_always_on = r#"{"services": [{"service": "mysql-8.4", "port": 3306, "always_on": false}]}"#;
+        assert!(serde_json::from_str::<Settings>(no_always_on).unwrap_err().to_string().contains("always on"));
+        let zero = r#"{"apache_port": 0}"#;
+        assert!(serde_json::from_str::<Settings>(zero).is_err());
     }
 
     #[test]

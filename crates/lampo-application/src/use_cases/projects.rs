@@ -58,10 +58,16 @@ impl ProjectQueries {
         Self { projects, worktrees, settings, fs }
     }
 
-    pub fn list(&self) -> AppResult<Vec<ProjectDto>> {
+    /// The projects that load, plus the files that do not (so a front-end can say so instead of
+    /// silently showing fewer projects).
+    pub fn list(&self) -> AppResult<ProjectListDto> {
         let settings = self.settings.load()?;
         let worktrees = self.worktrees.list_all()?;
-        Ok(self.projects.list()?.iter().map(|p| project_dto(p, &worktrees, &settings, Some(self.fs.as_ref()))).collect())
+        let listing = self.projects.scan()?;
+        Ok(ProjectListDto {
+            projects: listing.projects.iter().map(|p| project_dto(p, &worktrees, &settings, Some(self.fs.as_ref()))).collect(),
+            unreadable: listing.unreadable.into_iter().map(|u| UnreadableProjectDto { file: u.file.display().to_string(), reason: u.reason }).collect(),
+        })
     }
 
     pub fn summaries(&self) -> AppResult<Vec<ProjectSummaryDto>> {

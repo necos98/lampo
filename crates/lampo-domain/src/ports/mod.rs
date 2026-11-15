@@ -51,7 +51,7 @@ pub use services::{
     ProcessSupervisor, ServiceRunner, SpawnedChild, StreamCompression, StreamingCommandRunner,
 };
 pub use store::{
-    AppLocationRecorder, CustomPresetRepository, ExecutableLocator, FileSystemInspector, GitInspector, ProjectDetector, ProjectRepository, ProjectResolver, ProjectTransfer, ScaffoldFiles,
-    SettingsRepository, ShimIndexReader, ShimIndexWriter, ShimInstaller, UserPathEditor, WorktreeRepository,
+    AppLocationRecorder, CustomPresetRepository, ExecutableLocator, FileSystemInspector, GitInspector, ProjectDetector, ProjectListing, ProjectRepository, ProjectResolver, ProjectTransfer,
+    ScaffoldFiles, SettingsRepository, ShimIndexReader, ShimIndexWriter, ShimInstaller, UnreadableProject, UserPathEditor, WorktreeRepository,
 };
 pub use web::{HostsFileReader, HostsFileWriter, PhpIniWriter, WebServerConfigurator};

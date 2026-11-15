@@ -121,6 +121,18 @@ export interface Project {
 	worktrees: WorktreeEnvironment[];
 }
 
+/** A project file that does not load: the project is hidden until the file is repaired. */
+export interface UnreadableProject {
+	file: string;
+	/** Why it does not load (names the file). */
+	reason: string;
+}
+
+export interface ProjectList {
+	projects: Project[];
+	unreadable: UnreadableProject[];
+}
+
 export interface ProjectSummary {
 	id: string;
 	name: string;

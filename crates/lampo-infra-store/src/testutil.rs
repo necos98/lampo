@@ -25,7 +25,7 @@ pub fn project(id: &str, root: &str) -> Project {
         preset.environment.clone(),
     )
     .unwrap();
-    p.database = Some(DatabaseName::new(id.replace('-', "_")).unwrap());
+    p.set_database_name(DatabaseName::new(id.replace('-', "_")).unwrap());
     p.tls = TlsMode::LocalCa;
     p.active = true;
     p.origin_preset = Some(preset.id);

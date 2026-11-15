@@ -21,7 +21,7 @@ use crate::use_cases::*;
 fn assert_distinct_ports(w: &World) -> BTreeSet<u16> {
     let mut seen = BTreeSet::new();
     for p in w.projects.list().unwrap() {
-        for port in p.addresses.iter().filter_map(SiteAddress::loopback) {
+        for port in p.addresses().iter().filter_map(SiteAddress::loopback) {
             assert!(seen.insert(port), "port {port} assigned twice (project {})", p.id);
         }
     }
@@ -29,6 +29,18 @@ fn assert_distinct_ports(w: &World) -> BTreeSet<u16> {
         assert!(seen.insert(wt.loopback_port), "port {} assigned twice (worktree {})", wt.loopback_port, wt.site_id());
     }
     seen
+}
+
+/// A project whose file does not load is hidden, not gone: the user may repair it, so its
+/// loopback port is never handed to another site.
+#[tokio::test]
+async fn ports_named_by_unreadable_project_files_are_not_allocated() {
+    let w = World::with_basics();
+    let first = w.allocator.peek().await.unwrap();
+    w.unreadable_project("C:\\Lampo\\projects\\blog.toml", &[first]);
+    let next = w.allocator.peek().await.unwrap();
+    assert_ne!(next, first);
+    assert_eq!(w.allocator.allocate(|port, snap| Ok((port, snap.reserved_ports.clone()))).await.unwrap(), (next, BTreeSet::from([first])));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]

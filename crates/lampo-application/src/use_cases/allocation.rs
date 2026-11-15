@@ -6,6 +6,7 @@
 //! must be one atomic step. [`LoopbackPortAllocator`] holds that lock; every use case that saves
 //! loopback addresses goes through it, and the composition roots share **one** instance.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lampo_domain::ports::{PortAvailability, PortProbe, ProjectRepository, SettingsRepository, WorktreeRepository};
@@ -19,6 +20,9 @@ use crate::error::AppResult;
 #[derive(Debug, Clone)]
 pub struct SiteSnapshot {
     pub projects: Vec<Project>,
+    /// Loopback ports named by project files that do not load: never handed out, so a repaired
+    /// project does not find its listener taken.
+    pub reserved_ports: BTreeSet<u16>,
     pub worktrees: Vec<WorktreeEnvironment>,
     pub settings: Settings,
 }
@@ -37,13 +41,16 @@ impl LoopbackPortAllocator {
     }
 
     fn snapshot(&self) -> AppResult<SiteSnapshot> {
-        Ok(SiteSnapshot { projects: self.projects.list()?, worktrees: self.worktrees.list_all()?, settings: self.settings.load()? })
+        let listing = self.projects.scan()?;
+        let reserved_ports = listing.unreadable.iter().flat_map(|u| u.loopback_ports.iter().copied()).collect();
+        Ok(SiteSnapshot { projects: listing.projects, reserved_ports, worktrees: self.worktrees.list_all()?, settings: self.settings.load()? })
     }
 
-    /// Lowest port of the configured range that is neither assigned to a site, nor a service
-    /// port, nor busy on the OS.
+    /// Lowest port of the configured range that is neither assigned to a site, nor named by an
+    /// unreadable project file, nor a service port, nor busy on the OS.
     fn free_port(&self, snap: &SiteSnapshot) -> AppResult<u16> {
         let mut used = used_loopback_ports(&snap.projects, &snap.worktrees);
+        used.extend(&snap.reserved_ports);
         loop {
             let port = allocate_loopback_port(&used, &snap.settings)?;
             match self.probe.check(port)? {

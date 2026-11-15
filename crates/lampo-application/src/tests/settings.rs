@@ -89,7 +89,7 @@ async fn unchanged_values_are_a_no_op_without_a_sync() {
 async fn invalid_patches_are_rejected_and_nothing_is_saved() {
     let w = World::with_basics();
     w.project("shop", "C:\\sites\\shop", false);
-    w.update_project("shop", |p| p.addresses.push(SiteAddress::LoopbackPort(8101)));
+    w.update_project("shop", |p| add_address(p, SiteAddress::LoopbackPort(8101)));
     let original = w.settings.load().unwrap();
     let patch = w.patch_settings();
     let cases: Vec<(SettingsPatchRequest, ErrorCode, &str)> = vec![
@@ -136,7 +136,7 @@ async fn a_new_port_must_be_free_unless_a_lampo_service_holds_it() {
 fn with_loopback_site() -> World {
     let w = World::with_basics();
     w.project("shop", "C:\\sites\\shop", false);
-    w.update_project("shop", |p| p.addresses.push(SiteAddress::LoopbackPort(8101)));
+    w.update_project("shop", |p| add_address(p, SiteAddress::LoopbackPort(8101)));
     w.hosts_in_sync();
     w
 }
@@ -233,7 +233,7 @@ async fn gui_save_waits_for_the_allocator_lock() {
     let projects = w.projects.clone();
     let take_8101 = move |snap: &SiteSnapshot| {
         let mut shop = snap.projects[0].clone();
-        shop.addresses.push(SiteAddress::LoopbackPort(8101));
+        add_address(&mut shop, SiteAddress::LoopbackPort(8101));
         Ok(projects.save(&shop)?)
     };
     let saved = after_a_locked_commit(&w, take_8101, async move { service.update(dto, &gui()).await }).await;

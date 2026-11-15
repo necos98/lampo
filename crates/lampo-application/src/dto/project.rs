@@ -87,6 +87,23 @@ pub struct ProjectDto {
     pub worktrees: Vec<WorktreeEnvironmentDto>,
 }
 
+/// A project file that does not load (malformed, or edited into invalid values). The project is
+/// hidden until the file is repaired; its loopback ports stay reserved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnreadableProjectDto {
+    pub file: String,
+    pub reason: String,
+}
+
+/// Every registered project: the ones that load and the files that do not.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectListDto {
+    pub projects: Vec<ProjectDto>,
+    pub unreadable: Vec<UnreadableProjectDto>,
+}
+
 /// Compact row for `lampo status` / `lampo project list`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

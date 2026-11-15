@@ -51,11 +51,12 @@ fn key(p: &Path) -> String {
 // Store
 // ---------------------------------------------------------------------------------------------
 
+/// The projects that load, plus the files that do not (`unreadable`, set by tests).
 #[derive(Default)]
-pub struct MemProjects(pub Mutex<BTreeMap<ProjectId, Project>>);
+pub struct MemProjects(pub Mutex<BTreeMap<ProjectId, Project>>, pub Mutex<Vec<UnreadableProject>>);
 impl ProjectRepository for MemProjects {
-    fn list(&self) -> PortResult<Vec<Project>> {
-        Ok(lock(&self.0).values().cloned().collect())
+    fn scan(&self) -> PortResult<ProjectListing> {
+        Ok(ProjectListing { projects: lock(&self.0).values().cloned().collect(), unreadable: lock(&self.1).clone() })
     }
     fn get(&self, id: &ProjectId) -> PortResult<Option<Project>> {
         Ok(lock(&self.0).get(id).cloned())
@@ -772,6 +773,13 @@ pub fn php(s: &str) -> PhpMinor {
     PhpMinor::parse(s).unwrap()
 }
 
+/// Appends `address` to `project`'s addresses, through the aggregate's validation.
+pub fn add_address(project: &mut Project, address: SiteAddress) {
+    let mut list = project.addresses().to_vec();
+    list.push(address);
+    project.set_addresses(list).unwrap();
+}
+
 /// What the fake scanner finds in every PHP build's `ext` dir.
 pub const FAKE_BUNDLED_EXTENSIONS: &[&str] = &["gd", "intl", "mbstring", "opcache", "pdo_mysql", "zip"];
 
@@ -926,6 +934,12 @@ impl World {
         self.projects.save(&p).unwrap();
         self.fs.add(root);
         p
+    }
+
+    /// Registers a project file that does not load, naming `loopback_ports`.
+    pub fn unreadable_project(&self, file: &str, loopback_ports: &[u16]) {
+        let reason = format!("invalid data in {file}: a project needs at least one address");
+        lock(&self.projects.1).push(UnreadableProject { file: PathBuf::from(file), reason, loopback_ports: loopback_ports.iter().copied().collect() });
     }
 
     pub fn update_project(&self, id: &str, f: impl FnOnce(&mut Project)) {

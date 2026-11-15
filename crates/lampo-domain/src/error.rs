@@ -65,6 +65,8 @@ pub enum DomainError {
     DuplicateProjectRoot { root: String, other: String },
     #[error("project `{other}` already uses the hostname `{hostname}`")]
     DuplicateHostname { hostname: String, other: String },
+    #[error("the database `{0}` needs MySQL, which the project does not use")]
+    DatabaseWithoutMysql(String),
     #[error("MySQL {0} is not configured in the settings")]
     UnknownMysqlSeries(String),
     #[error("invalid settings: {0}")]

@@ -81,7 +81,7 @@ export const prepareUpdate = () => call<void>(COMMANDS.prepareUpdate);
 export const cancelUpdate = () => call<void>(COMMANDS.cancelUpdate);
 
 // Projects
-export const listProjects = () => call<T.Project[]>(COMMANDS.listProjects);
+export const listProjects = () => call<T.ProjectList>(COMMANDS.listProjects);
 export const getProject = (projectId: string) => call<T.Project>(COMMANDS.getProject, { projectId });
 export const detectProject = (folder: string) => call<T.Detection>(COMMANDS.detectProject, { folder });
 export const suggestAddresses = (projectId: string) => call<T.AddressSuggestions>(COMMANDS.suggestAddresses, { projectId });

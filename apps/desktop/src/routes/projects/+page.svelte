@@ -6,6 +6,7 @@
 	import PageHeader from '#lib/components/common/PageHeader.svelte';
 	import ImportProjectDialog from '#lib/components/projects/ImportProjectDialog.svelte';
 	import ProjectRow from '#lib/components/projects/ProjectRow.svelte';
+	import UnreadableProjectsNotice from '#lib/components/projects/UnreadableProjectsNotice.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { messages as m } from '#lib/messages/index.js';
@@ -14,7 +15,7 @@
 	let filter = $state('');
 	let importing = $state(false);
 
-	const all = $derived(projects.list.data ?? []);
+	const all = $derived(projects.all);
 	const visible = $derived.by(() => {
 		const needle = filter.trim().toLowerCase();
 		return needle ? all.filter((p) => [p.name, p.id, p.root, p.url].some((v) => v.toLowerCase().includes(needle))) : all;
@@ -27,6 +28,10 @@
 		<Button size="sm" href="/projects/new"><Plus />{m.projects.add}</Button>
 	{/snippet}
 </PageHeader>
+
+{#if projects.unreadable.length > 0}
+	<UnreadableProjectsNotice unreadable={projects.unreadable} />
+{/if}
 
 {#if all.length > 3}
 	<Input data-filter class="mb-3 h-8 max-w-xs" placeholder={m.common.search} bind:value={filter} aria-label={m.common.search} />

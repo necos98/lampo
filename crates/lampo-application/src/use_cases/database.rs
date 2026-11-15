@@ -49,7 +49,7 @@ impl DatabaseService {
         self.services.ensure_running(series.service_id()).await?;
         let site_database = match &worktree {
             Some(w) => w.database_name(&project).cloned(),
-            None => project.database.clone(),
+            None => project.database().cloned(),
         };
         Ok(Target { endpoint, site_database })
     }
@@ -98,7 +98,7 @@ impl DatabaseService {
     /// existing database is kept (`already-exists`); a missing MySQL package is reported, never
     /// installed.
     pub async fn provision_project(&self, project: &Project) -> Option<DatabaseSetupDto> {
-        let (series, name) = (project.environment.mysql()?, project.database.clone()?);
+        let (series, name) = (project.environment.mysql()?, project.database().cloned()?);
         let outcome = |status, message: Option<String>| Some(DatabaseSetupDto { name: name.to_string(), status, message });
         let endpoint = match self.settings.load().map_err(AppError::from).and_then(|s| mysql_endpoint(self.installed.as_ref(), &s, series)) {
             Ok(endpoint) => endpoint,

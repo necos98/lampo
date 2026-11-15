@@ -40,6 +40,7 @@ pub mod settings;
 pub mod shim_index;
 pub mod shim_installer;
 pub mod transfer;
+mod unreadable;
 pub mod user_path;
 pub mod worktrees;
 

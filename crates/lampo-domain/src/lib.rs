@@ -31,6 +31,7 @@ pub mod ports;
 pub mod preset;
 pub mod progress;
 pub mod project;
+pub mod project_file;
 pub mod project_import;
 pub mod resolution;
 pub mod scaffold;

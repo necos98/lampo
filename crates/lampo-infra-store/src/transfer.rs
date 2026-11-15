@@ -2,6 +2,7 @@ use std::path::Path;
 
 use lampo_domain::ports::ProjectTransfer;
 use lampo_domain::project::{ApacheDirectives, Project};
+use lampo_domain::project_file::ProjectFile;
 use lampo_domain::project_import::{DroppedOnImport, ImportedProject, is_untrusted_php_ini_key};
 use lampo_domain::{PortError, PortResult};
 use toml::{Table, Value};
@@ -43,7 +44,7 @@ impl ProjectTransfer for TomlProjectTransfer {
             _ => return Err(PortError::invalid_data(&name, "missing `schema` header")),
         }
         let dropped = drop_untrusted(&mut table, &name)?;
-        let parsed: Project = Value::Table(table).try_into().map_err(|e| PortError::invalid_data(&name, e))?;
+        let parsed: ProjectFile = Value::Table(table).try_into().map_err(|e| PortError::invalid_data(&name, e))?;
         // Re-run the aggregate's own validation (address list invariants), then reset runtime state.
         let mut project = Project::new(parsed.id, parsed.name, parsed.root, parsed.addresses, parsed.environment)?;
         if let Some(db) = parsed.database {
@@ -82,7 +83,6 @@ fn drop_untrusted(table: &mut Table, name: &str) -> PortResult<DroppedOnImport> 
 
 #[cfg(test)]
 mod tests {
-    use lampo_domain::mysql::DatabaseName;
     use lampo_domain::project::TlsMode;
 
     use super::*;
@@ -142,16 +142,19 @@ mod tests {
     fn a_database_without_mysql_is_not_imported() {
         let dir = tempfile::tempdir().unwrap();
         let mut p = project("shop", "C:\\sites\\shop");
-        p.environment.set_mysql(None);
-        p.database = Some(DatabaseName::new("orphan").unwrap());
-        let (file, _) = exported(&dir, &p);
-        assert!(TomlProjectTransfer.import_from(&file).unwrap().project.database.is_none());
+        let mut env = p.environment.clone();
+        env.set_mysql(None);
+        p.set_environment(env).unwrap();
+        let (file, mut table) = exported(&dir, &p);
+        table.insert("database".into(), Value::String("orphan".into()));
+        write_table(&file, &table).unwrap();
+        assert!(TomlProjectTransfer.import_from(&file).unwrap().project.database().is_none());
 
         // With MySQL and no name in the file, the default one is used.
-        let mut p = project("shop", "C:\\sites\\shop");
-        p.database = None;
-        let (file, _) = exported(&dir, &p);
-        assert_eq!(TomlProjectTransfer.import_from(&file).unwrap().project.database.unwrap().as_str(), "shop");
+        let (file, mut table) = exported(&dir, &project("my-shop", "C:\\sites\\shop"));
+        assert!(table.remove("database").is_some());
+        write_table(&file, &table).unwrap();
+        assert_eq!(TomlProjectTransfer.import_from(&file).unwrap().project.database().unwrap().as_str(), "my_shop");
     }
 
     #[test]

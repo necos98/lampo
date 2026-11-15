@@ -1,6 +1,7 @@
 //! Local persistence and filesystem facts. Implemented by `lampo-infra-store`.
 //! All synchronous: small files under `%APPDATA%\Lampo` / `%LOCALAPPDATA%\Lampo`.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use crate::detection::DetectionHint;
@@ -16,10 +17,35 @@ use crate::worktree::WorktreeEnvironment;
 
 pub use crate::resolution::{GitInspector, ProjectResolver};
 
+/// A project file that exists but does not load: malformed TOML, or values the domain rejects
+/// (an empty address list, a database without MySQL, …). The project is hidden, not gone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreadableProject {
+    pub file: PathBuf,
+    /// Why it does not load (names the file).
+    pub reason: String,
+    /// Loopback ports the file names, read leniently: they stay reserved, so a new site never
+    /// takes the listener of a project the user is about to repair.
+    pub loopback_ports: BTreeSet<u16>,
+}
+
+/// Every project file: the projects that load and the ones that do not.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProjectListing {
+    /// Sorted by id.
+    pub projects: Vec<Project>,
+    /// Sorted by file name.
+    pub unreadable: Vec<UnreadableProject>,
+}
+
 /// Project configurations (one TOML file per project).
 pub trait ProjectRepository: Send + Sync {
-    /// All projects, sorted by id. Unreadable files are skipped and logged, not fatal.
-    fn list(&self) -> PortResult<Vec<Project>>;
+    /// Every project file, the unreadable ones reported instead of failing the listing.
+    fn scan(&self) -> PortResult<ProjectListing>;
+    /// The projects that load, sorted by id (see [`Self::scan`] for the others).
+    fn list(&self) -> PortResult<Vec<Project>> {
+        self.scan().map(|listing| listing.projects)
+    }
     fn get(&self, id: &ProjectId) -> PortResult<Option<Project>>;
     /// Creates or replaces. Writes atomically (temp file + rename).
     fn save(&self, project: &Project) -> PortResult<()>;

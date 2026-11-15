@@ -142,7 +142,7 @@ pub(super) fn changed_ports(before: &Settings, after: &Settings, catalog: &Servi
 /// A service port may not be a site's dedicated loopback port (Apache listens there for it).
 fn check_loopback_ports(changed: &[PortChange], projects: &[Project], worktrees: &[WorktreeEnvironment]) -> AppResult<()> {
     for port in changed.iter().map(|c| c.port) {
-        let project = projects.iter().find(|p| p.addresses.iter().any(|a| a.loopback() == Some(port))).map(|p| p.id.to_string());
+        let project = projects.iter().find(|p| p.addresses().iter().any(|a| a.loopback() == Some(port))).map(|p| p.id.to_string());
         let site = project.or_else(|| worktrees.iter().find(|w| w.loopback_port == port).map(|w| w.site_id().to_string()));
         if let Some(site) = site {
             return Err(DomainError::LoopbackPortTaken { port, service: format!("site `{site}`") }.into());

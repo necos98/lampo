@@ -16,6 +16,7 @@ use crate::error::DomainError;
 use crate::mysql::{DatabaseConnection, DatabaseName, MysqlSeries};
 use crate::package::PackageKind;
 use crate::php::{ExtensionName, PhpIniOverrides, PhpMinor};
+use crate::project_file::ProjectFile;
 use crate::service::{ServiceId, ServiceKind};
 use crate::settings::Settings;
 use crate::version::VersionSeries;
@@ -447,25 +448,23 @@ impl ProjectEnvironment {
 // ---------------------------------------------------------------------------------------------
 
 /// A local PHP site managed by Lampo.
+///
+/// `addresses` and `database` are private: every way in ([`Project::new`], the setters and
+/// deserialization, which goes through [`ProjectFile`]) keeps the address list valid and the
+/// database tied to the MySQL choice.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "ProjectFile")]
 pub struct Project {
     pub id: ProjectId,
     pub name: DisplayName,
     pub root: ProjectRoot,
-    /// How the site is reached; the first one is the primary (shown/opened by default).
-    /// Use [`Project::set_addresses`] to keep the list valid.
-    pub addresses: Vec<SiteAddress>,
+    addresses: Vec<SiteAddress>,
     pub environment: ProjectEnvironment,
-    /// Schema shown in the connection details; `None` when the project has no MySQL.
-    #[serde(default)]
-    pub database: Option<DatabaseName>,
-    #[serde(default)]
+    database: Option<DatabaseName>,
     pub tls: TlsMode,
     /// Inactive projects keep their config but get no vhost and require no service.
-    #[serde(default)]
     pub active: bool,
     /// Preset the environment was copied from (informational only, no live link).
-    #[serde(default)]
     pub origin_preset: Option<PresetId>,
 }
 
@@ -486,9 +485,16 @@ impl Project {
         Ok(())
     }
 
+    /// How the site is reached, never empty; the first one is the primary (shown/opened by
+    /// default).
+    pub fn addresses(&self) -> &[SiteAddress] {
+        &self.addresses
+    }
+
     /// The primary address.
     pub fn primary_address(&self) -> &SiteAddress {
-        self.addresses.first().expect("validated: a project has at least one address")
+        // The list is private and every way in validates it (`validate_addresses`): never empty.
+        self.addresses.first().expect("a project always has at least one address")
     }
 
     /// Names that need a hosts-file entry.
@@ -523,6 +529,11 @@ impl Project {
         };
         self.environment = environment;
         Ok(())
+    }
+
+    /// Schema shown in the connection details; `None` when the project has no MySQL.
+    pub fn database(&self) -> Option<&DatabaseName> {
+        self.database.as_ref()
     }
 
     /// Names the project's schema. Ignored without MySQL: such a project has no database.

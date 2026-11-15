@@ -81,7 +81,7 @@ async fn a_stored_project_with_refused_directives_cannot_be_saved_until_fixed() 
     w.project("blog", "C:\\sites\\blog", false);
     w.update_project("blog", |p| p.environment.apache_directives = stored_directives(&format!("Header set X 1\n{PIPED_LOG}")));
     w.hosts_in_sync();
-    assert_eq!(w.project_queries().list().unwrap().len(), 1, "it still loads");
+    assert_eq!(w.project_queries().list().unwrap().projects.len(), 1, "it still loads");
 
     let activate = SetProjectActive::new(w.project_writer());
     let err = activate.execute(SetProjectActiveRequest { project_id: "blog".into(), active: true }, &gui()).await.unwrap_err();

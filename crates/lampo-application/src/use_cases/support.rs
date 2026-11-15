@@ -136,7 +136,7 @@ impl SiteRef<'_> {
     pub fn addresses(&self) -> Vec<SiteAddress> {
         match self.worktree {
             Some(w) => w.addresses(),
-            None => self.project.addresses.clone(),
+            None => self.project.addresses().to_vec(),
         }
     }
 
@@ -148,7 +148,7 @@ impl SiteRef<'_> {
     pub fn database(&self) -> Option<DatabaseName> {
         match self.worktree {
             Some(w) => w.database_name(self.project).cloned(),
-            None => self.project.database.clone(),
+            None => self.project.database().cloned(),
         }
     }
 
@@ -206,12 +206,12 @@ pub(crate) fn project_dto(project: &Project, worktrees: &[WorktreeEnvironment], 
         name: project.name.to_string(),
         root: project.root.to_string(),
         folder_exists: fs.is_none_or(|fs| fs.is_dir(project.root.as_path())),
-        addresses: project.addresses.iter().map(address_to_dto).collect(),
+        addresses: project.addresses().iter().map(address_to_dto).collect(),
         url: project.url(settings),
         urls: project.urls(settings),
         document_root: project.document_root().display().to_string(),
         environment: environment_to_dto(&project.environment),
-        database_name: project.database.as_ref().map(|d| d.to_string()),
+        database_name: project.database().map(|d| d.to_string()),
         database: project.database_connection(settings).ok().flatten().as_ref().map(connection_to_dto),
         mail: project.environment.uses(&ServiceKind::MAILPIT).then(|| mail_to_dto(&settings.mail_connection())),
         tls: tls_to_dto(project.tls),

@@ -265,12 +265,25 @@ async fn import_and_relink_refuse_a_loopback_port_owned_by_a_worktree_environmen
     assert!(w.projects.get(&exported.id).unwrap().is_none(), "nothing is saved");
 
     // The same port reached through a relink of a project that already holds it (pre-fix data).
-    exported.addresses.push(lampo_domain::address::SiteAddress::LoopbackPort(8100));
-    exported.addresses.dedup();
     w.projects.save(&exported).unwrap();
     w.fs.add("D:\\moved\\api");
     let err = w.relink_project().execute(RelinkProjectRequest { project_id: "api".into(), root: "D:\\moved\\api".into() }, &gui()).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::Conflict, "{err:?}");
+}
+
+/// A project file that does not load is reported with the listing, not silently dropped: the
+/// GUI tells the user how many projects it could not read, and why.
+#[test]
+fn the_project_list_reports_unreadable_files() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", false);
+    w.unreadable_project("C:\\Lampo\\projects\\blog.toml", &[8101]);
+    let list = w.project_queries().list().unwrap();
+    assert_eq!(list.projects.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["shop"]);
+    assert_eq!(
+        list.unreadable,
+        [UnreadableProjectDto { file: "C:\\Lampo\\projects\\blog.toml".into(), reason: "invalid data in C:\\Lampo\\projects\\blog.toml: a project needs at least one address".into() }]
+    );
 }
 
 #[tokio::test]
@@ -281,7 +294,8 @@ async fn project_views_report_missing_folders_and_summaries() {
     w.fs.remove("C:\\sites\\gone");
     let q = w.project_queries();
     let list = q.list().unwrap();
-    assert_eq!(list.iter().map(|p| (p.id.as_str(), p.folder_exists)).collect::<Vec<_>>(), [("gone", false), ("shop", true)]);
+    assert_eq!(list.projects.iter().map(|p| (p.id.as_str(), p.folder_exists)).collect::<Vec<_>>(), [("gone", false), ("shop", true)]);
+    assert!(list.unreadable.is_empty());
     let shop = q.get("shop").unwrap();
     assert_eq!(shop.database.as_ref().unwrap().port, 3306);
     let summaries = q.summaries().unwrap();
@@ -610,7 +624,7 @@ async fn address_patches_are_validated_against_the_project_and_other_sites() {
     w.project("blog", r"C:\sites\blog", false);
     one_address(&w, "shop", "shop.localhost");
     w.update_project("blog", |p| {
-        let mut list = p.addresses.clone();
+        let mut list = p.addresses().to_vec();
         list.push(lampo_domain::address::SiteAddress::parse("127.0.0.1:8200").unwrap());
         p.set_addresses(list).unwrap();
     });

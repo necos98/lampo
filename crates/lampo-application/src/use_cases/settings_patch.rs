@@ -164,7 +164,7 @@ fn notes(before: &Settings, after: &Settings, projects: &[Project], worktrees: &
             out.push(format!("{label} is not running: it listens on port {port} when it next starts."));
         }
         if id.is_apache() {
-            let hosted: Vec<String> = projects.iter().filter(|p| p.addresses.iter().any(|a| a.loopback().is_none())).map(|p| p.id.to_string()).collect();
+            let hosted: Vec<String> = projects.iter().filter(|p| p.addresses().iter().any(|a| a.loopback().is_none())).map(|p| p.id.to_string()).collect();
             if !hosted.is_empty() {
                 out.push(format!(
                     "Host-name URLs now use port {port} (projects {}); dedicated loopback-port URLs are unchanged. Update APP_URL-style values that include the old port.",

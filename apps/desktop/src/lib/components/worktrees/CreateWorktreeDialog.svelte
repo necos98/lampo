@@ -24,7 +24,7 @@
 	let busy = $state(false);
 
 	const modeOptions = (['shared', 'fresh', 'clone'] as const).map((value) => ({ value, label: t.modes[value] }));
-	const sourceOptions = $derived((projects.list.data ?? []).filter((p) => p.database).map((p) => ({ value: p.id, label: p.name })));
+	const sourceOptions = $derived(projects.all.filter((p) => p.database).map((p) => ({ value: p.id, label: p.name })));
 	const effectiveSource = $derived(source || projectId);
 
 	async function submit(e: SubmitEvent) {

@@ -1,12 +1,16 @@
 //! `%APPDATA%\Lampo\projects\<id>.toml`. The TOML schema is the serde form of
 //! `lampo_domain::project::Project` plus a `schema` header for migrations.
+//!
+//! A file that does not load (malformed, or edited into values the domain rejects) is listed as
+//! unreadable with the loopback ports it names, and copied aside before a save replaces it.
 
 use lampo_domain::PortResult;
 use lampo_domain::paths::LampoPaths;
-use lampo_domain::ports::ProjectRepository;
+use lampo_domain::ports::{ProjectListing, ProjectRepository, UnreadableProject};
 use lampo_domain::project::{Project, ProjectId};
 
-use crate::atomic::{read_all_toml, read_toml, remove_file_if_exists, write_toml};
+use crate::atomic::{TomlScan, read_toml, remove_file_if_exists, scan_toml, write_toml};
+use crate::unreadable::loopback_ports_in;
 
 pub struct TomlProjectRepository {
     paths: LampoPaths,
@@ -19,10 +23,11 @@ impl TomlProjectRepository {
 }
 
 impl ProjectRepository for TomlProjectRepository {
-    fn list(&self) -> PortResult<Vec<Project>> {
-        let mut projects: Vec<Project> = read_all_toml(&self.paths.projects_dir())?;
+    fn scan(&self) -> PortResult<ProjectListing> {
+        let TomlScan { loaded: mut projects, failed } = scan_toml::<Project>(&self.paths.projects_dir())?;
         projects.sort_by(|a, b| a.id.cmp(&b.id));
-        Ok(projects)
+        let unreadable = failed.into_iter().map(|(file, error)| UnreadableProject { loopback_ports: loopback_ports_in(&file), reason: error.to_string(), file }).collect();
+        Ok(ProjectListing { projects, unreadable })
     }
 
     fn get(&self, id: &ProjectId) -> PortResult<Option<Project>> {
@@ -138,5 +143,76 @@ redis = true
         repo.delete(&p.id).unwrap();
         repo.delete(&p.id).unwrap();
         assert!(repo.get(&p.id).unwrap().is_none());
+    }
+
+    /// Rewrites the saved file of `p` through `edit`, as a user editing it by hand would.
+    fn edit_file(dir: &tempfile::TempDir, p: &Project, edit: impl FnOnce(&mut toml::Table)) -> std::path::PathBuf {
+        let file = paths(dir).project_file(&p.id);
+        let mut table = crate::atomic::read_table(&file).unwrap().unwrap();
+        edit(&mut table);
+        crate::atomic::write_table(&file, &table).unwrap();
+        file
+    }
+
+    /// A file edited into values the domain rejects does not load (no aggregate that panics
+    /// later): `scan` reports it, `list` leaves it out, `get` names it.
+    #[test]
+    fn files_breaking_the_project_invariants_are_unreadable() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = TomlProjectRepository::new(paths(&dir));
+        let (shop, blog, api) = (project("shop", r"C:\sites\shop"), project("blog", r"C:\sites\blog"), project("api", r"C:\sites\api"));
+        for p in [&shop, &blog, &api] {
+            repo.save(p).unwrap();
+        }
+        edit_file(&dir, &shop, |t| {
+            t.insert("addresses".into(), toml::Value::Array(Vec::new()));
+        });
+        edit_file(&dir, &blog, |t| {
+            let services = t["environment"].as_table_mut().unwrap()["services"].as_table_mut().unwrap();
+            assert!(services.remove("mysql").is_some());
+            assert!(t.contains_key("database"));
+        });
+
+        let listing = repo.scan().unwrap();
+        assert_eq!(listing.projects, std::slice::from_ref(&api));
+        let unreadable: Vec<_> = listing.unreadable.iter().map(|u| (u.file.file_name().unwrap().to_string_lossy().into_owned(), u.reason.clone())).collect();
+        assert_eq!(unreadable.len(), 2, "{unreadable:?}");
+        assert_eq!(unreadable[0].0, "blog.toml");
+        assert!(unreadable[0].1.contains("blog.toml") && unreadable[0].1.contains("needs MySQL"), "{unreadable:?}");
+        assert_eq!(unreadable[1].0, "shop.toml");
+        assert!(unreadable[1].1.contains("at least one address"), "{unreadable:?}");
+        assert_eq!(repo.list().unwrap(), [api]);
+        assert!(repo.get(&shop.id).unwrap_err().to_string().contains("shop.toml"));
+        assert!(repo.get(&blog.id).unwrap_err().to_string().contains("blog.toml"));
+    }
+
+    /// A corrupt file keeps its loopback ports reserved, and a save over it (a new project with
+    /// the same id) keeps a copy of the user's content first.
+    #[test]
+    fn corrupt_files_keep_their_ports_and_are_backed_up_before_a_save_replaces_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = TomlProjectRepository::new(paths(&dir));
+        let shop = project("shop", r"C:\sites\shop");
+        repo.save(&shop).unwrap();
+        let file = paths(&dir).project_file(&shop.id);
+        let corrupt = "id = \"shop\"\n[[addresses]]\nkind = \"loopback-port\"\nport = 8107\n[[[\n";
+        std::fs::write(&file, corrupt).unwrap();
+
+        let listing = repo.scan().unwrap();
+        assert!(listing.projects.is_empty());
+        assert_eq!(listing.unreadable.len(), 1);
+        assert_eq!(listing.unreadable[0].file, file);
+        assert_eq!(listing.unreadable[0].loopback_ports.iter().copied().collect::<Vec<_>>(), [8107]);
+
+        repo.save(&shop).unwrap();
+        assert_eq!(repo.get(&shop.id).unwrap().unwrap(), shop);
+        let copies: Vec<_> = std::fs::read_dir(paths(&dir).projects_dir())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("shop.toml.corrupt-"))
+            .collect();
+        assert_eq!(copies.len(), 1, "{copies:?}");
+        assert_eq!(std::fs::read_to_string(&copies[0]).unwrap(), corrupt);
+        assert_eq!(repo.scan().unwrap(), ProjectListing { projects: vec![shop], unreadable: Vec::new() }, "the copy is not listed");
     }
 }
