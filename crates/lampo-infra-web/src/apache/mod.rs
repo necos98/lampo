@@ -2,11 +2,14 @@
 //!
 //! Generated layout (`LampoPaths::apache_config_dir`):
 //! * `httpd.conf` — from `templates/httpd.conf.j2`: modules, one `Listen` per
-//!   `WebServerConfig::listen_ports()` (loopback only), mod_fcgid process management, a
-//!   catch-all vhost, `IncludeOptional ${LAMPO_VHOSTS}` (= `vhosts/*.conf` unless the
-//!   validation wrapper redefines it to point at the staged tree);
+//!   `WebServerConfig::listen_ports()` (loopback only), mod_fcgid process management, the
+//!   denial of VCS metadata/secrets/logs/dumps, a catch-all vhost on every listened address
+//!   (404 for a Host no site claims, DNS-rebinding protection included),
+//!   `IncludeOptional ${LAMPO_VHOSTS}` (= `vhosts/*.conf` unless the validation wrapper
+//!   redefines it to point at the staged tree);
 //! * `vhosts/<site-id>.conf` — from `templates/vhost.conf.j2`: name-based vhost on the shared
-//!   port (`server_names`) and/or `<VirtualHost 127.0.0.1:<loopback_port>>`, `AllowOverride All`
+//!   port (`server_names`) and/or `<VirtualHost 127.0.0.1:<loopback_port>>` (site names plus
+//!   `localhost`/`127.0.0.1`), no directory listing, `AllowOverride All`
 //!   (so `.htaccess` works), `FcgidWrapper "<php-cgi.exe>" .php`,
 //!   `FcgidInitialEnv PHPRC "<phprc_dir>"`, then the project's custom directives verbatim.
 //!
@@ -21,6 +24,9 @@ pub mod signal;
 pub mod staging;
 pub mod syntax;
 pub mod validation;
+
+#[cfg(test)]
+mod hardening_tests;
 
 /// Templates embedded at compile time (minijinja syntax).
 pub mod templates {

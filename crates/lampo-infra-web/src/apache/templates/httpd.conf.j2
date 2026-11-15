@@ -60,6 +60,19 @@ AccessFileName .htaccess
     Require all denied
 </Files>
 
+# The document root is often the project root: never serve version-control metadata, secrets
+# (`.env*`), git files (`.gitignore`, the `.git` file of a worktree), logs, SQL dumps or
+# backups. Case-insensitive because NTFS is; `/.well-known/` is not matched. These sections
+# merge after every <Directory> and `.htaccess`, so a site cannot re-grant them by accident.
+# Apache matches directories with `/` separators on Windows too.
+<DirectoryMatch "(?i)/\.(git|svn|hg)(/|$)">
+    Require all denied
+</DirectoryMatch>
+
+<FilesMatch "(?i)^\.(env|git)|\.(log|sql|bak)$">
+    Require all denied
+</FilesMatch>
+
 # PHP through mod_fcgid: php-cgi.exe processes are spawned on the first request of a site and
 # reaped when idle, so an idle Lampo costs almost no RAM.
 FcgidMaxProcesses {{ main.fcgid.max_processes }}
@@ -77,9 +90,11 @@ FcgidConnectTimeout {{ main.fcgid.connect_timeout_secs }}
 FcgidMaxRequestLen {{ main.fcgid.max_request_len }}
 FcgidMaxRequestInMem {{ main.fcgid.max_request_in_mem }}
 
-# Catch-all for host names no site claims (first vhost of the shared address).
-<VirtualHost {{ main.shared_addresses }}>
-    ServerName localhost
+# Catch-all for host names no site claims: the first, so default, vhost of every listened
+# address. On a dedicated port it refuses foreign Host headers (DNS rebinding). Its name never
+# resolves, so `localhost` and `127.0.0.1` stay free for the site of a dedicated port.
+<VirtualHost {{ main.catch_all_addresses }}>
+    ServerName {{ main.catch_all_name }}
     DocumentRoot "${SRVROOT}/htdocs"
     RewriteEngine On
     RewriteRule ^ - [R=404,L]

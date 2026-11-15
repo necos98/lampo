@@ -163,6 +163,34 @@ fn http_get(port: u16, host: &str, path: &str, extra: &str) -> (u16, String) {
     (status, body)
 }
 
+/// Files a project keeps next to its code when the document root is the project root.
+const PROJECT_INTERNALS: &[&str] =
+    &[".env", ".env.local", ".gitignore", ".git/config", ".git/refs/heads/main", ".svn/entries", "storage/logs/laravel.log", "backup/dump.sql", "backup/Dump.SQL", "index.php.bak"];
+const WELL_KNOWN: &str = ".well-known/acme-challenge/token";
+
+fn write_project_internals(docroot: &Path) {
+    for file in PROJECT_INTERNALS.iter().chain([&WELL_KNOWN]) {
+        let path = docroot.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "secret").unwrap();
+    }
+}
+
+fn assert_dotfiles_are_refused(port: u16, host: &str) {
+    let case_variants = ["/.GIT/config", "/.Env"];
+    for path in PROJECT_INTERNALS.iter().map(|f| format!("/{f}")).chain(case_variants.map(String::from)) {
+        let (status, body) = http_get(port, host, &path, "");
+        assert_eq!(status, 403, "{host}:{port}{path} must be refused: {body}");
+    }
+    for dir in ["/storage/logs/", "/.git/", "/backup/"] {
+        let (status, body) = http_get(port, host, dir, "");
+        assert_eq!(status, 403, "{host}:{port}{dir} must not be listed: {body}");
+        assert!(!body.contains("Index of"), "{body}");
+    }
+    let (status, body) = http_get(port, host, &format!("/{WELL_KNOWN}"), "");
+    assert_eq!((status, body.as_str()), (200, "secret"), "/.well-known/ stays reachable");
+}
+
 /// php-cgi.exe processes started from `php_dir`.
 fn php_cgi_count(php_dir: &Path) -> usize {
     let script = format!("@(Get-Process php-cgi -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -like '{}*' }}).Count", php_dir.display().to_string().replace('/', "\\"));
@@ -253,6 +281,7 @@ async fn real_apache_serves_php_sites() {
     std::fs::write(docroot.join("index.php"), INDEX_PHP).unwrap();
     std::fs::write(docroot.join(".htaccess"), "RewriteEngine On\nRewriteCond %{REQUEST_FILENAME} !-f\nRewriteCond %{REQUEST_FILENAME} !-d\nRewriteRule ^ index.php [L,QSA]\n").unwrap();
     std::fs::write(docroot.join("static.txt"), "static file").unwrap();
+    write_project_internals(&docroot);
 
     let shared = free_port();
     let wt_port = free_port();
@@ -337,10 +366,21 @@ async fn real_apache_serves_php_sites() {
         assert!(body.contains(&format!("php={old_minor}.")));
         assert!(body.contains("generated/php/shop@feature-x/php.ini"));
 
-        // 5. Unknown host → catch-all.
+        // 5. Unknown host → catch-all, on the shared port and on a dedicated one (a page that
+        //    rebinds its own domain to 127.0.0.1 must not read the site same-origin).
         let (status, body) = http_get(shared, "nobody.test", "/", "");
         assert_eq!(status, 404);
         assert!(body.contains("no site is configured"));
+        let (status, body) = http_get(wt_port, &format!("evil.example:{wt_port}"), "/static.txt", "");
+        assert_eq!(status, 404, "foreign Host on a dedicated port: {body}");
+        assert!(body.contains("no site is configured"));
+        let (status, body) = http_get(wt_port, &format!("localhost:{wt_port}"), "/static.txt", "");
+        assert_eq!((status, body.as_str()), (200, "static file"), "localhost reaches the dedicated port");
+
+        // 5b. Document root = project root: VCS metadata, secrets, logs and dumps are refused,
+        //     directories are not listed, `/.well-known/` stays reachable.
+        assert_dotfiles_are_refused(shared, "shop.test");
+        assert_dotfiles_are_refused(wt_port, "127.0.0.1");
 
         // 6. Idle php-cgi processes are reaped.
         assert!(php_cgi_count(&php) >= 1);
