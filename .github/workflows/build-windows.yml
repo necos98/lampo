@@ -66,7 +66,7 @@ jobs:
         run: |
           $version = (Get-Content apps/desktop/package.json -Raw | ConvertFrom-Json).version
           if ("${{ github.ref_name }}" -ne "v$version") {
-            throw "Il tag ${{ github.ref_name }} non corrisponde alla versione v$version: usa scripts/bump-version.mjs"
+            throw "Il tag ${{ github.ref_name }} non corrisponde alla versione v${version}: usa scripts/bump-version.mjs"
           }
 
       - name: Install frontend deps
