@@ -54,6 +54,14 @@ php.ini values, services, database name, public folder and Apache directives, ap
 stored project under that same lock, so a CLI edit never reverts a concurrent GUI save. It
 also checks what the GUI only offers as choices: add-ons installed for the project's PHP,
 bundled extensions present in its `ext` dir, MySQL series configured in the settings.
+The same patch renames (`lampo project rename`, `--name`) and adds or removes addresses
+(`--address`/`--no-address`, the displayed form parsed by `SiteAddress::parse`; `loopback`
+draws a free port from the allocator in the same commit). Additions are appended (the first
+address stays primary), at least one must remain, and `check_conflicts` refuses names and ports
+of other sites. `lampo project remove` sends `project-delete` (`DeleteProject`, as the GUI).
+From the CLI, a patch that changes hosts-file names or removes a project that has some fails
+with `ElevationRequired` *before* saving anything unless `--allow-elevation`, so a retry with
+the flag finds the same state.
 
 Creating a project that uses MySQL also creates its database (name derived from the project id) on
 its instance, starting it on demand; an existing database is kept, and a failure never fails

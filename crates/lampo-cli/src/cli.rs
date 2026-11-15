@@ -181,14 +181,14 @@ pub enum ProjectCommand {
         /// Project id (default: resolved from the current folder).
         id: Option<String>,
     },
-    /// Change the project's PHP extensions, add-ons (Xdebug), php.ini values, services (MySQL/Redis), database name, public folder or Apache directives
+    /// Change the project's PHP extensions, add-ons (Xdebug), php.ini values, services (MySQL/Redis), database name, public folder, Apache directives, display name or addresses
     ///
     /// Only what is named changes, in one atomic edit of the stored project (no lost update
-    /// with the GUI); then Apache, php.ini and services are regenerated as after a GUI save.
-    /// Every flag is repeatable and list flags also take comma-separated values; removals apply
-    /// before additions; adding something already there (or removing something absent) is a
-    /// no-op. Worktree environments follow their parent project. Prints the updated project
-    /// (`--json`: the ProjectDto). Display name, addresses and ports are edited in the app.
+    /// with the GUI); then Apache, php.ini, services and the hosts file are regenerated as after
+    /// a GUI save. Every flag is repeatable and list flags also take comma-separated values;
+    /// removals apply before additions; adding something already there (or removing something
+    /// absent) is a no-op. Worktree environments follow their parent project. Prints the
+    /// updated project (`--json`: the ProjectDto).
     ///
     /// Examples:
     ///   lampo project set --ext intl,gd --ini memory_limit=512M
@@ -196,13 +196,45 @@ pub enum ProjectCommand {
     ///   lampo project set --no-addon xdebug --no-ini xdebug.mode
     ///   lampo project set --service redis --service mysql@5.7 --database shop_legacy
     ///   lampo project set shop --public-dir public --json
+    ///   lampo project set --address api.shop.localhost --address loopback
+    ///   lampo project set --address shop.test --allow-elevation
+    ///   lampo project set --no-address 127.0.0.1:8101 --name "Shop Legacy"
     #[command(verbatim_doc_comment)]
     Set(Box<ProjectSetArgs>),
+    /// Change the project's display name (the id, URLs, folder and database stay)
+    ///
+    /// Same as `lampo project set --name`. Quote names with spaces.
+    ///
+    /// Example: lampo project rename "Shop Legacy" shop
+    Rename {
+        /// New display name (1-80 characters).
+        name: String,
+        /// Project id (default: resolved from the current folder or --project).
+        id: Option<String>,
+    },
+    /// Unregister a project from Lampo. Requires `--yes` (never prompts)
+    ///
+    /// Removes its configuration and its worktree environments; the folder, the files and the
+    /// databases are NEVER deleted (drop a database with `lampo db drop` first if wanted). An
+    /// active project is removed too: Lampo just stops serving it, as in the app. A project with
+    /// a hosts-file name (`shop.test`) needs `--allow-elevation` (exit 7, nothing removed,
+    /// otherwise). Undo: `lampo project create <folder>` registers the folder again (with new
+    /// defaults).
+    ///
+    /// Example: lampo project remove shop --yes
+    Remove {
+        /// Project id (default: resolved from the current folder or --project).
+        id: Option<String>,
+        /// Confirm the removal.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Args)]
 #[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args([
     "ext", "no_ext", "addon", "no_addon", "ini", "no_ini", "service", "no_service", "database", "public_dir", "apache_directives",
+    "name", "address", "no_address",
 ])))]
 pub struct ProjectSetArgs {
     /// Project id (default: resolved from the current folder or --project).
@@ -247,6 +279,21 @@ pub struct ProjectSetArgs {
     /// `""` clears them). From a file in PowerShell: --apache-directives (Get-Content x.conf -Raw)
     #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
     pub apache_directives: Option<String>,
+    /// New display name (the id, URLs, folder and database stay).
+    #[arg(long, value_name = "NAME")]
+    pub name: Option<String>,
+    /// Add a site address, appended after the current ones (the first address stays the
+    /// primary one): `<name>.localhost` (no UAC), `127.0.0.1:<port>` or `loopback` (a free
+    /// dedicated port; no-op if the project has one), or a hosts-file name such as `shop.test`
+    /// (needs --allow-elevation: exit 7, nothing changed, otherwise). A name or port used by
+    /// another site is a conflict (exit 5).
+    #[arg(long, value_name = "ADDRESS", value_delimiter = ',')]
+    pub address: Vec<String>,
+    /// Remove a site address (same forms; `loopback` = the dedicated port, whichever it is).
+    /// At least one must remain; removing the first makes the next one primary. Removing a
+    /// hosts-file name also needs --allow-elevation.
+    #[arg(long, value_name = "ADDRESS", value_delimiter = ',')]
+    pub no_address: Vec<String>,
 }
 
 #[derive(Debug, Args)]

@@ -24,7 +24,7 @@ use super::environment::EnvironmentSync;
 use super::presets::PresetQueries;
 use super::service_catalog::ServiceCatalog;
 use super::support::{load_project, newest_of, package_missing, parse_project_id, project_dto, validation};
-use crate::context::CallContext;
+use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::mapping::{address_from_dto, address_to_dto, environment_from_dto};
@@ -162,17 +162,21 @@ impl ProjectWriter {
     /// Loads `project_id`, applies `change` and, if it reports a change, saves the result, all
     /// under the allocator lock (no lost update, no conflict slipping in).
     pub(crate) async fn modify(&self, project_id: &str, change: impl FnOnce(&mut Project, &SiteSnapshot) -> AppResult<bool>) -> AppResult<Project> {
-        let project = self
-            .allocator
-            .reserve(|snap| {
-                let mut project = load_project(self.projects.as_ref(), project_id)?;
-                if change(&mut project, snap)? {
-                    self.save_checked(snap, &project, false)?;
-                    self.changed(&project.id);
-                }
-                Ok(project)
-            })
-            .await?;
+        self.allocator.reserve(|snap| self.commit_change(project_id, snap, change)).await
+    }
+
+    /// Like [`Self::modify`], also handing `change` a free loopback port picked under the same
+    /// lock (it may leave it unused).
+    pub(crate) async fn modify_with_free_port(&self, project_id: &str, change: impl FnOnce(&mut Project, &SiteSnapshot, u16) -> AppResult<bool>) -> AppResult<Project> {
+        self.allocator.allocate(|port, snap| self.commit_change(project_id, snap, |project, snap| change(project, snap, port))).await
+    }
+
+    fn commit_change(&self, project_id: &str, snap: &SiteSnapshot, change: impl FnOnce(&mut Project, &SiteSnapshot) -> AppResult<bool>) -> AppResult<Project> {
+        let mut project = load_project(self.projects.as_ref(), project_id)?;
+        if change(&mut project, snap)? {
+            self.save_checked(snap, &project, false)?;
+            self.changed(&project.id);
+        }
         Ok(project)
     }
 
@@ -322,6 +326,16 @@ impl UpdateProject {
     }
 }
 
+/// A CLI change of hosts-file `names` (added or removed) is refused up front without
+/// `--allow-elevation`, before anything is saved: the sync would apply the rest and fail anyway.
+pub(crate) fn require_hosts_elevation(ctx: &CallContext, names: &[String], action: &str, outcome: &str) -> AppResult<()> {
+    if ctx.elevation == ElevationPolicy::Allow || names.is_empty() {
+        return Ok(());
+    }
+    let list = names.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", ");
+    Err(AppError::new(ErrorCode::ElevationRequired, format!("{action} changes the hosts file ({list}), which needs administrator permission: re-run with --allow-elevation ({outcome})")))
+}
+
 /// Removes the project's config and its worktree environments' configs. Never deletes folders
 /// or databases.
 pub struct DeleteProject {
@@ -336,8 +350,13 @@ impl DeleteProject {
         Self { projects, worktrees, env, events }
     }
 
+    /// Active projects are removed too (the sync stops serving them). A project with hosts-file
+    /// names needs elevation (`ElevationRequired` with nothing removed otherwise), so a retry
+    /// with `--allow-elevation` finds it still there.
     pub async fn execute(&self, project_id: &str, ctx: &CallContext) -> AppResult<()> {
         let project = load_project(self.projects.as_ref(), project_id)?;
+        let names: Vec<String> = project.hosts_file_names().map(ToString::to_string).collect();
+        require_hosts_elevation(ctx, &names, &format!("removing `{}`", project.id), "nothing was removed")?;
         let had_worktrees = !self.worktrees.list_for(&project.id)?.is_empty();
         self.worktrees.delete_all_for(&project.id)?;
         self.projects.delete(&project.id)?;

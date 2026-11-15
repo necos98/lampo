@@ -727,4 +727,79 @@ fn project_set_needs_at_least_one_change() {
     assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "shop"]).is_err());
     assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "--no-ini", "memory_limit"]).is_ok());
     assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "--apache-directives", "-Indexes"]).is_ok());
+    assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "--no-address", "loopback"]).is_ok());
+    assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "rename"]).is_err(), "rename needs a name");
+}
+
+// --- `project rename`, addresses, `project remove` ---------------------------------------------
+
+#[tokio::test]
+async fn project_set_maps_name_and_addresses_and_forwards_elevation() {
+    let fake = Fake::new();
+    fake.reply(Ok(project_json()));
+    let args = ["project", "set", "--name", "Shop Legacy", "--address", "api.shop.localhost,loopback", "--address", "shop.test", "--no-address", "127.0.0.1:8101", "--allow-elevation"];
+    let (code, out, _) = run_cli(&fake, &args).await;
+    assert_eq!(code, 0, "{out}");
+    let (request, context) = fake.last_request();
+    let ControlRequest::ProjectPatch(r) = request else { panic!("wrong request: {request:?}") };
+    assert_eq!((r.project_id.as_str(), r.name.as_deref()), ("shop", Some("Shop Legacy")));
+    assert_eq!(r.addresses_add, ["api.shop.localhost", "loopback", "shop.test"]);
+    assert_eq!(r.addresses_remove, ["127.0.0.1:8101"]);
+    assert!(r.extensions_add.is_empty() && r.services_add.is_empty() && r.apache_directives.is_none(), "only what is named");
+    assert_eq!(context.elevation, ElevationPolicy::Allow);
+
+    fake.reply(Err(AppError::new(ErrorCode::ElevationRequired, "this address change changes the hosts file (`shop.test`): re-run with --allow-elevation (nothing was changed)")));
+    let (code, out, _) = run_cli(&fake, &["project", "set", "--address", "shop.test", "--json"]).await;
+    assert_eq!(code, 7);
+    assert_eq!(parse(&out)["error"]["code"], "elevation-required");
+    assert_eq!(fake.last_request().1.elevation, ElevationPolicy::Deny);
+
+    fake.reply(Err(AppError::new(ErrorCode::Conflict, "hostname `blog.localhost` is already used by project `blog`")));
+    let (code, _, _) = run_cli(&fake, &["project", "set", "--address", "blog.localhost"]).await;
+    assert_eq!(code, 5);
+}
+
+#[tokio::test]
+async fn project_rename_sends_a_patch_with_the_name_only() {
+    let fake = Fake::new();
+    fake.reply(Ok(project_json()));
+    let (code, out, _) = run_cli(&fake, &["project", "rename", "Shop Legacy", "blog", "--json"]).await;
+    assert_eq!(code, 0);
+    assert_eq!(parse(&out), project_json(), "the updated ProjectDto");
+    let ControlRequest::ProjectPatch(r) = fake.last_request().0 else { panic!("wrong request") };
+    assert_eq!(r, ProjectPatchRequest { project_id: "blog".into(), name: Some("Shop Legacy".into()), ..Default::default() });
+
+    fake.reply(Ok(project_json()));
+    let (code, _, _) = run_cli(&fake, &["project", "rename", "Shop"]).await;
+    assert_eq!(code, 0);
+    let ControlRequest::ProjectPatch(r) = fake.last_request().0 else { panic!("wrong request") };
+    assert_eq!(r.project_id, "shop", "resolved from the current folder");
+}
+
+#[tokio::test]
+async fn project_remove_needs_yes_and_reports_what_was_kept() {
+    let fake = Fake::new();
+    let (code, out, _) = run_cli(&fake, &["project", "remove", "shop", "--json"]).await;
+    assert_eq!(code, 4);
+    assert!(parse(&out)["error"]["message"].as_str().unwrap().contains("--yes"));
+    assert!(fake.sent.lock().unwrap().is_empty(), "nothing sent");
+
+    let (code, _, _) = run_cli(&fake, &["project", "remove", "ghost", "--yes"]).await;
+    assert_eq!(code, 3, "unknown id, read from the files");
+    assert!(fake.sent.lock().unwrap().is_empty(), "nothing sent");
+
+    fake.reply(Ok(Value::Null));
+    let (code, out, _) = run_cli(&fake, &["project", "remove", "--yes", "--json"]).await;
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(parse(&out), json!({"projectId": "shop", "name": "Shop", "root": "C:\\work\\shop", "databaseName": "shop", "wasActive": true, "worktreeEnvironments": 0}));
+    assert_eq!(fake.last_request().0, ControlRequest::ProjectDelete { project_id: "shop".into() });
+
+    fake.reply(Ok(Value::Null));
+    let (code, out, _) = run_cli(&fake, &["project", "remove", "shop", "--yes"]).await;
+    assert_eq!(code, 0);
+    assert!(out.contains("removed project shop (Shop) from Lampo; folder C:\\work\\shop and database `shop` kept"), "{out}");
+
+    fake.reply(Err(AppError::new(ErrorCode::ElevationRequired, "removing `shop` changes the hosts file")));
+    let (code, _, _) = run_cli(&fake, &["project", "remove", "shop", "--yes"]).await;
+    assert_eq!(code, 7);
 }

@@ -35,7 +35,7 @@ Tutte in inglese (descrizioni comprese), invocate come `lampo:<id>`:
 | `database` | Credenziali, `lampo db list/create/import/export/drop`, `.env`, database per i test, modalità dei worktree, regole di sicurezza |
 | `worktrees` | `lampo worktree up/down/list/prune`, modalità shared/fresh/clone, flusso consigliato con più agent |
 | `services-logs` | Servizi, log, `lampo doctor`, playbook (500, 404/rewrite, porte occupate, MySQL, PHP sbagliato, estensioni) |
-| `new-project` | `project detect`, `project create`, `project new --git/--laravel`, preset, indirizzi, attivazione |
+| `new-project` | `project detect`, `project create`, `project new --git/--laravel`, preset, indirizzi, attivazione, `project rename`/`project remove`, indirizzi dopo la creazione (`project set --address`) |
 | `laravel` | `.env` per MySQL/Redis di Lampo, migrazioni, queue e scheduler da terminale, test su database dedicato, Vite, Xdebug, errori comuni |
 | `migrate` | Procedura di migrazione da Docker/Sail, Laragon, XAMPP/WAMP, Herd (file di riferimento `docker.md`, `laragon.md`, `xampp-wamp.md`, `herd.md`) |
 

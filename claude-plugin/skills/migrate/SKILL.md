@@ -169,7 +169,7 @@ End with a summary for the user:
   (PostgreSQL, Mailpit, search engines) and how it is handled now;
 - how to roll back:
   1. restore `.env` (or `wp-config.php`) from the backup folder;
-  2. `lampo project deactivate <id>` (and remove the project in the app, "Progetti", if wanted:
-     the folder and the database stay);
+  2. `lampo project deactivate <id>`, or, only if the user wants it gone from Lampo,
+     `lampo project remove <id> --yes` (ask first; the folder and the database stay);
   3. drop the imported database only if the user asks: `lampo db drop <name> --yes`;
   4. start the old environment again from its own tool.

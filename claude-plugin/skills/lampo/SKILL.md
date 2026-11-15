@@ -106,6 +106,8 @@ You MUST ASK the user first, and wait for a clear yes, before:
 - changing the PHP version of a main project (`lampo project set-php`), or with
   `lampo project set` removing a service, switching its MySQL series, or changing its database
   name, public folder or Apache directives;
+- removing a project (`lampo project remove <id> --yes`; its folder and databases stay) or
+  removing one of its addresses (`lampo project set --no-address <address>`);
 - removing worktree environments that own a database (`lampo worktree down --drop-database`,
   `lampo worktree prune --drop-databases`, or `lampo worktree down` of an environment whose
   database the user may still want);
@@ -128,9 +130,9 @@ that is not Lampo (Laragon, XAMPP, Docker, IIS) without the user's explicit appr
 - A project's environment is edited with `lampo project set` (extensions, add-ons, php.ini
   values, services, database name, public folder, Apache directives; see
   `lampo project set --help`). Only what you name changes; worktree environments follow the
-  parent. Still only in the Lampo app (GUI in Italian): display name and addresses of a
-  project ("Progetti" > project), ports and MySQL instances ("Impostazioni"), deleting
-  projects, uninstalling packages.
+  parent. Display name: `lampo project rename`; addresses: `lampo project set --address <address>` /
+  `--no-address` (see `lampo:new-project`). Still only in the Lampo app (GUI in Italian):
+  ports and MySQL instances ("Impostazioni"), uninstalling packages.
 
 ## 6. Load the specialised skill
 
@@ -140,6 +142,6 @@ that is not Lampo (Laragon, XAMPP, Docker, IIS) without the user's explicit appr
 | Databases: create, import, export, drop, `.env`, worktree database modes | `lampo:database` |
 | One environment per git worktree, parallel agents | `lampo:worktrees` |
 | Services, logs, `lampo doctor`, 500/404 errors, ports, MySQL not starting | `lampo:services-logs` |
-| Register a folder (preview detection first), clone a repository, new Laravel app, addresses | `lampo:new-project` |
+| Register a folder (preview detection first), clone a repository, new Laravel app, addresses, rename or remove a project | `lampo:new-project` |
 | Laravel on Lampo: `.env`, migrations, queues, scheduler, tests, Vite | `lampo:laravel` |
 | Move a project from Docker/Sail, Laragon, XAMPP/WAMP or Herd to Lampo | `lampo:migrate` |

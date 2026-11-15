@@ -77,6 +77,9 @@ lampo project create --activate       # registra la cartella corrente come proge
 lampo project new --git https://github.com/acme/shop.git --in D:\sites
 lampo project new --laravel shop --in D:\sites --php 8.4
 lampo project set --ext intl --addon xdebug --ini memory_limit=512M   # modifica l'ambiente
+lampo project set --address api.shop.localhost --no-address 127.0.0.1:8101   # indirizzi
+lampo project rename "Shop Legacy"    # nome visualizzato (l'id resta)
+lampo project remove shop --yes       # la toglie da Lampo: cartella e database restano
 lampo worktree up --db clone:shop     # ambiente per il git worktree corrente
 lampo exec -- composer install        # comando con il PHP e il Composer del progetto
 lampo logs error -f                   # log degli errori del sito, in tempo reale

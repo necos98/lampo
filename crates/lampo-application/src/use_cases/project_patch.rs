@@ -1,5 +1,6 @@
-//! Partial edits of a project's environment (`lampo project set`): extensions, add-ons, php.ini
-//! overrides, services, database name, public folder, Apache directives.
+//! Partial edits of a project (`lampo project set`, `lampo project rename`): extensions,
+//! add-ons, php.ini overrides, services, database name, public folder, Apache directives, display
+//! name and addresses.
 //!
 //! The patch is applied to the *stored* project inside [`ProjectWriter::modify`] (under the
 //! allocator lock), so it never overwrites a concurrent edit with stale data the way a
@@ -10,17 +11,19 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use lampo_domain::address::SiteAddress;
 use lampo_domain::mysql::DatabaseName;
 use lampo_domain::package::PackageKind;
 use lampo_domain::php::{ExtensionName, IniKey, PhpMinor, php_ini_overrides};
 use lampo_domain::ports::InstalledPackageRegistry;
-use lampo_domain::project::{ApacheDirectives, ProjectEnvironment, PublicDir};
+use lampo_domain::project::{ApacheDirectives, DisplayName, Project, ProjectEnvironment, PublicDir};
 use lampo_domain::service::ServiceKind;
 use lampo_domain::settings::Settings;
 use lampo_domain::version::VersionSeries;
 
+use super::allocation::SiteSnapshot;
 use super::packages::PhpExtensionsQuery;
-use super::projects::ProjectWriter;
+use super::projects::{ProjectWriter, require_hosts_elevation};
 use super::service_catalog::ServiceCatalog;
 use super::support::{newest_of, validation};
 use crate::context::CallContext;
@@ -43,33 +46,48 @@ impl PatchProjectEnvironment {
     /// and removed, a bundled extension the project's PHP does not ship, an unknown or
     /// unconfigured service (version), or a database name without MySQL; `PackageMissing` for
     /// an add-on not installed for the project's PHP minor (the message names the install
-    /// command). Nothing is saved on error. Then syncs like every project update.
+    /// command). Display name and addresses: `Validation` for a malformed one or removing every
+    /// address, `Conflict` for a hostname or port another site uses (`check_conflicts`),
+    /// `ElevationRequired` when hosts-file names change without elevation. Nothing is saved on
+    /// error. Then syncs like every project update.
     pub async fn execute(&self, request: ProjectPatchRequest, ctx: &CallContext) -> AppResult<ProjectDto> {
         let patch = Patch::parse(&request)?;
         let installed = if patch.addons_add.is_empty() { Vec::new() } else { self.installed.list()? };
         let catalog = self.writer.services.clone();
-        let project = self
-            .writer
-            .modify(&request.project_id, |project, snap| {
-                let mut env = project.environment.clone();
-                patch.apply(&mut env, catalog.as_ref(), &snap.settings)?;
-                for kind in &patch.addons_add {
-                    if newest_of(&installed, kind, None, Some(env.php)).is_none() {
-                        return Err(addon_missing(kind, env.php));
-                    }
+        let change = |project: &mut Project, snap: &SiteSnapshot, free_port: Option<u16>| -> AppResult<bool> {
+            let mut env = project.environment.clone();
+            patch.apply(&mut env, catalog.as_ref(), &snap.settings)?;
+            for kind in &patch.addons_add {
+                if newest_of(&installed, kind, None, Some(env.php)).is_none() {
+                    return Err(addon_missing(kind, env.php));
                 }
-                self.check_bundled(&patch.extensions_add, env.php)?;
-                if patch.database.is_some() && env.mysql().is_none() {
-                    return Err(validation("the project uses no MySQL: add it with `--service mysql` to set a database name"));
-                }
-                let before = (project.environment.clone(), project.database.clone());
-                project.set_environment(env)?;
-                if let Some(db) = &patch.database {
-                    project.database = Some(db.clone());
-                }
-                Ok((project.environment.clone(), project.database.clone()) != before)
-            })
-            .await?;
+            }
+            self.check_bundled(&patch.extensions_add, env.php)?;
+            if patch.database.is_some() && env.mysql().is_none() {
+                return Err(validation("the project uses no MySQL: add it with `--service mysql` to set a database name"));
+            }
+            let mut addresses = project.addresses.clone();
+            patch.apply_addresses(&mut addresses, free_port)?;
+            let hosts_before: BTreeSet<String> = project.hosts_file_names().map(ToString::to_string).collect();
+            let before = (project.name.clone(), project.addresses.clone(), project.environment.clone(), project.database.clone());
+            project.set_addresses(addresses)?;
+            let hosts_after: BTreeSet<String> = project.hosts_file_names().map(ToString::to_string).collect();
+            let touched: Vec<String> = hosts_before.symmetric_difference(&hosts_after).cloned().collect();
+            require_hosts_elevation(ctx, &touched, "this address change", "nothing was changed")?;
+            project.set_environment(env)?;
+            if let Some(db) = &patch.database {
+                project.database = Some(db.clone());
+            }
+            if let Some(name) = &patch.name {
+                project.name = name.clone();
+            }
+            Ok((project.name.clone(), project.addresses.clone(), project.environment.clone(), project.database.clone()) != before)
+        };
+        let project = if patch.wants_free_port() {
+            self.writer.modify_with_free_port(&request.project_id, |project, snap, port| change(project, snap, Some(port))).await?
+        } else {
+            self.writer.modify(&request.project_id, |project, snap| change(project, snap, None)).await?
+        };
         self.writer.finish(&project, ctx).await
     }
 
@@ -113,6 +131,42 @@ struct Patch {
     database: Option<DatabaseName>,
     public_dir: Option<PublicDir>,
     apache_directives: Option<ApacheDirectives>,
+    name: Option<DisplayName>,
+    /// In request order (appended in that order).
+    addresses_add: Vec<AddressArg>,
+    addresses_remove: BTreeSet<AddressArg>,
+}
+
+/// An address named in a patch: an exact one, or [`AUTO_LOOPBACK`].
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum AddressArg {
+    Exact(SiteAddress),
+    AnyLoopback,
+}
+
+impl AddressArg {
+    fn parse(raw: &str) -> AppResult<Self> {
+        if raw.trim().eq_ignore_ascii_case(AUTO_LOOPBACK) {
+            return Ok(Self::AnyLoopback);
+        }
+        Ok(Self::Exact(SiteAddress::parse(raw)?))
+    }
+
+    fn matches(&self, address: &SiteAddress) -> bool {
+        match self {
+            Self::Exact(exact) => exact == address,
+            Self::AnyLoopback => address.loopback().is_some(),
+        }
+    }
+}
+
+impl std::fmt::Display for AddressArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Exact(a) => write!(f, "{a}"),
+            Self::AnyLoopback => f.write_str(AUTO_LOOPBACK),
+        }
+    }
 }
 
 /// Rejects an item named on both sides of a patch.
@@ -144,7 +198,11 @@ impl Patch {
             database: r.database_name.as_deref().map(|d| DatabaseName::new(d.trim())).transpose()?,
             public_dir: r.public_dir.as_deref().map(PublicDir::new).transpose()?,
             apache_directives: r.apache_directives.clone().map(ApacheDirectives::new).transpose()?,
+            name: r.name.as_deref().map(DisplayName::new).transpose()?,
+            addresses_add: r.addresses_add.iter().map(|a| AddressArg::parse(a)).collect::<AppResult<_>>()?,
+            addresses_remove: r.addresses_remove.iter().map(|a| AddressArg::parse(a)).collect::<AppResult<_>>()?,
         };
+        disjoint("address", &patch.addresses_add.iter().cloned().collect(), &patch.addresses_remove)?;
         disjoint("extension", &patch.extensions_add, &patch.extensions_remove)?;
         disjoint("add-on", &patch.addons_add, &patch.addons_remove)?;
         let ini_set: BTreeSet<IniKey> = patch.ini_set.keys().cloned().collect();
@@ -177,6 +235,38 @@ impl Patch {
         }
         if let Some(directives) = &self.apache_directives {
             env.apache_directives = directives.clone();
+        }
+        Ok(())
+    }
+
+    /// Whether an address must be allocated: [`AUTO_LOOPBACK`] added.
+    fn wants_free_port(&self) -> bool {
+        self.addresses_add.contains(&AddressArg::AnyLoopback)
+    }
+
+    /// Removals first, then additions appended in order (the first address, the primary one,
+    /// stays first unless removed: then the next one becomes primary, as in the GUI).
+    /// `free_port` is set when [`Self::wants_free_port`].
+    fn apply_addresses(&self, addresses: &mut Vec<SiteAddress>, free_port: Option<u16>) -> AppResult<()> {
+        if self.addresses_add.is_empty() && self.addresses_remove.is_empty() {
+            return Ok(());
+        }
+        addresses.retain(|a| !self.addresses_remove.iter().any(|r| r.matches(a)));
+        for wanted in &self.addresses_add {
+            let address = match wanted {
+                AddressArg::Exact(a) => a.clone(),
+                AddressArg::AnyLoopback if addresses.iter().any(|a| a.loopback().is_some()) => continue,
+                AddressArg::AnyLoopback => SiteAddress::loopback_port(free_port.ok_or_else(|| AppError::internal("no loopback port was allocated"))?)?,
+            };
+            if !addresses.contains(&address) {
+                addresses.push(address);
+            }
+        }
+        if addresses.is_empty() {
+            return Err(validation("a project needs at least one address: add another one (`--address`) before removing the last"));
+        }
+        if addresses.iter().filter(|a| a.loopback().is_some()).count() > 1 {
+            return Err(validation(format!("a project can have at most one dedicated loopback port: remove the current one too (`--no-address {AUTO_LOOPBACK}`)")));
         }
         Ok(())
     }

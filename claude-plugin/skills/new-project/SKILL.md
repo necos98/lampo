@@ -1,6 +1,6 @@
 ---
 name: new-project
-description: Add a project to Lampo: register an existing folder (`lampo project create`), clone a git repository (`lampo project new --git`) or create a new Laravel application with the Lampo-managed installer (`lampo project new --laravel`), choose preset and PHP version, addressing (.localhost plus a loopback port, or a hosts-file name that needs UAC), the automatic database, and activation. Use when the user asks "add this folder to Lampo", "serve this project", "clone this repo and set it up", "create a new Laravel project", "start a new PHP site", or a lampo command fails with exit code 6 (no project for this folder).
+description: Add a project to Lampo: register an existing folder (`lampo project create`), clone a git repository (`lampo project new --git`) or create a new Laravel application with the Lampo-managed installer (`lampo project new --laravel`), choose preset and PHP version, addressing (.localhost plus a loopback port, or a hosts-file name that needs UAC), the automatic database, activation, and later renaming, changing addresses or removing a project. Use when the user asks "add this folder to Lampo", "serve this project", "clone this repo and set it up", "create a new Laravel project", "start a new PHP site", "add a .test domain", "rename/remove this project", or a lampo command fails with exit code 6 (no project for this folder).
 ---
 
 # New projects
@@ -114,7 +114,24 @@ lampo project set shop --ext intl --ini memory_limit=512M --service redis
 lampo project set shop --public-dir web
 ```
 
-## Not available from the CLI
+## Rename, change addresses, remove
 
-Removing a project, renaming it or changing its addresses is done in the Lampo app
-("Progetti" > project). Removing a project never deletes its folder or its database.
+```powershell
+lampo project rename "Shop Legacy" shop            # display name only: id, URLs, database stay
+lampo project set shop --address api.shop.localhost --address loopback
+lampo project set shop --no-address 127.0.0.1:8101
+lampo project set shop --address shop.test --allow-elevation   # hosts-file name: ASK first (UAC)
+lampo project remove shop --yes                    # ASK first
+```
+
+- Addresses take the form `project info` shows: `<name>.localhost` and `127.0.0.1:<port>`
+  need no UAC; `loopback` picks a free dedicated port (one per project). A hosts-file name
+  (`<name>.<tld>`) needs `--allow-elevation`, for adding and for removing it: without it the
+  command exits with 7 and nothing changes.
+- New addresses are appended; the first one stays the primary URL. Removing the first makes
+  the next one primary; the last address cannot be removed. A name or port another site uses
+  is refused with exit 5.
+- `project remove` unregisters the project and its worktree environments, also when it is
+  active (Lampo stops serving it). The folder and the databases are never deleted; it needs
+  `--allow-elevation` too when the project has a hosts-file name. Removing a project is
+  never part of another task: ASK the user and wait for a clear yes.
