@@ -225,8 +225,8 @@ impl ApacheConfigRenderer {
         env.set_trim_blocks(true);
         env.set_lstrip_blocks(true);
         env.set_keep_trailing_newline(true);
-        env.add_template("httpd.conf", templates::HTTPD_CONF).expect("valid httpd.conf template");
-        env.add_template("vhost.conf", templates::VHOST_CONF).expect("valid vhost.conf template");
+        env.add_template("httpd.conf", templates::httpd_conf()).expect("valid httpd.conf template");
+        env.add_template("vhost.conf", templates::vhost_conf()).expect("valid vhost.conf template");
         Self { env, options }
     }
 

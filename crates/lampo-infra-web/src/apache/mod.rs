@@ -24,8 +24,39 @@ pub mod validation;
 
 /// Templates embedded at compile time (minijinja syntax).
 pub mod templates {
-    pub const HTTPD_CONF: &str = include_str!("templates/httpd.conf.j2");
-    pub const VHOST_CONF: &str = include_str!("templates/vhost.conf.j2");
+    use std::sync::LazyLock;
+
+    /// Raw template sources, as checked out. `.gitattributes` keeps them LF, but a checkout
+    /// with other settings may embed CRLF: the renderer uses [`httpd_conf`] / [`vhost_conf`].
+    const HTTPD_CONF: &str = include_str!("templates/httpd.conf.j2");
+    const VHOST_CONF: &str = include_str!("templates/vhost.conf.j2");
+
+    static HTTPD_CONF_LF: LazyLock<String> = LazyLock::new(|| to_lf(HTTPD_CONF));
+    static VHOST_CONF_LF: LazyLock<String> = LazyLock::new(|| to_lf(VHOST_CONF));
+
+    /// `httpd.conf.j2` with LF line endings, whatever the checkout used.
+    pub fn httpd_conf() -> &'static str {
+        &HTTPD_CONF_LF
+    }
+
+    /// `vhost.conf.j2` with LF line endings, whatever the checkout used.
+    pub fn vhost_conf() -> &'static str {
+        &VHOST_CONF_LF
+    }
+
+    pub(crate) fn to_lf(text: &str) -> String {
+        text.replace("\r\n", "\n")
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn templates_are_normalized_to_lf() {
+            assert_eq!(super::to_lf("a\r\nb\nc\r\n"), "a\nb\nc\n");
+            assert!(!super::httpd_conf().contains('\r'));
+            assert!(!super::vhost_conf().contains('\r'));
+        }
+    }
 }
 
 #[cfg(test)]
