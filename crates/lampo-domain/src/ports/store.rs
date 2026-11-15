@@ -7,6 +7,7 @@ use crate::detection::DetectionHint;
 use crate::error::PortResult;
 use crate::preset::{Preset, PresetId};
 use crate::project::{Project, ProjectId, ProjectRoot};
+use crate::project_import::ImportedProject;
 use crate::scaffold::PathState;
 use crate::settings::Settings;
 use crate::shim::ShimIndex;
@@ -42,8 +43,10 @@ pub trait CustomPresetRepository: Send + Sync {
 /// Export / import of a single project's configuration as a portable file.
 pub trait ProjectTransfer: Send + Sync {
     fn export_to(&self, project: &Project, file: &Path) -> PortResult<()>;
-    /// Parses and validates an exported file. The returned project is *not* saved.
-    fn import_from(&self, file: &Path) -> PortResult<Project>;
+    /// Parses and validates an exported file, leaving out what an import never brings along
+    /// (`project_import`: the Apache directives, the untrusted php.ini keys) and reporting it.
+    /// The returned project is *not* saved.
+    fn import_from(&self, file: &Path) -> PortResult<ImportedProject>;
 }
 
 /// Writes the CLI shim index (atomically; shims may be reading it concurrently).

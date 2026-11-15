@@ -99,7 +99,7 @@ export const openTerminal = (projectId: string) => call<void>(COMMANDS.openTermi
 export const openProjectFolder = (projectId: string) => call<void>(COMMANDS.openProjectFolder, { projectId });
 /** Opens the project folder in VS Code; `package-missing` if VS Code is not installed. */
 export const openInVsCode = (projectId: string) => call<void>(COMMANDS.openInVsCode, { projectId });
-export const importProject = (request: T.ImportProjectRequest) => call<T.Project>(COMMANDS.importProject, { request });
+export const importProject = (request: T.ImportProjectRequest) => call<T.ImportProjectResult>(COMMANDS.importProject, { request });
 
 // Presets
 export const listPresets = () => call<T.Preset[]>(COMMANDS.listPresets);

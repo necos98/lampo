@@ -175,6 +175,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     }));
     let update_project = Arc::new(UpdateProject::new(project_writer.clone()));
     let delete_project = Arc::new(DeleteProject::new(projects.clone(), worktrees.clone(), env.clone(), events.clone()));
+    let import_project = Arc::new(ImportProject::new(project_writer.clone(), transfer.clone(), fs.clone()));
     let set_project_active = Arc::new(SetProjectActive::new(project_writer.clone()));
     let set_project_php = Arc::new(SetProjectPhp::new(project_writer.clone(), installed.clone()));
     let php_extensions = Arc::new(PhpExtensionsQuery::new(installed.clone(), Arc::new(packages::FsPhpExtensionScanner)));
@@ -227,6 +228,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         set_project_php: set_project_php.clone(),
         patch_project,
         delete_project: delete_project.clone(),
+        import_project: import_project.clone(),
         service_control: service_control.clone(),
         environment: env.clone(),
         install_package: install_package.clone(),
@@ -257,7 +259,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         set_project_php,
         relink_project: Arc::new(RelinkProject::new(project_writer.clone(), fs.clone())),
         export_project: Arc::new(ExportProject::new(projects.clone(), transfer.clone())),
-        import_project: Arc::new(ImportProject::new(project_writer, transfer, fs.clone())),
+        import_project,
         preset_queries,
         save_preset: Arc::new(SavePreset::new(projects.clone(), custom_presets.clone(), builtin_presets.clone())),
         delete_preset: Arc::new(DeletePreset::new(custom_presets, builtin_presets)),

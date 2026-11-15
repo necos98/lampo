@@ -15,6 +15,7 @@
 //! * paths are only *joined and compared*, never touched.
 
 pub mod address;
+pub mod apache_directives;
 pub mod claude_code;
 pub mod detection;
 pub mod error;
@@ -30,6 +31,7 @@ pub mod ports;
 pub mod preset;
 pub mod progress;
 pub mod project;
+pub mod project_import;
 pub mod resolution;
 pub mod scaffold;
 pub mod service;

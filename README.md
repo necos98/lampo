@@ -84,6 +84,7 @@ lampo project set --ext intl --addon xdebug --ini memory_limit=512M   # modifica
 lampo project set --address api.shop.localhost --no-address 127.0.0.1:8101   # indirizzi
 lampo project rename "Shop Legacy"    # nome visualizzato (l'id resta)
 lampo project remove shop --yes       # la toglie da Lampo: cartella e database restano
+lampo project import shop.lampo.toml  # importa un progetto esportato (senza direttive Apache né chiavi php.ini rischiose)
 lampo package extensions              # estensioni incluse nel PHP del progetto (per --ext)
 lampo package uninstall php 8.2 --yes # rimuove un pacchetto non più usato
 lampo settings                        # impostazioni globali: porte, PHP predefinito

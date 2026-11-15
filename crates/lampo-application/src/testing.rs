@@ -22,6 +22,7 @@ use lampo_domain::ports::*;
 use lampo_domain::preset::{Preset, PresetId, builtin};
 use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
 use lampo_domain::project::{DisplayName, Project, ProjectEnvironment, ProjectId, ProjectRoot};
+use lampo_domain::project_import::{DroppedOnImport, ImportedProject};
 use lampo_domain::resolution::{GitCheckout, ResolverChain};
 use lampo_domain::service::{ServiceId, ServiceKind, ServiceLaunch, ServiceState, ServiceStatus};
 use lampo_domain::settings::Settings;
@@ -237,14 +238,17 @@ impl ProjectDetector for FakeDetector {
 pub struct FakeTransfer {
     pub exported: Mutex<Vec<(ProjectId, PathBuf)>>,
     pub to_import: Mutex<Option<Project>>,
+    /// What the import reports as left out of the file.
+    pub dropped: Mutex<DroppedOnImport>,
 }
 impl ProjectTransfer for FakeTransfer {
     fn export_to(&self, project: &Project, file: &Path) -> PortResult<()> {
         lock(&self.exported).push((project.id.clone(), file.to_path_buf()));
         Ok(())
     }
-    fn import_from(&self, file: &Path) -> PortResult<Project> {
-        lock(&self.to_import).clone().ok_or_else(|| PortError::not_found("file", file.display().to_string()))
+    fn import_from(&self, file: &Path) -> PortResult<ImportedProject> {
+        let project = lock(&self.to_import).clone().ok_or_else(|| PortError::not_found("file", file.display().to_string()))?;
+        Ok(ImportedProject { project, dropped: lock(&self.dropped).clone() })
     }
 }
 

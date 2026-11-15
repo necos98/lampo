@@ -87,9 +87,17 @@ impl From<DomainError> for AppError {
             DomainError::ToolNotAvailable { .. } => ErrorCode::PackageMissing,
             _ => ErrorCode::Validation,
         };
-        Self::new(code, e.to_string())
+        let error = Self::new(code, e.to_string());
+        match e {
+            // The GUI shows the reason next to the directives editor.
+            DomainError::InvalidApacheDirectives(reason) => error.with_details(serde_json::json!({ "field": APACHE_DIRECTIVES_FIELD, "reason": reason })),
+            _ => error,
+        }
     }
 }
+
+/// `details.field` of a validation error about the project's custom Apache directives.
+pub const APACHE_DIRECTIVES_FIELD: &str = "apacheDirectives";
 
 impl From<PortError> for AppError {
     fn from(e: PortError) -> Self {
@@ -131,5 +139,14 @@ mod tests {
         assert_eq!(e.code, ErrorCode::Conflict);
         let e: AppError = PortError::not_found("app", "pipe").into();
         assert_eq!(e.code, ErrorCode::AppUnavailable);
+    }
+
+    #[test]
+    fn refused_apache_directives_carry_the_reason_for_the_editor() {
+        let e: AppError = lampo_domain::project::ApacheDirectives::new("Include x").unwrap_err().into();
+        assert_eq!(e.code, ErrorCode::Validation);
+        let details = e.details.unwrap();
+        assert_eq!(details["field"], APACHE_DIRECTIVES_FIELD);
+        assert!(details["reason"].as_str().unwrap().starts_with("line 1: `Include` is not allowed"), "{details}");
     }
 }

@@ -387,7 +387,13 @@ export function createMockBackend({ fresh }: Options): Backend {
 			const next = rebuild({ ...clone(base), id: name, name, root: root ?? `C:\\Dev\\${name}`, addresses: [{ kind: 'localhost', host: `${name}.localhost` }], worktrees: [], originPreset: null });
 			projects = [...projects, next];
 			syncProject(name);
-			return attachWorktrees(clone(next));
+			// A file whose name says "shared" shows the review of what an import leaves out.
+			const shared = file.toLowerCase().includes('shared');
+			return {
+				...attachWorktrees(clone(next)),
+				droppedApacheDirectives: shared ? 'CustomLog "|C:/Windows/System32/cmd.exe /c calc" common' : null,
+				droppedPhpIniKeys: shared ? ['auto_prepend_file'] : []
+			};
 		},
 
 		// Presets

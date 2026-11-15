@@ -85,10 +85,21 @@ The same patch renames (`lampo project rename`, `--name`) and adds or removes ad
 (`--address`/`--no-address`, the displayed form parsed by `SiteAddress::parse`; `loopback`
 draws a free port from the allocator in the same commit). Additions are appended (the first
 address stays primary), at least one must remain, and `check_conflicts` refuses names and ports
-of other sites. `lampo project remove` sends `project-delete` (`DeleteProject`, as the GUI).
+of other sites. `lampo project remove` sends `project-delete` (`DeleteProject`, as the GUI);
+`lampo project import` sends `project-import` (`ImportProject`, as the GUI).
 From the CLI, a patch that changes hosts-file names or removes a project that has some fails
 with `ElevationRequired` *before* saving anything unless `--allow-elevation`, so a retry with
 the flag finds the same state.
+
+Custom Apache directives reach the vhost verbatim and come from the GUI, the CLI, agents and
+imported files, so they are untrusted: `ApacheDirectives::new` refuses whatever runs programs,
+loads code, changes Lampo's variables or PHP environment, or maps/grants access to folders
+(`lampo_domain::apache_directives`). A stored value is only checked structurally when read, so
+an old project still loads; `ProjectWriter` refuses to save it and the sync leaves its vhost
+out (`config-rejected`, like a vhost `httpd -t` rejects) until it is fixed. An import never
+brings the export's directives nor the php.ini keys that load or run files
+(`lampo_domain::project_import`): they are returned in `ImportProjectResultDto` for the user
+to review, and `tls` is reset.
 
 Likewise the GUI saves the whole settings (`SettingsService::update`) while `lampo settings set`
 sends a patch (`PatchSettings`, control request `settings-patch`): Apache's port, service

@@ -158,18 +158,21 @@ impl ApplyEnvironment {
         Ok(())
     }
 
-    /// Applies `desired`; on rejection, isolates the broken vhosts and applies the rest.
+    /// Applies `desired`. Sites whose custom directives break the policy (stored before a rule
+    /// existed) are left out up front; on an Apache rejection the broken vhosts are isolated.
+    /// The rest is applied.
     async fn apply_web(&self, desired: &WebServerConfig, ini: &[PhpIniSpec]) -> WebState {
         let state = |blocked, rejection| WebState { desired: desired.clone(), ini: ini.to_vec(), blocked, rejection };
-        let output = match self.deps.web_config.apply(desired).await {
-            Ok(()) => return state(false, None),
+        let (allowed, mut excluded) = leave_out_refused_directives(desired);
+        let output = match self.deps.web_config.apply(&allowed).await {
+            Ok(()) => return state(false, exclusion_error(&excluded)),
             Err(PortError::ConfigRejected { output }) => output,
             Err(e) => return state(true, Some(e.into())),
         };
-        let mut good = desired.clone();
+        let refused = excluded.len();
+        let mut good = allowed.clone();
         good.vhosts.clear();
-        let mut excluded = Vec::new();
-        for vhost in &desired.vhosts {
+        for vhost in &allowed.vhosts {
             let mut probe = good.clone();
             probe.vhosts = vec![vhost.clone()];
             match self.deps.web_config.apply(&probe).await {
@@ -178,23 +181,14 @@ impl ApplyEnvironment {
                 Err(e) => return state(true, Some(e.into())),
             }
         }
-        let whole = |output: String| AppError::from(PortError::ConfigRejected { output });
-        if excluded.is_empty() {
+        if excluded.len() == refused {
             // Every vhost is fine alone: the problem is global or a combination.
-            return state(true, Some(whole(output)));
+            return state(true, Some(AppError::from(PortError::ConfigRejected { output })));
         }
         if let Err(e) = self.deps.web_config.apply(&good).await {
             return state(true, Some(e.into()));
         }
-        let sites: Vec<&str> = excluded.iter().map(|(s, _)| s.as_str()).collect();
-        let error = AppError::new(ErrorCode::ConfigRejected, format!("Apache rejected the configuration of {}; the other sites are still served", sites.join(", "))).with_details(
-            serde_json::json!({
-                "output": excluded[0].1,
-                "excludedSites": sites,
-                "rejections": excluded.iter().map(|(s, o)| serde_json::json!({ "site": s, "output": o })).collect::<Vec<_>>(),
-            }),
-        );
-        state(false, Some(error))
+        state(false, exclusion_error(&excluded))
     }
 
     async fn sync_hosts(&self, snap: &ConfigSnapshot, ctx: &CallContext, out: &mut Outcome) {
@@ -314,6 +308,33 @@ impl ApplyEnvironment {
             state.launches.insert(id, launch);
         }
     }
+}
+
+/// Splits `desired` into the config to apply and the `(site, reason)` of the vhosts whose custom
+/// directives the policy refuses (`ApacheDirectives::validate`).
+fn leave_out_refused_directives(desired: &WebServerConfig) -> (WebServerConfig, Vec<(String, String)>) {
+    let mut allowed = desired.clone();
+    let mut refused = Vec::new();
+    allowed.vhosts.retain(|vhost| match vhost.custom_directives.validate() {
+        Ok(()) => true,
+        Err(e) => {
+            refused.push((vhost.site.to_string(), e.to_string()));
+            false
+        }
+    });
+    (allowed, refused)
+}
+
+/// The `ConfigRejected` error naming the left-out sites, `None` when every site is served.
+fn exclusion_error(excluded: &[(String, String)]) -> Option<AppError> {
+    let (_, first) = excluded.first()?;
+    let sites: Vec<&str> = excluded.iter().map(|(s, _)| s.as_str()).collect();
+    let message = format!("the configuration of {} was rejected and is not served; the other sites are still served", sites.join(", "));
+    Some(AppError::new(ErrorCode::ConfigRejected, message).with_details(serde_json::json!({
+        "output": first,
+        "excludedSites": sites,
+        "rejections": excluded.iter().map(|(s, o)| serde_json::json!({ "site": s, "output": o })).collect::<Vec<_>>(),
+    })))
 }
 
 impl GeneratedFilesWriter for ApplyEnvironment {

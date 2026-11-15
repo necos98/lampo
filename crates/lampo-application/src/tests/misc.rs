@@ -359,6 +359,7 @@ fn dispatcher(w: &World, quit: Arc<std::sync::atomic::AtomicBool>, gate: Arc<Shu
         set_project_php: Arc::new(SetProjectPhp::new(writer, w.installed.clone())),
         patch_project: Arc::new(w.patch_project()),
         delete_project: Arc::new(DeleteProject::new(w.projects.clone(), w.worktrees.clone(), w.env.clone(), w.events.clone())),
+        import_project: Arc::new(w.import_project(Arc::new(crate::testing::FakeTransfer::default()))),
         service_control: w.service_control.clone(),
         environment: w.env.clone(),
         install_package: install,

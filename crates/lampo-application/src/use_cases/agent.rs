@@ -221,6 +221,13 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         ),
         c("lampo project rename", "lampo project rename <name> [<id>]", "Change the project's display name (id, URLs and database stay).", true, true),
         c("lampo project remove", "lampo project remove [<id>] --yes", "Unregister a project and its worktree environments (folder and databases are kept; ask the user first).", true, true),
+        c(
+            "lampo project import",
+            "lampo project import <file> [--root <dir>]",
+            "Register a project exported from Lampo (inactive). Its Apache directives and code-running php.ini keys are never imported: they are listed (droppedApacheDirectives, droppedPhpIniKeys) for the user to review.",
+            true,
+            true,
+        ),
         c("lampo worktree up", "lampo worktree up [<path>] [--db shared|fresh|clone:<db>]", "Create (or return) the worktree's own environment.", true, true),
         c("lampo worktree down", "lampo worktree down [<path|site>] [--drop-database]", "Remove the worktree environment.", true, true),
         c("lampo worktree list", "lampo worktree list [--project <id>] [--json]", "List worktree environments.", false, false),

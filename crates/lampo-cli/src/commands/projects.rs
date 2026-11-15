@@ -50,6 +50,7 @@ pub async fn run(c: &Cmd<'_>, command: ProjectCommand) -> AppResult<i32> {
             c.io.emit(&project, render::project);
         }
         ProjectCommand::Remove { id, yes } => remove(c, id, yes).await?,
+        ProjectCommand::Import { file, root } => super::project_import::import(c, file, root).await?,
     }
     Ok(0)
 }

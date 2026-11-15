@@ -286,6 +286,22 @@ pub struct ImportProjectRequest {
     pub root: Option<String>,
 }
 
+/// The imported project (the fields of [`ProjectDto`]) and the settings of the file that were
+/// left out because they could run code here. Front-ends show them so the user can add them
+/// back knowingly.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportProjectResultDto {
+    #[serde(flatten)]
+    pub project: ProjectDto,
+    /// The export's custom Apache directives, verbatim (never imported); `null` when it had none.
+    #[serde(default)]
+    pub dropped_apache_directives: Option<String>,
+    /// php.ini keys left out (`auto_prepend_file`, `extension`, …), as written in the file.
+    #[serde(default)]
+    pub dropped_php_ini_keys: Vec<String>,
+}
+
 /// Result of analysing a folder before creating a project.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -95,7 +95,8 @@ move. The JSON result gives the URL and `databaseSetup` (the new, empty database
 
 Then reproduce what the inventory found and the preset lacks, in one call (add-ons need
 `lampo package install xdebug --php 8.2` first; nginx rules translated to Apache go in
-`--apache-directives`):
+`--apache-directives`, which refuses directives that run programs or expose folders, such as
+`Include`, piped logs, `<Directory>` or an `Alias` to an absolute path: see `lampo:services-logs`):
 
 ```powershell
 lampo project set shop --ext intl,gd,soap --ini memory_limit=512M --ini upload_max_filesize=64M --service redis --service mailpit

@@ -8,6 +8,7 @@ mod packages;
 mod projects;
 mod scaffold;
 mod settings;
+mod untrusted_config;
 mod worktrees;
 
 use crate::context::CallContext;

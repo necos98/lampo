@@ -95,6 +95,12 @@ export const it = {
 		importHelp: 'Crea un progetto da un file di configurazione esportato.',
 		importFile: 'File di configurazione',
 		importRoot: 'Cartella del progetto (facoltativa)',
+		importDroppedTitle: 'Alcune impostazioni del file non sono state importate',
+		importDroppedHelp:
+			'Il file può arrivare da altri: le impostazioni che possono eseguire codice su questo computer non vengono mai importate. Controllale e, solo se ti fidi, riaggiungile nelle impostazioni del progetto.',
+		importDroppedIni: 'Chiavi php.ini escluse',
+		importDroppedDirectives: 'Direttive Apache escluse',
+		openImported: 'Apri il progetto',
 		exportFileType: 'Configurazione di progetto Lampo',
 		saveAsPreset: 'Salva come preset',
 		saveAsPresetHelp: "Riusa questa configurazione per i prossimi progetti.",
@@ -184,6 +190,7 @@ export const it = {
 			title: 'Direttive Apache personalizzate',
 			help: 'Aggiunte al virtual host del progetto. Lampo verifica la configurazione prima di applicarla.',
 			rejected: 'Apache ha rifiutato la configurazione:',
+			refused: 'Lampo non accetta queste direttive: possono eseguire programmi o esporre file del disco. Usa blocchi <Location> o il file .htaccess.',
 			placeholder: '# es. SetEnv APP_ENV local'
 		}
 	},

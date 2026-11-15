@@ -234,11 +234,11 @@ async fn export_and_import_dedupe_ids_and_regenerate_addresses() {
     let same_root = import.execute(ImportProjectRequest { file: "D:\\shop.toml".into(), root: None }, &gui()).await.unwrap_err();
     assert_eq!(same_root.code, ErrorCode::Conflict);
     let dto = import.execute(ImportProjectRequest { file: "D:\\shop.toml".into(), root: Some("D:\\copy\\shop".into()) }, &gui()).await.unwrap();
-    assert_eq!(dto.id, "shop-2");
-    assert!(!dto.active);
-    assert_eq!(dto.urls, ["http://shop-2.test", "http://shop-2.localhost"]);
-    assert_eq!(dto.database_name.as_deref(), Some("shop_2"));
-    assert_eq!(dto.environment.service_version("mysql"), Some("8.4"));
+    assert_eq!(dto.project.id, "shop-2");
+    assert!(!dto.project.active);
+    assert_eq!(dto.project.urls, ["http://shop-2.test", "http://shop-2.localhost"]);
+    assert_eq!(dto.project.database_name.as_deref(), Some("shop_2"));
+    assert_eq!(dto.project.environment.service_version("mysql"), Some("8.4"));
 }
 
 /// H1 regression: an imported project keeps its exported addresses, including a loopback port.

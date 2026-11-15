@@ -22,6 +22,7 @@ pub mod logs;
 pub mod packages;
 pub mod presets;
 pub mod project_patch;
+pub mod project_transfer;
 pub mod projects;
 pub(crate) mod requirements;
 pub mod resolution;
@@ -50,9 +51,8 @@ pub use logs::LogQueries;
 pub use packages::{InstallPackage, InstallPackageDeps, PackageCatalog, PackageCatalogDeps, PhpExtensionListing, PhpExtensionsQuery, UninstallPackage, UninstallPackageDeps};
 pub use presets::{DeletePreset, PresetQueries, SavePreset};
 pub use project_patch::PatchProjectEnvironment;
-pub use projects::{
-    CreateProject, DeleteProject, DetectProject, ExportProject, ImportProject, ProjectQueries, ProjectWriter, RelinkProject, SetProjectActive, SetProjectPhp, SuggestAddresses, UpdateProject,
-};
+pub use project_transfer::{ExportProject, ImportProject};
+pub use projects::{CreateProject, DeleteProject, DetectProject, ProjectQueries, ProjectWriter, RelinkProject, SetProjectActive, SetProjectPhp, SuggestAddresses, UpdateProject};
 pub use resolution::SiteResolver;
 pub use scaffold::{ScaffoldProject, ScaffoldProjectDeps};
 pub use service_catalog::ServiceCatalog;

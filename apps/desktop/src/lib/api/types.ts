@@ -231,6 +231,15 @@ export interface ImportProjectRequest {
 	root: string | null;
 }
 
+/** `importProject` result: the project plus the settings of the file that were left out because
+ *  they could run code on this machine (the user reviews them and adds back what they trust). */
+export interface ImportProjectResult extends Project {
+	/** The export's custom Apache directives, verbatim; `null` when it had none. */
+	droppedApacheDirectives: string | null;
+	/** php.ini keys left out (`auto_prepend_file`, `extension`, …), as written in the file. */
+	droppedPhpIniKeys: string[];
+}
+
 export interface Detection {
 	folder: string;
 	projectType: string | null;

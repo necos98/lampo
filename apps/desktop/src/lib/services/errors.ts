@@ -22,3 +22,14 @@ export function errorOutput(value: unknown): string | null {
 	const d = err.details as { output?: unknown } | undefined;
 	return typeof d?.output === 'string' ? d.output : null;
 }
+
+/** `details.field` of a validation error about the project's custom Apache directives. */
+const APACHE_DIRECTIVES_FIELD = 'apacheDirectives';
+
+/** Why Lampo refused the custom Apache directives (which directive, which line), if it did. */
+export function refusedDirectivesReason(value: unknown): string | null {
+	const err: AppError = toAppError(value);
+	if (err.code !== 'validation') return null;
+	const d = err.details as { field?: unknown; reason?: unknown } | undefined;
+	return d?.field === APACHE_DIRECTIVES_FIELD && typeof d.reason === 'string' ? d.reason : null;
+}

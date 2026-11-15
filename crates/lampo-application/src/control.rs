@@ -70,6 +70,9 @@ pub enum ControlRequest {
     ProjectPatch(ProjectPatchRequest),
     /// → `null`
     ProjectDelete { project_id: String },
+    /// Imports an exported project (`lampo project import`). → [`ImportProjectResultDto`] (a
+    /// [`ProjectDto`] plus what was left out of the file)
+    ProjectImport(ImportProjectRequest),
     /// → [`SyncReportDto`]
     ServicesUp(ServicesRequest),
     /// → [`SyncReportDto`]
@@ -144,6 +147,7 @@ pub struct ControlServices {
     pub set_project_php: Arc<SetProjectPhp>,
     pub patch_project: Arc<PatchProjectEnvironment>,
     pub delete_project: Arc<DeleteProject>,
+    pub import_project: Arc<ImportProject>,
     pub service_control: Arc<ServiceControl>,
     pub environment: Arc<dyn EnvironmentSync>,
     pub install_package: Arc<InstallPackage>,
@@ -191,6 +195,7 @@ impl ControlDispatcher {
             ControlRequest::ProjectSetPhp(r) => to_json(s.set_project_php.execute(r, ctx).await?),
             ControlRequest::ProjectPatch(r) => to_json(s.patch_project.execute(r, ctx).await?),
             ControlRequest::ProjectDelete { project_id } => to_json(s.delete_project.execute(&project_id, ctx).await?),
+            ControlRequest::ProjectImport(r) => to_json(s.import_project.execute(r, ctx).await?),
             ControlRequest::ServicesUp(r) => to_json(s.service_control.up(r, ctx).await?),
             ControlRequest::ServicesDown(r) => to_json(s.service_control.down(r).await?),
             ControlRequest::ServicesRestart(r) => to_json(s.service_control.restart(r).await?),

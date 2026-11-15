@@ -18,6 +18,7 @@
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import * as Tabs from '#lib/components/ui/tabs/index.js';
 	import { messages as m } from '#lib/messages/index.js';
+	import { refusedDirectivesReason } from '#lib/services/errors.js';
 	import { projects } from '#lib/stores/index.js';
 	import { ProjectDraft } from '#lib/stores/projectDraft.svelte.js';
 
@@ -58,7 +59,7 @@
 		if (result.ok) draft.reset(result.value);
 		else {
 			saveError = result.error;
-			if (result.error.code === 'config-rejected') tab = 'apache';
+			if (result.error.code === 'config-rejected' || refusedDirectivesReason(result.error) !== null) tab = 'apache';
 		}
 	}
 

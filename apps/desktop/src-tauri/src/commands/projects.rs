@@ -87,7 +87,7 @@ pub fn export_project(state: State<'_, AppState>, request: ExportProjectRequest)
 }
 
 #[tauri::command]
-pub async fn import_project(state: State<'_, AppState>, request: ImportProjectRequest) -> AppResult<ProjectDto> {
+pub async fn import_project(state: State<'_, AppState>, request: ImportProjectRequest) -> AppResult<ImportProjectResultDto> {
     state.import_project.execute(request, &CallContext::GUI).await
 }
 

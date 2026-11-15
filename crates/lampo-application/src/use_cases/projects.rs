@@ -4,7 +4,6 @@
 //! [`LoopbackPortAllocator`] lock, after `project::check_conflicts` against every project *and
 //! every worktree environment*. The rule cannot be skipped by forgetting an optional builder.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use lampo_domain::address::SiteAddress;
@@ -13,7 +12,7 @@ use lampo_domain::events::DomainEvent;
 use lampo_domain::mysql::DatabaseName;
 use lampo_domain::package::PackageKind;
 use lampo_domain::php::PhpMinor;
-use lampo_domain::ports::{EventPublisher, FileSystemInspector, InstalledPackageRegistry, ProjectDetector, ProjectRepository, ProjectTransfer, SettingsRepository, WorktreeRepository};
+use lampo_domain::ports::{EventPublisher, FileSystemInspector, InstalledPackageRegistry, ProjectDetector, ProjectRepository, SettingsRepository, WorktreeRepository};
 use lampo_domain::preset::Preset;
 use lampo_domain::project::{DisplayName, Project, ProjectEnvironment, ProjectId, ProjectRoot, TlsMode, check_conflicts, unique_project_id};
 use lampo_domain::service::ServiceKind;
@@ -37,7 +36,7 @@ fn folder_name(root: &ProjectRoot) -> String {
 }
 
 /// An existing absolute folder, or `Validation`.
-fn existing_folder(fs: &dyn FileSystemInspector, raw: &str) -> AppResult<ProjectRoot> {
+pub(super) fn existing_folder(fs: &dyn FileSystemInspector, raw: &str) -> AppResult<ProjectRoot> {
     let root = ProjectRoot::new(raw)?;
     if !fs.is_dir(root.as_path()) {
         return Err(validation(format!("folder `{root}` does not exist")));
@@ -150,9 +149,12 @@ pub struct ProjectWriter {
 }
 
 impl ProjectWriter {
-    /// Validates `candidate` against every project and worktree environment (`check_conflicts`)
-    /// and saves it. Call only inside an allocator commit (`snap` comes from it).
-    fn save_checked(&self, snap: &SiteSnapshot, candidate: &Project, is_new: bool) -> AppResult<()> {
+    /// Validates `candidate` (its custom Apache directives against the current policy, its
+    /// services, its conflicts with every project and worktree environment) and saves it. Call
+    /// only inside an allocator commit (`snap` comes from it).
+    pub(super) fn save_checked(&self, snap: &SiteSnapshot, candidate: &Project, is_new: bool) -> AppResult<()> {
+        // A stored project may predate a rule: it loads, but is never saved again unfixed.
+        candidate.environment.apache_directives.validate()?;
         self.services.validate_environment(&candidate.environment)?;
         check_conflicts(&snap.projects, &snap.worktrees, candidate, is_new, &snap.settings)?;
         self.projects.save(candidate)?;
@@ -180,7 +182,7 @@ impl ProjectWriter {
         Ok(project)
     }
 
-    fn changed(&self, id: &ProjectId) {
+    pub(super) fn changed(&self, id: &ProjectId) {
         self.events.publish(DomainEvent::ProjectsChanged { changed: vec![id.clone()] });
     }
 
@@ -313,10 +315,8 @@ impl UpdateProject {
                 project.name = name;
                 project.set_addresses(addresses)?;
                 project.set_environment(environment)?;
-                if project.environment.mysql().is_some() {
-                    if let Some(db) = database {
-                        project.database = Some(db);
-                    }
+                if let Some(db) = database {
+                    project.set_database_name(db);
                 }
                 project.tls = TlsMode::Disabled;
                 Ok(true)
@@ -447,69 +447,6 @@ impl RelinkProject {
                 Ok(true)
             })
             .await?;
-        self.writer.finish(&project, ctx).await
-    }
-}
-
-pub struct ExportProject {
-    projects: Arc<dyn ProjectRepository>,
-    transfer: Arc<dyn ProjectTransfer>,
-}
-
-impl ExportProject {
-    pub fn new(projects: Arc<dyn ProjectRepository>, transfer: Arc<dyn ProjectTransfer>) -> Self {
-        Self { projects, transfer }
-    }
-
-    pub fn execute(&self, request: ExportProjectRequest) -> AppResult<()> {
-        let project = load_project(self.projects.as_ref(), &request.project_id)?;
-        if request.file.trim().is_empty() {
-            return Err(validation("an export file is required"));
-        }
-        Ok(self.transfer.export_to(&project, Path::new(request.file.trim()))?)
-    }
-}
-
-/// Imports an exported config (inactive), optionally re-rooted, de-duplicating the id.
-pub struct ImportProject {
-    writer: ProjectWriter,
-    transfer: Arc<dyn ProjectTransfer>,
-    fs: Arc<dyn FileSystemInspector>,
-}
-
-impl ImportProject {
-    pub fn new(writer: ProjectWriter, transfer: Arc<dyn ProjectTransfer>, fs: Arc<dyn FileSystemInspector>) -> Self {
-        Self { writer, transfer, fs }
-    }
-
-    /// The imported project is always inactive. `root` (if given) must exist; without it the
-    /// exported folder is kept even if missing here (relink later). When the id is already
-    /// taken it gets a numeric suffix and its addresses are regenerated for the new id (the old
-    /// ones would collide with the existing project). Exported addresses are otherwise kept and
-    /// validated like any other save (`Conflict` when a loopback port belongs to another site).
-    pub async fn execute(&self, request: ImportProjectRequest, ctx: &CallContext) -> AppResult<ProjectDto> {
-        let mut project = self.transfer.import_from(Path::new(request.file.trim()))?;
-        if let Some(raw) = request.root.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-            project.relink(existing_folder(self.fs.as_ref(), raw)?);
-        }
-        project.set_active(false);
-        let project = self
-            .writer
-            .allocator
-            .reserve(|snap| {
-                let id = unique_project_id(&snap.projects, &project.id);
-                if id != project.id {
-                    project.set_addresses(SiteAddress::defaults_for(id.as_str(), &snap.settings.tld)?)?;
-                    if project.database.is_some() {
-                        project.database = Some(DatabaseName::from_slug(id.as_str())?);
-                    }
-                    project.id = id;
-                }
-                self.writer.save_checked(snap, &project, true)?;
-                Ok(project)
-            })
-            .await?;
-        self.writer.changed(&project.id);
         self.writer.finish(&project, ctx).await
     }
 }

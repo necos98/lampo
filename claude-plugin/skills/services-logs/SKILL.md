@@ -109,7 +109,12 @@ starting services); report the others (VC++ downloads, other programs on a port)
   directives: `lampo project set --apache-directives "<text>"` replaces them all (`""` clears;
   from a file in PowerShell: `--apache-directives (Get-Content .\lampo.conf -Raw)`). Lampo
   validates them with `httpd -t`; a rejected configuration comes back as exit 12 with
-  `details.output` (the project is saved: fix or clear the directives).
+  `details.output` (the project is saved: fix or clear the directives). Directives that run
+  programs, load code or expose folders are refused up front (validation error, nothing
+  saved): `Include`, `LoadModule`, `Define`, piped or out-of-folder logs (`CustomLog "|…"`),
+  `ScriptAlias`, `RewriteMap`, `Fcgid*`, `<Directory>`, `Alias` or `RewriteRule` to a disk
+  path, the `file` expression function, `SetEnv PATH`/`PHPRC`. The error names the line and
+  the directive (`details.reason`). Use `<Location>` blocks or `.htaccess` instead.
 
 ### The site does not open at all
 

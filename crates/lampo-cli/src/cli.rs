@@ -235,6 +235,25 @@ pub enum ProjectCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Register a project exported from Lampo (a `.lampo.toml` file, e.g. from another machine)
+    ///
+    /// The imported project is inactive and uses HTTP. The file may come from someone else, so
+    /// what could run code on this machine is NEVER imported: its custom Apache directives and
+    /// the php.ini keys auto_prepend_file, auto_append_file, extension, zend_extension,
+    /// extension_dir, open_basedir, disable_functions and include_path. They are listed in the
+    /// output (`--json`: `droppedApacheDirectives`, `droppedPhpIniKeys`) with a warning on
+    /// stderr: review them, then add back what you trust with `lampo project set`. An id
+    /// already in use gets a numeric suffix and new addresses. A hosts-file name (`shop.test`)
+    /// needs `--allow-elevation` (exit 7, nothing imported, otherwise).
+    ///
+    /// Example: lampo project import D:\exports\shop.lampo.toml --root C:\sites\shop
+    Import {
+        /// The exported file (relative paths resolve against the current directory).
+        file: String,
+        /// The project's folder on this machine, when it is not the exported one.
+        #[arg(long)]
+        root: Option<String>,
+    },
 }
 
 #[derive(Debug, Args)]

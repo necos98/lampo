@@ -6,6 +6,7 @@
 mod db;
 mod diagnostics;
 mod packages;
+mod project_import;
 mod projects;
 mod services;
 mod settings;
