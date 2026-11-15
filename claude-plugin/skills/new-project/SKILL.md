@@ -20,8 +20,9 @@ lampo project create C:\sites\blog --preset wordpress --php 8.3 --activate
 
 Defaults come from detection: Laravel (`artisan` + `laravel/framework`), WordPress
 (`wp-config.php`), Symfony (`bin/console`), any `composer.json`, and Docker files
-(`compose.yaml`, `docker-compose.yml`, `Dockerfile`: the PHP of the image, MySQL/Redis
-services, warnings for PostgreSQL or Mailpit). To see those defaults before registering
+(`compose.yaml`, `docker-compose.yml`, `Dockerfile`: the PHP of the image, MySQL/Redis/Mailpit
+services (MailHog maps to Mailpit), warnings for PostgreSQL or search engines). To see those
+defaults before registering
 anything (read-only; `alreadyRegistered` names the project if the folder is one already):
 
 ```powershell
@@ -34,7 +35,7 @@ Options:
 |--------|--------|
 | `--name <display name>` | default: the folder name |
 | `--id <id>` | used in URLs and the database name (default: from the name, `my-shop`) |
-| `--preset <id>` | `laravel`, `wordpress`, `symfony`, `generic-php`, `legacy` (PHP 7.4 + MySQL 5.7), or a custom preset |
+| `--preset <id>` | `laravel`, `wordpress`, `symfony`, `generic-php` (these four include Mailpit for mail), `legacy` (PHP 7.4 + MySQL 5.7), or a custom preset |
 | `--php <x.y>` | PHP minor; default: the preset's (the newest), raised to `composer.json` `require.php` |
 | `--activate` | serve it right away (otherwise `lampo project activate <id>` later) |
 | `--no-database` | do not create the MySQL database |

@@ -1,6 +1,6 @@
 ---
 name: services-logs
-description: Lampo services, logs and troubleshooting: `lampo status`, `lampo up/down/restart`, `lampo logs` (Apache, per-site access/error/PHP logs, MySQL, Redis), `lampo doctor`, and a playbook for HTTP 500 errors, 404s and broken rewrites, ports already in use, MySQL that will not start, the wrong PHP version and missing extensions. Use when the user says "the page gives a 500 error", "blank page", "404 on every route", "the site does not open", "port 80/3306 is in use", "MySQL does not start", "show me the logs", "restart Apache", or anything else is broken in the local Lampo environment.
+description: Lampo services, logs and troubleshooting: `lampo status`, `lampo up/down/restart`, `lampo logs` (Apache, per-site access/error/PHP logs, MySQL, Redis, Mailpit), the Mailpit web UI for caught mail, `lampo doctor`, and a playbook for HTTP 500 errors, 404s and broken rewrites, ports already in use, MySQL that will not start, the wrong PHP version and missing extensions. Use when the user says "the page gives a 500 error", "blank page", "404 on every route", "the site does not open", "port 80/3306 is in use", "MySQL does not start", "show me the logs", "restart Apache", "where are the emails", "open Mailpit", or anything else is broken in the local Lampo environment.
 ---
 
 # Services, logs and troubleshooting
@@ -13,7 +13,7 @@ lampo status
 ```
 
 `hints` in `agent context` often names the problem (project not active, no worktree
-environment, Composer missing). `status` lists each service (`apache`, `mysql-8.4`, `redis`...)
+environment, Composer missing). `status` lists each service (`apache`, `mysql-8.4`, `redis`, `mailpit`...)
 with state, port and PID, and the projects; without the app running the states are `unknown`.
 
 ## Services
@@ -29,6 +29,26 @@ lampo down redis
 headless if needed). Starting and restarting are allowed. Stopping (`lampo down`, `lampo quit`)
 affects every project: only when the user asks or the task needs it. Apache is restarted
 automatically when a project's configuration changes; `lampo restart apache` is rarely needed.
+
+## Mail (Mailpit)
+
+One shared Mailpit catches the mail of every project that uses it (`--service mailpit`; new
+Laravel, Symfony, WordPress and generic PHP projects have it): SMTP on 127.0.0.1:1025, web UI
+at http://127.0.0.1:8025 by default. `agent context` gives the actual values in `mail`
+(`smtpPort`, `webUrl`); `lampo status` shows `1025, ui 8025` in the port column. Messages are
+kept across restarts (a database in Lampo's data folder, newest 500).
+
+```powershell
+lampo up mailpit
+lampo logs mailpit --tail 30
+Invoke-RestMethod http://127.0.0.1:8025/api/v1/messages
+```
+
+It starts by itself with the projects that use it. "Where did my email go": open the web UI
+link for the user, or query the API above (`messages[].Subject`, `To`) to check a mail arrived.
+Nothing is ever delivered to real recipients. PHP `mail()` already uses it through php.ini;
+frameworks need `MAIL_MAILER=smtp`, `MAIL_HOST=127.0.0.1`, `MAIL_PORT=<smtpPort>`, no
+authentication or encryption (`lampo:laravel`).
 
 ## Logs
 
@@ -46,7 +66,7 @@ lampo logs php:shop@fix-login --tail 30
 `error` (Apache's error log for the virtual host, including PHP-CGI crashes and rewrite
 errors), `php` (PHP's own error log: warnings, fatals, uncaught exceptions); add `:<site>` for
 another site. Service sources: `apache`, `apache-error`, `mysql-<series>`,
-`mysql-<series>-error`, `redis`. `--follow` (`-f`) streams until Ctrl+C: avoid it in agent runs,
+`mysql-<series>-error`, `redis`, `mailpit`. `--follow` (`-f`) streams until Ctrl+C: avoid it in agent runs,
 use `--tail` / `--since` instead. Framework logs live in the project (Laravel:
 `storage\logs\laravel.log`): read them directly.
 
@@ -101,7 +121,8 @@ starting services); report the others (VC++ downloads, other programs on a port)
 
 ### Port already in use (exit 5, doctor `ports` error, a service that stops at once)
 
-Find the owner of the port (80 Apache, 3306 MySQL 8.4, 6379 Redis, or the one reported):
+Find the owner of the port (80 Apache, 3306 MySQL 8.4, 6379 Redis, 1025/8025 Mailpit, or the one
+reported):
 
 ```powershell
 Get-NetTCPConnection -LocalPort 80 -State Listen | Select-Object LocalAddress, OwningProcess
@@ -114,8 +135,9 @@ user what you found and ASK before stopping anything that is not Lampo; it is th
 Alternatives: stop the other program from its own UI, or, with the user's yes, move Lampo's
 service to a free port: `lampo settings` shows the ports, then for example
 `lampo settings set --apache-port 8080`, `lampo settings set --mysql-port 8.4=3310` or
-`lampo settings set --redis-port 6380` (a port taken by another program or Lampo site is
-refused, exit 5). Then `lampo up`, and update `DB_PORT` / `REDIS_PORT` / `APP_URL` in the
+`lampo settings set --redis-port 6380`; Mailpit has two ports, SMTP and its web UI:
+`lampo settings set --port mailpit=2025 --ui-port mailpit=9025` (a port taken by another program or Lampo site is
+refused, exit 5). Then `lampo up`, and update `DB_PORT` / `REDIS_PORT` / `MAIL_PORT` / `APP_URL` in the
 `.env` files of the sites the output lists.
 
 ### MySQL does not start

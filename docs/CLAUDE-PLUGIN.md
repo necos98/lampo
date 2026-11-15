@@ -31,12 +31,12 @@ Tutte in inglese (descrizioni comprese), invocate come `lampo:<id>`:
 | Skill | Contenuto |
 |-------|-----------|
 | `lampo` | Orientamento (`lampo agent context --json`), risoluzione del sito, `--json`, exit code e cosa fare per ciascuno, regole di autonomia, indice delle altre skill |
-| `php` | Shim, `lampo exec`/`lampo env`, versioni di PHP (`package list --installed`, `package install/uninstall`), estensioni (`package extensions`) e componenti aggiuntivi (Xdebug, php-redis), valori php.ini, cambio versione |
+| `php` | Shim, `lampo exec`/`lampo env`, versioni di PHP (`package list --installed`, `package install/uninstall`), estensioni (`package extensions`) e componenti aggiuntivi (Xdebug, php-redis), valori php.ini (anche `mail()` verso Mailpit), cambio versione |
 | `database` | Credenziali, `lampo db list/create/import/export/drop`, `.env`, database per i test, modalità dei worktree, regole di sicurezza |
 | `worktrees` | `lampo worktree up/down/list/prune`, modalità shared/fresh/clone, flusso consigliato con più agent |
-| `services-logs` | Servizi, log, `lampo doctor`, playbook (500, 404/rewrite, porte occupate, MySQL, PHP sbagliato, estensioni) |
+| `services-logs` | Servizi, log, `lampo doctor`, posta raccolta da Mailpit (interfaccia web, API), playbook (500, 404/rewrite, porte occupate, MySQL, PHP sbagliato, estensioni) |
 | `new-project` | `project detect`, `project create`, `project new --git/--laravel`, preset, indirizzi, attivazione, `project rename`/`project remove`, indirizzi dopo la creazione (`project set --address`) |
-| `laravel` | `.env` per MySQL/Redis di Lampo, migrazioni, queue e scheduler da terminale, test su database dedicato, Vite, Xdebug, errori comuni |
+| `laravel` | `.env` per MySQL/Redis/Mailpit di Lampo, migrazioni, queue e scheduler da terminale, test su database dedicato, Vite, Xdebug, errori comuni |
 | `migrate` | Procedura di migrazione da Docker/Sail, Laragon, XAMPP/WAMP, Herd (file di riferimento `docker.md`, `laragon.md`, `xampp-wamp.md`, `herd.md`) |
 
 Regole per chi scrive le skill:
@@ -103,7 +103,8 @@ senza registrare nulla) e la schermata "Aggiungi progetto" usano anche il rileva
 `docker-compose.yml`, i `Dockerfile` (anche in `docker/` e `.docker/`) e i runtime di Laravel
 Sail. È un indizio "di ambiente" (`ENVIRONMENT_ONLY`): non sceglie il tipo né il preset, ma si
 unisce a quello vincente (`combine_hints`) con il PHP dell'immagine, i servizi (`mysql`,
-`redis`) e gli avvisi (PostgreSQL non supportato, MariaDB, Mailpit, motori di ricerca). La
-creazione aggiunge i servizi rilevati non versionati che il preset non ha (Redis). Laragon,
+`redis`, `mailpit`: anche MailHog diventa Mailpit, con un avviso) e gli avvisi (PostgreSQL non
+supportato, MariaDB, motori di ricerca). La
+creazione aggiunge i servizi rilevati non versionati che il preset non ha (Redis, Mailpit). Laragon,
 XAMPP e Herd non lasciano marcatori affidabili nella cartella del progetto: li copre la skill
 `lampo:migrate`.

@@ -1,6 +1,6 @@
 ---
 name: lampo
-description: Core guide to Lampo, the local PHP environment for Windows (Apache, any PHP version, MySQL, Redis, per-git-worktree environments) and its `lampo` CLI. Use whenever the project is served by Lampo or the user mentions Lampo, its local URL (*.localhost, 127.0.0.1:81xx), its PHP version, database, services or shims, or asks "what is my local URL", "which PHP does this project use", "is Lampo running", "why did the lampo command fail" (exit codes). Explains how to orient with `lampo agent context --json`, site resolution, JSON output and exit codes, what the agent may do alone and what needs the user's approval, and which specialised `lampo:` skill to load next.
+description: Core guide to Lampo, the local PHP environment for Windows (Apache, any PHP version, MySQL, Redis, Mailpit for caught mail, per-git-worktree environments) and its `lampo` CLI. Use whenever the project is served by Lampo or the user mentions Lampo, its local URL (*.localhost, 127.0.0.1:81xx), its PHP version, database, services or shims, or asks "what is my local URL", "which PHP does this project use", "is Lampo running", "why did the lampo command fail" (exit codes). Explains how to orient with `lampo agent context --json`, site resolution, JSON output and exit codes, what the agent may do alone and what needs the user's approval, and which specialised `lampo:` skill to load next.
 ---
 
 # Lampo
@@ -8,13 +8,14 @@ description: Core guide to Lampo, the local PHP environment for Windows (Apache,
 Lampo is a desktop app plus a CLI that serves PHP projects locally on Windows, without Docker
 and without Windows services: one Apache (mod_fcgid) with a virtual host per project, any PHP
 from 5.6 up chosen per project, shared MySQL instances (one per series: 8.4, 5.7), optional
-Redis, and a separate environment for every git worktree. Lampo owns these processes; you drive
+Redis, a shared Mailpit that catches the sites' mail (SMTP 1025, web UI http://127.0.0.1:8025),
+and a separate environment for every git worktree. Lampo owns these processes; you drive
 it with `lampo`. If `lampo` is not on PATH, use `%LOCALAPPDATA%\Lampo\bin\lampo.exe`.
 
 Lampo is a "ghost" integration: it never writes files into the user's project for its own sake.
 Never create `AGENTS.md`, `CLAUDE.md`, `.claude/settings.json` or any Lampo config file in the
 project, and never install anything into the project just for Lampo. Editing the app's own
-`.env` (database, Redis, `APP_URL`) is normal project work and is fine.
+`.env` (database, Redis, mail, `APP_URL`) is normal project work and is fine.
 
 ## 1. Orient first
 
@@ -28,7 +29,8 @@ lampo agent context --json
 
 One read-only JSON document (works when the app is not running): `resolution` (how the site was
 found), `projectId`, `root`, `worktree`, `url` / `urls`, `documentRoot`, `php` (version, binary,
-ini dir, Composer), `database` (host, port, user, password, database), `services` (with ports),
+ini dir, Composer), `database` (host, port, user, password, database), `mail` (Mailpit: host,
+`smtpPort`, `webUrl`, when the site uses it), `services` (with ports),
 `logs` (source ids and files), `commands`, `cli.exitCodes`, `hints`. Read the `hints`: they say
 what to run next (for example "project is not active", "no worktree environment is up").
 
@@ -93,10 +95,11 @@ You MAY, without asking:
 - create databases (`lampo db create`) and worktree environments (`lampo worktree up` with any
   `--db` mode);
 - run `php`, `composer`, `php artisan`, `mysql`, `redis-cli` through the shims or `lampo exec`;
-- write the database, Redis and `APP_URL` values Lampo reports into the project's `.env`;
+- write the database, Redis, mail and `APP_URL` values Lampo reports into the project's `.env`;
 - install a package the current task needs when a command fails with exit code 10 (say so);
 - enable what the task needs with `lampo project set`: a bundled extension (`--ext`), an add-on
-  (`--addon xdebug`), a php.ini value (`--ini`), Redis (`--service redis`); say what you changed.
+  (`--addon xdebug`), a php.ini value (`--ini`), Redis (`--service redis`), Mailpit
+  (`--service mailpit`); say what you changed.
 
 You MUST ASK the user first, and wait for a clear yes, before:
 
@@ -104,7 +107,7 @@ You MUST ASK the user first, and wait for a clear yes, before:
   (it writes into an existing database), `php artisan migrate:fresh` / `db:wipe` /
   `migrate:reset` on a database that is not a throwaway one;
 - using `--allow-elevation` (it opens a UAC prompt);
-- changing ports or other global settings with `lampo settings set` (Apache, MySQL, Redis
+- changing ports or other global settings with `lampo settings set` (Apache, MySQL, Redis, Mailpit
   ports, default PHP, loopback range): they affect every project and restart running services;
 - changing the PHP version of a main project (`lampo project set-php`), or with
   `lampo project set` removing a service, switching its MySQL series, or changing its database
@@ -133,6 +136,10 @@ that is not Lampo (Laragon, XAMPP, Docker, IIS) without the user's explicit appr
   The `mysql` shim already selects it: `mysql -N -B -e "SHOW TABLES"`. Always pass SQL with
   `-e`, never open the interactive prompt (details: `lampo:database`).
 - Lampo never edits `.env`; copy the values from `agent context` when the app needs them.
+- Mail: projects using Mailpit (`--service mailpit`, on by default for new Laravel, Symfony,
+  WordPress and generic PHP projects) send to SMTP `127.0.0.1:1025` (no auth, no TLS; PHP
+  `mail()` already does through php.ini) and the mails show up at `http://127.0.0.1:8025`;
+  nothing reaches real recipients. Read the ports from `mail` in `agent context`.
 - A project's environment is edited with `lampo project set` (extensions, add-ons, php.ini
   values, services, database name, public folder, Apache directives; see
   `lampo project set --help`). Only what you name changes; worktree environments follow the
@@ -140,9 +147,10 @@ that is not Lampo (Laragon, XAMPP, Docker, IIS) without the user's explicit appr
   `--no-address`; unregistering: `lampo project remove --yes`, with the user's yes (see
   `lampo:new-project`).
 - Global settings: `lampo settings` shows them; with the user's yes,
-  `lampo settings set --apache-port 8080`, `--mysql-port 8.4=3310` or `--redis-port 6380`
+  `lampo settings set --apache-port 8080`, `--mysql-port 8.4=3310`, `--redis-port 6380` or
+  `--port mailpit=2025` (Mailpit's web UI: `--ui-port mailpit=9025`)
   moves a service (the port is checked first; running services restart on it). Then update
-  `DB_PORT` / `REDIS_PORT` / `APP_URL` in the `.env` files of the sites the output lists.
+  `DB_PORT` / `REDIS_PORT` / `MAIL_PORT` / `APP_URL` in the `.env` files of the sites the output lists.
   The configured MySQL series themselves cannot be added or removed, only their ports.
 
 ## 6. Load the specialised skill
@@ -152,7 +160,7 @@ that is not Lampo (Laragon, XAMPP, Docker, IIS) without the user's explicit appr
 | PHP versions, extensions, Xdebug, php.ini, shims, `lampo exec` | `lampo:php` |
 | Databases: create, import, export, drop, `.env`, worktree database modes | `lampo:database` |
 | One environment per git worktree, parallel agents | `lampo:worktrees` |
-| Services, logs, `lampo doctor`, 500/404 errors, ports, MySQL not starting | `lampo:services-logs` |
+| Services, logs, `lampo doctor`, 500/404 errors, ports, MySQL not starting, caught mail (Mailpit) | `lampo:services-logs` |
 | Register a folder (preview detection first), clone a repository, new Laravel app, addresses, rename or remove a project | `lampo:new-project` |
 | Laravel on Lampo: `.env`, migrations, queues, scheduler, tests, Vite | `lampo:laravel` |
 | Move a project from Docker/Sail, Laragon, XAMPP/WAMP or Herd to Lampo | `lampo:migrate` |

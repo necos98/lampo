@@ -12,7 +12,7 @@ exist. Read only: never edit their config files or data folders.
 | PHP (one version) | `C:\xampp\php\php.exe`, `C:\xampp\php\php.ini` |
 | Database | **MariaDB** in current XAMPP releases, under `C:\xampp\mysql\` (`bin\mysqldump.exe`, `bin\mysql.exe`, config `bin\my.ini`, data `data\`) |
 | Control panel | `C:\xampp\xampp-control.exe`; Apache/MySQL may also be installed as Windows services |
-| Mail | `C:\xampp\sendmail\` (not provided by Lampo) |
+| Mail | `C:\xampp\sendmail\` (not needed on Lampo: with `--service mailpit` PHP `mail()` goes to Lampo's Mailpit, web UI http://127.0.0.1:8025) |
 
 ```powershell
 C:\xampp\php\php.exe -v

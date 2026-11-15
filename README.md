@@ -5,7 +5,7 @@
 <h1 align="center">Lampo</h1>
 
 Lampo è un ambiente di sviluppo PHP locale per Windows: un'app desktop che scarica e gestisce
-Apache, PHP, MySQL e Redis e serve ogni progetto al suo indirizzo, senza Docker e senza servizi di
+Apache, PHP, MySQL, Redis e Mailpit e serve ogni progetto al suo indirizzo, senza Docker e senza servizi di
 Windows. Include la CLI `lampo`, pensata anche per i coding agent.
 
 ## Funzionalità
@@ -13,6 +13,9 @@ Windows. Include la CLI `lampo`, pensata anche per i coding agent.
 - **Un solo Apache** con un virtual host per progetto.
 - **Qualsiasi versione di PHP dalla 5.6 in su**, scelta per progetto e scaricata da windows.php.net.
 - **MySQL condiviso** con un'istanza per versione e **Redis** facoltativo.
+- **Mailpit** per la posta: la posta inviata dai progetti (anche con `mail()` di PHP) resta sul
+  computer e si legge nell'interfaccia web (`http://127.0.0.1:8025`, SMTP su `127.0.0.1:1025`);
+  attivo di serie nei nuovi progetti Laravel, Symfony, WordPress e PHP generico.
 - **Riconoscimento del progetto** (Laravel, WordPress, Symfony, Composer; da Docker Compose e
   Laravel Sail anche PHP e servizi) con preset di configurazione.
 - **Indirizzi senza permessi di amministratore**: `<progetto>.localhost` e una porta dedicata su

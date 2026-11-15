@@ -38,7 +38,10 @@ lampo project detect C:\sites\shop --json
 Image to Lampo mapping: `php:<x.y>-*` -> PHP x.y; `mysql:5.7` -> MySQL 5.7 (`--preset legacy`
 or the 5.7 service); `mysql:8.x` -> MySQL 8.4; `mariadb:*` -> MySQL 8.4 (caveats in
 SKILL.md); `postgres:*` -> **not supported** (stop, SKILL.md); `redis:*` / `valkey/*` -> Redis;
-`mailpit`, `mailhog`, `meilisearch`, `elasticsearch`, `minio`... -> not provided, keep them in
+`axllent/mailpit` -> Mailpit (`--service mailpit`); `mailhog/mailhog` -> Mailpit too (same SMTP
+usage, port 1025; MailHog's web UI and API on 8025 differ, so scripts calling MailHog's API need
+updating);
+`meilisearch`, `elasticsearch`, `minio`... -> not provided, keep them in
 Docker and point `.env` at their published port (`127.0.0.1:<host port>`).
 
 ## Laravel Sail
@@ -48,6 +51,10 @@ Docker and point `.env` at their published port (`127.0.0.1:<host port>`).
   uses images such as `laravelsail/php82-composer`).
 - Sail defaults in `.env`: `DB_HOST=mysql`, `DB_USERNAME=sail`, `DB_PASSWORD=password`,
   `REDIS_HOST=redis`, `MAIL_HOST=mailpit`, `APP_PORT`/`FORWARD_DB_PORT` for published ports.
+  On Lampo: `MAIL_HOST=127.0.0.1`, `MAIL_PORT=1025` (`mail.smtpPort` in `agent context`);
+  Sail's `mailpit` container and `FORWARD_MAILPIT_PORT` / `FORWARD_MAILPIT_DASHBOARD_PORT` are no
+  longer needed (the web UI is `http://127.0.0.1:8025`). Stop the container before `lampo up`
+  if it publishes 1025 or 8025.
 - On Windows a Sail project normally lives in WSL (`\\wsl$\Ubuntu\home\<user>\shop`, or
   `\\wsl.localhost\...`). Lampo serves Windows folders: clone the repository into a Windows
   folder (`lampo project new --git <url> --in C:\sites`) or copy it (with the user's agreement,
@@ -84,15 +91,16 @@ docker compose stop
 ```
 
 `stop` keeps containers and volumes (`docker compose start` brings them back). Never use
-`down -v`. Keep the services Lampo does not provide (Mailpit, Meilisearch) running if the app
-needs them: `docker compose stop laravel.test mysql redis` stops only the replaced ones.
+`down -v`. Keep the services Lampo does not provide (Meilisearch...) running if the app
+needs them: `docker compose stop laravel.test mysql redis mailpit` stops only the replaced ones
+(the Mailpit container must stop too: it holds ports 1025/8025).
 
 ## `.env` changes (after a backup)
 
 `DB_HOST=127.0.0.1`, `DB_PORT` from Lampo, `DB_USERNAME=root`, `DB_PASSWORD=` (empty),
 `DB_DATABASE` = the Lampo database, `REDIS_HOST=127.0.0.1`, `APP_URL` = the Lampo URL,
-`MAIL_HOST=127.0.0.1` + the published Mailpit port if it keeps running in Docker (else
-`MAIL_MAILER=log`). Remove nothing else; `php artisan config:clear`.
+`MAIL_MAILER=smtp`, `MAIL_HOST=127.0.0.1`, `MAIL_PORT` = `mail.smtpPort` from Lampo (1025), no
+username, password or encryption. Remove nothing else; `php artisan config:clear`.
 
 ## Rollback
 

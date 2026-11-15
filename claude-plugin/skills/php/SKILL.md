@@ -1,6 +1,6 @@
 ---
 name: php
-description: PHP toolchain of a Lampo project on Windows: the php/composer/mysql/mysqldump/redis-cli shims, `lampo exec` and `lampo env`, installing PHP versions and add-ons (Xdebug, the Redis extension) with `lampo package install`, enabling extensions and php.ini values, and switching a project's PHP version. Use when the user asks which PHP runs, "php -v shows the wrong version", "install PHP 8.3", "enable Xdebug", "missing extension intl/gd/redis", "raise memory_limit", "switch this project to PHP 8.4", or when composer/php commands must run with the project's toolchain.
+description: PHP toolchain of a Lampo project on Windows: the php/composer/mysql/mysqldump/redis-cli shims, `lampo exec` and `lampo env`, installing PHP versions and add-ons (Xdebug, the Redis extension) with `lampo package install`, enabling extensions and php.ini values (including `mail()` through Mailpit), and switching a project's PHP version. Use when the user asks which PHP runs, "php -v shows the wrong version", "install PHP 8.3", "enable Xdebug", "missing extension intl/gd/redis", "raise memory_limit", "mail() does not work", "switch this project to PHP 8.4", or when composer/php commands must run with the project's toolchain.
 ---
 
 # PHP on Lampo
@@ -45,7 +45,8 @@ lampo exec -- composer run-script post-install-cmd
 
 Everything after `--` is the command line; stdio is inherited; the exit code is the child's
 (`--json` is ignored). `lampo env` prints the same environment (PATH additions, `PHPRC`,
-`LAMPO_PROJECT`, `LAMPO_PHP_VERSION`, `LAMPO_DB_HOST`, `LAMPO_DB_PORT`...). To load it into
+`LAMPO_PROJECT`, `LAMPO_PHP_VERSION`, `LAMPO_DB_HOST`, `LAMPO_DB_PORT`, `LAMPO_MAIL_HOST`,
+`LAMPO_MAIL_PORT`...). To load it into
 the current shell:
 
 ```powershell
@@ -158,6 +159,17 @@ php -d memory_limit=-1 artisan migrate
 php --ini
 php -i
 ```
+
+### `mail()`
+
+PHP's `mail()` on Windows speaks SMTP to the `SMTP` / `smtp_port` php.ini values. For a site
+that uses Mailpit (`lampo project set --service mailpit`), Lampo's php.ini already sets
+`SMTP = 127.0.0.1`, `smtp_port = <Mailpit's SMTP port>` (1025 by default) and
+`sendmail_from = lampo@localhost`, so `mail()` works with no setup and the message appears in
+Mailpit's web UI (`mail.webUrl` in `agent context`). A project's own `--ini SMTP=...` /
+`--ini smtp_port=...` / `--ini sendmail_from=...` values win. Sites without Mailpit get none
+of these (PHP's defaults: `localhost:25`, so `mail()` fails). Check with
+`php -r "var_dump(mail('test@example.com', 'Test', 'Hello'));"` (prints `bool(true)`).
 
 ## Composer
 

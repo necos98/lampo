@@ -15,7 +15,7 @@ Read only: do not edit anything under `C:\laragon`.
 | Active versions | `C:\laragon\usr\laragon.ini` (sections such as `[php]`, `[mysql]`, `Version=`) |
 | MySQL / MariaDB | `C:\laragon\bin\mysql\mysql-<version>-winx64\bin\` (`mysqldump.exe`, `mysql.exe`); MariaDB builds are also possible, `mariadb-<version>` |
 | Database data | `C:\laragon\data\mysql-<major>` or `C:\laragon\data\mysql` (do not touch) |
-| Redis, Memcached, mail | `C:\laragon\bin\redis\`, `C:\laragon\bin\memcached\`, Laragon's mail catcher/sendmail settings |
+| Redis, Memcached, mail | `C:\laragon\bin\redis\`, `C:\laragon\bin\memcached\`, Laragon's mail catcher/sendmail settings (on Lampo: Mailpit, `--service mailpit`; PHP `mail()` needs no sendmail) |
 
 Commands (read-only):
 

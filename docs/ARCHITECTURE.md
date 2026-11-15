@@ -1,8 +1,9 @@
 # Lampo: architecture
 
 A lightweight local PHP development environment for Windows: one Apache (mod_fcgid) with a
-virtual host per project, any PHP from 5.6 up, shared MySQL instances per version, optional Redis,
-per-git-worktree environments for parallel coding agents. Rust core + Tauri 2 + SvelteKit GUI,
+virtual host per project, any PHP from 5.6 up, shared MySQL instances per version, optional Redis
+and Mailpit (a shared SMTP catcher with a web UI), per-git-worktree environments for parallel
+coding agents. Rust core + Tauri 2 + SvelteKit GUI,
 plus an agent-friendly `lampo` CLI and `.exe` shims for `php`, `composer`, `mysql`, `mysqldump`
 and `redis-cli`.
 
@@ -28,7 +29,7 @@ and `redis-cli`.
 | `crates/lampo-infra-store` | TOML repositories (projects, worktrees, settings, presets), app paths, app location file, shim index file, shim installer (shims + CLI copy), project detectors, git metadata reader, user PATH, clock, generated agent-plugin files | Lampo's own files |
 | `crates/lampo-infra-packages` | Embedded + windows.php.net catalogs, downloader, SHA-256, zip extraction, installed registry, VC++ runtime detection, post-install hooks | Where binaries come from |
 | `crates/lampo-infra-web` | Apache config templates + `httpd -t` + runner, php.ini rendering, hosts-file block via the elevated `lampo-hosts-helper` | Apache/PHP/hosts specifics |
-| `crates/lampo-infra-services` | Job Object supervisor, MySQL/Redis runners, port probe, log files, `DatabaseAdmin` (plain, `.sql.gz` and single-`.sql` `.zip` dumps, (de)compressed while streaming), control named pipe, headless app launcher, `claude` CLI runner | Local processes and IPC |
+| `crates/lampo-infra-services` | Job Object supervisor, MySQL/Redis/Mailpit runners, port probe, log files, `DatabaseAdmin` (plain, `.sql.gz` and single-`.sql` `.zip` dumps, (de)compressed while streaming), control named pipe, headless app launcher, `claude` CLI runner | Local processes and IPC |
 | `crates/lampo-cli` | `lampo` CLI and `lampo-shim` (copied as `php.exe` etc.): two composition roots (`src/composition.rs`, `src/bin/lampo-shim.rs`, which registers the shim tools) | CLI surface |
 | `claude-plugin` | Claude Code plugin sources: `skills/<skill-id>/SKILL.md` + reference files and `icon.png` (embedded as is), trigger evals and a dev manifest (repository only) | What agents are taught |
 | `apps/desktop` | SvelteKit GUI (`src/lib/api` typed API, `src/lib/messages` Italian strings) and `src-tauri` (Tauri commands, tray, composition root) | GUI |
@@ -38,12 +39,38 @@ traits are small and role-specific; new package kinds, presets, project detector
 shim tools, doctor checks and service kinds are added by implementing a trait and registering
 it in the composition roots.
 
-A **service kind** (MySQL, Redis, a future PostgreSQL or Mailpit) is data: a
-`ServiceDescriptor` (default port, data dir, error log, client defaults, versioned or not;
-built-ins in `lampo_domain::service::builtin`) plus a `ServiceRunner`. Projects list the
-services they use (`environment.services`), settings list the configured instances
-(`services`); Apache stays special as the web tier. Files written before this (`mysql`/`redis`
-fields, `mysql_instances`/`redis_port`, shim index v1) are migrated on read.
+A **service kind** (MySQL, Redis, Mailpit, a future PostgreSQL) is data: a
+`ServiceDescriptor` (default port, data dir, error log, client defaults, versioned or not,
+optional second port and php.ini contributions; built-ins in `lampo_domain::service::builtin`)
+plus a `ServiceRunner`. Projects list the services they use (`environment.services`), settings
+list the configured instances (`services`); Apache stays special as the web tier. Files written
+before this (`mysql`/`redis` fields, `mysql_instances`/`redis_port`, shim index v1) are migrated
+on read; a settings file that lacks a built-in unversioned instance (Mailpit, added later)
+gets it with its default ports, moved up past any port already taken.
+
+**Two-port services.** An instance has its main `port` plus an optional `ui_port`
+(`ServiceInstanceSettings`, written only when set) for kinds whose descriptor has a
+`default_ui_port` (Mailpit: SMTP 1025, web UI 8025). `ServiceCatalog::ui_port` is the configured
+value or the default; `ServiceLaunch::ports()` lists both, and every free-port check (sync,
+`lampo up`, the runner, `doctor`), `Settings::validate` (distinct ports) and
+`Settings::service_on_port` (loopback allocation) cover the UI port too. The settings patch
+takes `serviceUiPorts` (`lampo settings set --ui-port mailpit=9025`; SMTP stays
+`--port mailpit=1025`) and reports the change as `mailpit.ui-port`; the GUI edits it under the
+instance's port. DTOs expose `uiPort`/`uiUrl` on service statuses and instances (omitted for
+single-port kinds).
+
+**Mailpit** (`MailpitRunner`, `crates/lampo-infra-services/src/mailpit.rs`) is one shared,
+unversioned instance started on demand like Redis: `mailpit.exe --smtp 127.0.0.1:<port>
+--listen 127.0.0.1:<ui_port> --database <data>\mailpit\data\mailpit.db
+--smtp-auth-accept-any --smtp-auth-allow-insecure --smtp-disable-rdns --disable-version-check`,
+output captured to `output.log` (`lampo logs mailpit`). Ready = SMTP `220` greeting and the UI
+port accepting; stop = terminate (Mailpit has no shutdown command). Sites using it get
+`SMTP = 127.0.0.1`, `smtp_port = <port>`, `sendmail_from = lampo@localhost` in their php.ini
+(`ServiceDescriptor::php_ini`, merged between Lampo's base values and the project's own, which
+win), a `mail` object (host, SMTP port, web URL) in `ProjectDto` and `agent context`, and
+`LAMPO_MAIL_HOST`/`_PORT` from `lampo env` (the package folder goes on PATH like a client dir:
+`mailpit sendmail`). The laravel, wordpress, symfony and generic-php presets include it; the
+Docker detector maps `axllent/mailpit` and `mailhog/mailhog` (with a warning) to it.
 
 Loopback ports are handed out by one `LoopbackPortAllocator` (shared by project creation and
 `worktree up`), which also serialises every project save with its conflict check.

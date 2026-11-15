@@ -1,6 +1,6 @@
 ---
 name: migrate
-description: Move an existing PHP project to Lampo from another local environment: Docker or docker-compose (including Laravel Sail), Laragon, XAMPP, WampServer or Laravel Herd for Windows. Covers the inventory of the old setup, compatibility checks (PHP, MySQL vs MariaDB, PostgreSQL not supported, nginx rules, Mailpit and search engines), registering the project, moving the database with the user's confirmation, updating .env, freeing ports 80/3306, verification, and a summary with rollback steps. Use when the user says "migrate/port/move this project to Lampo", "switch from Laragon/XAMPP/WAMP/Herd/Docker/Sail to Lampo", "import my Docker setup into Lampo", or wants to stop using their old local stack.
+description: Move an existing PHP project to Lampo from another local environment: Docker or docker-compose (including Laravel Sail), Laragon, XAMPP, WampServer or Laravel Herd for Windows. Covers the inventory of the old setup, compatibility checks (PHP, MySQL vs MariaDB, PostgreSQL not supported, nginx rules, Mailpit/MailHog now provided by Lampo, search engines), registering the project, moving the database with the user's confirmation, updating .env, freeing ports 80/3306, verification, and a summary with rollback steps. Use when the user says "migrate/port/move this project to Lampo", "switch from Laragon/XAMPP/WAMP/Herd/Docker/Sail to Lampo", "import my Docker setup into Lampo", or wants to stop using their old local stack.
 ---
 
 # Migrating a project to Lampo
@@ -38,8 +38,9 @@ lampo project detect C:\laragon\www\shop --json
 ```
 
 It returns `projectType`, `presetId`, `phpVersion` (the minimum from `composer.json` or the
-Docker image), `suggestedId`, `evidence`, `services` (from a compose file: `mysql`, `redis`),
-`warnings` (what Lampo cannot provide: PostgreSQL, MariaDB, Mailpit, search engines) and
+Docker image), `suggestedId`, `evidence`, `services` (from a compose file: `mysql`, `redis`,
+`mailpit` for a Mailpit or MailHog container),
+`warnings` (what Lampo cannot provide or replaces: PostgreSQL, MariaDB, MailHog, search engines) and
 `alreadyRegistered` (an id: the folder is a Lampo project already, do not create it again).
 Compare it with your inventory: where they differ, your inventory wins and you pass `--php` /
 `--preset` in step 3. `lampo project list` and `lampo status` show what Lampo already knows.
@@ -56,7 +57,7 @@ Write the inventory down for the user in a short table before changing anything.
 | Redis / Valkey | Redis, optional per project |
 | Apache + `.htaccess` | identical: Apache 2.4 with `AllowOverride All` and mod_rewrite |
 | nginx-only rules | translate to `.htaccess` or to the project's Apache directives (`lampo project set --apache-directives "<rules>"`) |
-| Mailpit, MailHog | not provided: `MAIL_MAILER=log`, or keep the catcher running outside Lampo |
+| Mailpit, MailHog, Herd/Laragon mail catchers | Mailpit, shared and per project (`--service mailpit`; new Laravel/Symfony/WordPress projects have it): SMTP `127.0.0.1:1025`, web UI `http://127.0.0.1:8025`. MailHog's SMTP side is a drop-in; its UI/API differ |
 | Meilisearch, Elasticsearch, OpenSearch, Typesense, MinIO, RabbitMQ, Memcached | not provided: keep running them where they are (Docker, native) and point `.env` at them |
 | HTTPS (`herd secure`, Laragon SSL) | not available yet: use `http://` |
 | Cron, Supervisor, Horizon | no services: run `php artisan schedule:work` / `queue:work` in a terminal (`lampo:laravel`) |
@@ -97,7 +98,7 @@ Then reproduce what the inventory found and the preset lacks, in one call (add-o
 `--apache-directives`):
 
 ```powershell
-lampo project set shop --ext intl,gd,soap --ini memory_limit=512M --ini upload_max_filesize=64M --service redis
+lampo project set shop --ext intl,gd,soap --ini memory_limit=512M --ini upload_max_filesize=64M --service redis --service mailpit
 lampo project set shop --public-dir public --service mysql@5.7
 ```
 
@@ -123,9 +124,11 @@ project (Sail) copy them too.
 ## Step 5: update `.env`
 
 Copy the current `.env` to the backup folder, then change only the connection lines (database,
-Redis, mail host, `APP_URL`) to the values of `lampo agent context --json`. Typical changes:
+Redis, mail host and port, `APP_URL`) to the values of `lampo agent context --json`. Typical changes:
 `DB_HOST=mysql` / `DB_HOST=db` -> `127.0.0.1`, `DB_USERNAME=sail` -> `root`, empty
-`DB_PASSWORD`, `REDIS_HOST=redis` -> `127.0.0.1`, `APP_URL=http://shop.test` -> the Lampo URL.
+`DB_PASSWORD`, `REDIS_HOST=redis` -> `127.0.0.1`, `MAIL_HOST=mailpit` / `mailhog` -> `127.0.0.1`
+with `MAIL_PORT` = `mail.smtpPort` (1025) and no `MAIL_USERNAME` / `MAIL_PASSWORD` /
+`MAIL_ENCRYPTION`, `APP_URL=http://shop.test` -> the Lampo URL.
 Then `php artisan config:clear` (Laravel). WordPress: `wp-config.php` instead (and the site URL
 stored in the database, see xampp-wamp.md).
 
@@ -135,7 +138,8 @@ would need the backed-up `.env` to work again.
 ## Step 6: ports and the old services
 
 Lampo's Apache needs port 80 and MySQL 8.4 port 3306 (by default); the old stack usually holds
-the same ports. Check with `lampo doctor` (`ports`) and `lampo status`. Then, with the user's
+the same ports (a Mailpit/MailHog container or Herd's mail service often holds 1025/8025, which
+Lampo's Mailpit needs). Check with `lampo doctor` (`ports`) and `lampo status`. Then, with the user's
 yes, stop the old services from their own tool (the reference names it): stopping is
 reversible, deleting is not done. Alternatively, if the user prefers to keep the old stack
 running, move Lampo's services instead, again only after the user's yes (it changes the ports
@@ -172,7 +176,8 @@ End with a summary for the user:
 - what was created in Lampo: project id, URL, PHP, database name and what was imported;
 - files changed in the project (`.env`, `wp-config.php`) and where the backups are;
 - services of the old environment that were stopped, and anything left unsupported
-  (PostgreSQL, Mailpit, search engines) and how it is handled now;
+  (PostgreSQL, search engines) and how it is handled now; where caught mail is now (the Mailpit
+  web UI link);
 - how to roll back:
   1. restore `.env` (or `wp-config.php`) from the backup folder;
   2. `lampo project deactivate <id>`, or, only if the user wants it gone from Lampo,

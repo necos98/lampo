@@ -15,7 +15,7 @@ version). Read only: do not run commands that change Herd (`herd isolate`, `herd
 | PHP binaries | Herd's `bin` folder under `%USERPROFILE%\.config\herd\` (added to PATH by Herd) |
 | Per-site PHP | set with `herd isolate <version>`; read it with the commands below |
 | Databases (Herd Pro) | MySQL, PostgreSQL, Redis... configured in Herd's "Services" window, each with its own port |
-| Mail, dumps (Herd Pro) | Herd's mail and dump tools: not provided by Lampo |
+| Mail, dumps (Herd Pro) | Herd's mail service: replaced by Lampo's Mailpit (`--service mailpit`, SMTP 127.0.0.1:1025, web UI http://127.0.0.1:8025; set `MAIL_HOST`/`MAIL_PORT` from `agent context`, stop Herd's mail service if it holds 1025). Dumps: not provided |
 
 Read-only commands (run them in the site folder):
 

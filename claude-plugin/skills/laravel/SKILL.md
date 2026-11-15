@@ -1,6 +1,6 @@
 ---
 name: laravel
-description: Running a Laravel application on Lampo (Windows): .env for Lampo's MySQL and Redis, APP_URL, key generation, migrations and seeders, queue workers and the scheduler in a terminal (no Windows services), tests with a dedicated database, Vite/npm, Xdebug, mail without Mailpit, and common Laravel errors on Lampo. Use when the project has an `artisan` file and the user asks to "set up the .env", "run the migrations", "start the queue worker", "run the scheduler", "run the tests", "configure Redis/cache/sessions", "debug with Xdebug", or reports a Laravel error (SQLSTATE, No application encryption key, Vite manifest not found, 419, Class Redis not found).
+description: Running a Laravel application on Lampo (Windows): .env for Lampo's MySQL and Redis, APP_URL, key generation, migrations and seeders, queue workers and the scheduler in a terminal (no Windows services), tests with a dedicated database, Vite/npm, Xdebug, mail caught by Mailpit, and common Laravel errors on Lampo. Use when the project has an `artisan` file and the user asks to "set up the .env", "run the migrations", "start the queue worker", "run the scheduler", "run the tests", "configure Redis/cache/sessions", "debug with Xdebug", "set up mail", "where do the emails go", or reports a Laravel error (SQLSTATE, No application encryption key, Vite manifest not found, 419, Class Redis not found).
 ---
 
 # Laravel on Lampo
@@ -11,7 +11,7 @@ Core rules: `lampo:lampo`. Get the facts first:
 lampo agent context --json
 ```
 
-Use `url`, `database` and `services` from it. `php` and `composer` are shims with the
+Use `url`, `database`, `mail` and `services` from it. `php` and `composer` are shims with the
 project's PHP: run `php artisan ...` directly in the project folder (or in a worktree with its
 own environment, `lampo:worktrees`).
 
@@ -134,9 +134,30 @@ The IDE listens on port 9003.
 
 ## Mail
 
-Lampo has no mail catcher (no Mailpit or MailHog). Use `MAIL_MAILER=log` (mails go to
-`storage\logs\laravel.log`) unless the user runs their own catcher; then set `MAIL_HOST` and
-`MAIL_PORT` to it.
+Lampo runs one shared Mailpit: it accepts every mail on plain SMTP and shows it in a web UI;
+nothing leaves the machine. When the project uses it, `agent context` has a `mail` object
+(`host`, `smtpPort`, `webUrl`) and `services` lists `mailpit`. Read the port from there (the
+default is 1025, but the user may have moved it):
+
+```dotenv
+MAIL_MAILER=smtp
+MAIL_HOST=127.0.0.1
+MAIL_PORT=1025
+MAIL_USERNAME=null
+MAIL_PASSWORD=null
+MAIL_ENCRYPTION=null
+```
+
+- No authentication and no TLS: leave username, password and encryption empty/`null` (Mailpit
+  accepts any credentials anyway). Keep the project's `MAIL_FROM_ADDRESS`.
+- The caught mails are at `webUrl` (default `http://127.0.0.1:8025`); give the user that link.
+  Mailpit's API there (`/api/v1/messages`) lets you check that a mail was sent.
+- Mailpit starts by itself while a served project uses it. If the project does not use it
+  (no `mail` in `agent context`), enable it with `lampo project set --service mailpit` (say
+  so); `--no-service mailpit` turns it off. Without it use `MAIL_MAILER=log` (mails go to
+  `storage\logs\laravel.log`).
+- Plain PHP `mail()` needs no setup: Lampo's php.ini for the site already points `SMTP` and
+  `smtp_port` at Mailpit.
 
 ## Common errors
 
@@ -150,6 +171,7 @@ Lampo has no mail catcher (no Mailpit or MailHog). Use `MAIL_MAILER=log` (mails 
 | `Class "Redis" not found` | enable the `php-redis` add-on, or `REDIS_CLIENT=predis` with the package. |
 | `419 Page Expired` | `APP_URL` / `SESSION_DOMAIN` do not match the URL in the browser; clear cookies. |
 | 404 on every route | document root must be `public` (`lampo:services-logs`). |
+| `Connection could not be established with host "mailpit"` / port 1025 refused | `MAIL_HOST=127.0.0.1`, `MAIL_PORT` from `mail.smtpPort`; `lampo up mailpit` if it is not running. |
 | Changes to `.env` ignored | `php artisan optimize:clear`. |
 | `Vite manifest not found` | `npm run build`, or `npm run dev` running. |
 | Composer platform error | the project's PHP is too old or an extension is missing (`lampo:php`). |
