@@ -44,13 +44,31 @@ pub fn hint_for(code: ErrorCode) -> &'static str {
     }
 }
 
+/// The hint for `error`: its code's, plus the `--allow-elevation` one when another failure of
+/// the same operation needs elevation (`details.errors` of a sync, e.g. an `ElevationRequired`
+/// that came after a `PortInUse`).
+pub fn hint(error: &AppError) -> String {
+    let own = hint_for(error.code);
+    if error.code != ErrorCode::ElevationRequired && also_failed_with(error, ErrorCode::ElevationRequired) {
+        return format!("{own} Also: {}", hint_for(ErrorCode::ElevationRequired));
+    }
+    own.to_string()
+}
+
+/// `true` when `details.errors` (`[{code, message}]`) lists `code`.
+fn also_failed_with(error: &AppError, code: ErrorCode) -> bool {
+    let Ok(wanted) = serde_json::to_value(code) else { return false };
+    let errors = error.details.as_ref().and_then(|d| d.get("errors")).and_then(Value::as_array);
+    errors.is_some_and(|errors| errors.iter().any(|e| e.get("code") == Some(&wanted)))
+}
+
 /// The `error` object for an application error.
 pub fn error_object(error: &AppError) -> Value {
     let code = serde_json::to_value(error.code).unwrap_or_else(|_| json!("internal"));
     let mut object = json!({
         "code": code,
         "message": error.message,
-        "hint": hint_for(error.code),
+        "hint": hint(error),
         "exitCode": ExitCode::from(error.code).code(),
     });
     if let Some(details) = &error.details {
@@ -75,7 +93,7 @@ pub fn report(io: &Io, error: &AppError) -> i32 {
         io.out_line(&json!({ "error": error_object(error) }).to_string());
     }
     io.err_line(&format!("lampo: {}", error.message));
-    io.err_line(&format!("hint: {}", hint_for(error.code)));
+    io.err_line(&format!("hint: {}", hint(error)));
     ExitCode::from(error.code).code()
 }
 
@@ -180,6 +198,24 @@ mod tests {
         assert_eq!(report(&io, &AppError::new(ErrorCode::ElevationRequired, "hosts needs UAC")), 7);
         assert_eq!(out.text(), "");
         assert!(err.text().contains("--allow-elevation"));
+    }
+
+    #[test]
+    fn a_sync_that_also_needs_elevation_suggests_allow_elevation() {
+        let errors = json!({ "errors": [
+            { "code": "port-in-use", "message": "port 80 is in use" },
+            { "code": "elevation-required", "message": "the hosts file must be updated" },
+        ] });
+        let (io, out, err) = captured(true);
+        assert_eq!(report(&io, &AppError::new(ErrorCode::PortInUse, "port 80 is in use").with_details(errors)), 5, "the exit code is the first failure's");
+        let doc: Value = serde_json::from_str(out.text().trim()).unwrap();
+        let shown = doc["error"]["hint"].as_str().unwrap();
+        assert!(shown.starts_with(hint_for(ErrorCode::PortInUse)) && shown.contains("--allow-elevation"), "{shown}");
+        assert!(err.text().contains("--allow-elevation"));
+
+        let alone = AppError::new(ErrorCode::PortInUse, "port 80 is in use").with_details(json!({ "errors": [{ "code": "port-in-use", "message": "x" }] }));
+        assert_eq!(hint(&alone), hint_for(ErrorCode::PortInUse));
+        assert_eq!(hint(&AppError::new(ErrorCode::ElevationRequired, "x")), hint_for(ErrorCode::ElevationRequired), "not suggested twice");
     }
 
     #[test]

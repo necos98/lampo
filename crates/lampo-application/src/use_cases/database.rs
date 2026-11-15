@@ -7,15 +7,19 @@ use lampo_domain::progress::CancelFlag;
 use lampo_domain::project::Project;
 use lampo_domain::PortError;
 
+use super::service_leases::ServiceLease;
 use super::services::ServiceEnsurer;
 use super::support::{load_site, mysql_endpoint, validation};
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
 
-/// A site's MySQL instance (started on demand) and its own database.
+/// A site's MySQL instance (started on demand, leased while the target lives) and its own
+/// database.
 struct Target {
     endpoint: MysqlEndpoint,
     site_database: Option<DatabaseName>,
+    /// Keeps the instance running (no sync restarts it) while the operation uses it.
+    _lease: ServiceLease,
 }
 
 /// `lampo db …` on the MySQL instance of a site (project or worktree environment). Runs in the
@@ -46,12 +50,12 @@ impl DatabaseService {
         let (site_id, project, worktree) = load_site(self.projects.as_ref(), self.worktrees.as_ref(), site)?;
         let series = project.environment.mysql().ok_or_else(|| validation(format!("`{site_id}` does not use MySQL")))?;
         let endpoint = mysql_endpoint(self.installed.as_ref(), &self.settings.load()?, series)?;
-        self.services.ensure_running(series.service_id()).await?;
+        let lease = self.services.ensure_running(series.service_id()).await?;
         let site_database = match &worktree {
             Some(w) => w.database_name(&project).cloned(),
             None => project.database().cloned(),
         };
-        Ok(Target { endpoint, site_database })
+        Ok(Target { endpoint, site_database, _lease: lease })
     }
 
     /// `name`, or the site's own database.
@@ -109,7 +113,7 @@ impl DatabaseService {
             }
         };
         let created = match self.services.ensure_running(series.service_id()).await {
-            Ok(()) => match self.admin.create(&endpoint, &name).await {
+            Ok(_lease) => match self.admin.create(&endpoint, &name).await {
                 Ok(()) => Ok(DatabaseSetupStatusDto::Created),
                 Err(PortError::AlreadyExists { .. }) => Ok(DatabaseSetupStatusDto::AlreadyExists),
                 Err(e) => Err(AppError::from(e)),

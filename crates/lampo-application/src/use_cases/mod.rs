@@ -1,7 +1,7 @@
 //! Use cases. Each struct is one cohesive capability, built from `Arc<dyn Port>`s (and, where a
-//! use case composes another, from the application-level traits [`EnvironmentSync`] and
-//! [`ServiceEnsurer`]). Front-ends (Tauri commands, CLI, control-pipe dispatcher) only call these
-//! and map DTOs; they contain no business logic.
+//! use case composes another, from the application-level traits [`EnvironmentSync`],
+//! [`ServiceLifecycle`] and [`ServiceEnsurer`]). Front-ends (Tauri commands, CLI, control-pipe
+//! dispatcher) only call these and map DTOs; they contain no business logic.
 //!
 //! Which front-end may call what:
 //! * read-only, file-based use cases (queries, resolution, agent context, env, logs, doctor
@@ -31,6 +31,7 @@ pub(crate) mod requirements;
 pub mod resolution;
 pub mod scaffold;
 pub mod service_catalog;
+pub(crate) mod service_leases;
 pub mod services;
 pub mod settings;
 pub mod settings_patch;
@@ -38,6 +39,8 @@ pub mod settings_writer;
 pub mod shims;
 pub mod status;
 pub(crate) mod support;
+pub(crate) mod sync_outcome;
+pub(crate) mod web_apply;
 pub(crate) mod web_state;
 pub mod worktrees;
 
@@ -50,7 +53,7 @@ pub use diagnostics::{
     AppCheck, Doctor, DoctorCheck, DoctorDeps, DoctorFacts, FoldersCheck, HostsBlockCheck, PackagesCheck, PathShadowingCheck, PortsCheck, ShimsOnPathCheck, StaleWorktreesCheck,
     VcRuntimeCheck,
 };
-pub use environment::{ApplyEnvironment, ApplyEnvironmentDeps, EnvironmentSync};
+pub use environment::{ApplyEnvironment, ApplyEnvironmentDeps, EnvironmentSync, ServiceLifecycle};
 pub use lifecycle::{FirstRunDeps, FirstRunSetup, Shutdown, ShutdownGate, Startup};
 pub use logs::LogQueries;
 pub use package_uninstall::{UninstallPackage, UninstallPackageDeps};
@@ -64,6 +67,7 @@ pub use projects::{CreateProject, DeleteProject, DetectProject, ProjectQueries, 
 pub use resolution::SiteResolver;
 pub use scaffold::{ScaffoldProject, ScaffoldProjectDeps};
 pub use service_catalog::ServiceCatalog;
+pub use service_leases::ServiceLease;
 pub use services::{OfflineServiceStatus, ServiceControl, ServiceControlDeps, ServiceEnsurer, ServiceQueries, ServiceStatusSource};
 pub use settings::{SettingsQuery, SettingsService};
 pub use settings_patch::PatchSettings;

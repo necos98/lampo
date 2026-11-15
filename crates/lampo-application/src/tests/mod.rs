@@ -8,9 +8,11 @@ mod packages;
 mod project_saves;
 mod projects;
 mod scaffold;
+mod service_lifecycle;
 mod settings;
 mod uninstall;
 mod untrusted_config;
+mod web_isolation;
 mod worktrees;
 
 use crate::context::CallContext;

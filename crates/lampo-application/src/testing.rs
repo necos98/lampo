@@ -486,6 +486,11 @@ pub struct FakeDb {
     pub fail_drop_of: Mutex<BTreeSet<String>>,
     /// Present but missing from `list`: created by another client after the listing.
     pub unlisted: Mutex<BTreeSet<String>>,
+    /// While set, `import` announces itself on `import_started` and waits for `import_resumed`
+    /// (to act while an import runs).
+    pub hold_import: AtomicBool,
+    pub import_started: tokio::sync::Notify,
+    pub import_resumed: tokio::sync::Notify,
 }
 impl FakeDb {
     pub fn has(&self, name: &str) -> bool {
@@ -520,6 +525,10 @@ impl DatabaseAdmin for FakeDb {
         Ok(())
     }
     async fn import(&self, _e: &MysqlEndpoint, name: &DatabaseName, file: &Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
+        if self.hold_import.load(Ordering::SeqCst) {
+            self.import_started.notify_one();
+            self.import_resumed.notified().await;
+        }
         cancel.check()?;
         progress.report(Progress::new(ProgressStage::Configuring, 1, Some(1)));
         lock(&self.calls).push(format!("import:{name}:{}", file.display()));
@@ -941,15 +950,7 @@ impl World {
             paths: paths.clone(),
             events: events.clone(),
         }));
-        let service_control = Arc::new(ServiceControl::new(ServiceControlDeps {
-            runners,
-            catalog: services.clone(),
-            installed: installed.clone(),
-            settings: settings.clone(),
-            port_probe: ports.clone(),
-            paths: paths.clone(),
-            env: env.clone(),
-        }));
+        let service_control = Arc::new(ServiceControl::new(ServiceControlDeps { runners, catalog: services.clone(), settings: settings.clone(), lifecycle: env.clone(), env: env.clone() }));
         let allocator = Arc::new(LoopbackPortAllocator::new(projects.clone(), worktrees.clone(), settings.clone(), ports.clone()));
         Self {
             paths,

@@ -17,6 +17,7 @@ use lampo_domain::PortError;
 
 use super::allocation::LoopbackPortAllocator;
 use super::environment::EnvironmentSync;
+use super::service_leases::ServiceLease;
 use super::services::ServiceEnsurer;
 use super::support::{load_project, mysql_endpoint, sync_without_elevation, validation, worktree_dto};
 use crate::context::CallContext;
@@ -79,12 +80,13 @@ impl WorktreeDatabases {
         Self { projects, settings, installed, database, services }
     }
 
-    /// Starts the parent's MySQL instance if needed and returns its endpoint.
-    async fn mysql_for(&self, parent: &Project) -> AppResult<lampo_domain::ports::MysqlEndpoint> {
+    /// Starts the parent's MySQL instance if needed and returns its endpoint, with the lease
+    /// that keeps it running (no sync restarts it) while the caller uses it.
+    async fn mysql_for(&self, parent: &Project) -> AppResult<(lampo_domain::ports::MysqlEndpoint, ServiceLease)> {
         let series = parent.environment.mysql().ok_or_else(|| validation(format!("project `{}` does not use MySQL", parent.id)))?;
         let endpoint = mysql_endpoint(self.installed.as_ref(), &self.settings.load()?, series)?;
-        self.services.ensure_running(series.service_id()).await?;
-        Ok(endpoint)
+        let lease = self.services.ensure_running(series.service_id()).await?;
+        Ok((endpoint, lease))
     }
 
     /// The databases already on the parent's instance, which a new environment's own database
@@ -94,7 +96,7 @@ impl WorktreeDatabases {
         if *mode == DatabaseMode::Shared || parent.environment.mysql().is_none() {
             return Ok(Vec::new());
         }
-        let endpoint = self.mysql_for(parent).await?;
+        let (endpoint, _lease) = self.mysql_for(parent).await?;
         Ok(self.database.list(&endpoint).await?)
     }
 
@@ -104,7 +106,7 @@ impl WorktreeDatabases {
     /// dropped (best effort).
     async fn provision(&self, env: &WorktreeEnvironment, parent: &Project, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<()> {
         let WorktreeDatabase::Own { name, cloned_from } = &env.database else { return Ok(()) };
-        let endpoint = self.mysql_for(parent).await?;
+        let (endpoint, _lease) = self.mysql_for(parent).await?;
         cancel.check()?;
         let subject = env.site_id().to_string();
         match cloned_from {
@@ -130,7 +132,7 @@ impl WorktreeDatabases {
     async fn drop_owned(&self, env: &WorktreeEnvironment) -> AppResult<Option<DatabaseName>> {
         let Some(name) = env.owned_database() else { return Ok(None) };
         let parent = load_project(self.projects.as_ref(), env.parent.as_str())?;
-        let endpoint = self.mysql_for(&parent).await?;
+        let (endpoint, _lease) = self.mysql_for(&parent).await?;
         self.database.drop_database(&endpoint, name).await?;
         Ok(Some(name.clone()))
     }

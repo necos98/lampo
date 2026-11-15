@@ -248,6 +248,16 @@ CLI runs read-only, file-based commands itself (status offline, project/worktree
 named pipe (`lampo_application::control`), starting the app headless (`--headless`, tray only)
 when needed. Shims never talk to the app.
 
+Inside the app, `ApplyEnvironment` is the single owner of the service lifecycle: full syncs and
+single-service starts, restarts and stops (`lampo up/down/restart <service>`, database
+operations) share its lock and its record of each service's launch, so a service started
+outside a sync is still restarted when its configuration changes. A database operation (import,
+export, worktree database clone) holds a lease on its MySQL instance: while it runs, a sync
+postpones stopping or restarting that instance (with a warning) and a manual stop or restart is
+a `conflict`; the postponed change is applied once the last lease is released. A sync that fails
+returns its first failure, with every failure in `details.errors` (`[{code, message}]`); the
+CLI adds the `--allow-elevation` hint when one of them is `elevation-required`.
+
 `lampo` never prompts and never triggers UAC unless `--allow-elevation` is given.
 
 ### `lampo` exit codes (stable)

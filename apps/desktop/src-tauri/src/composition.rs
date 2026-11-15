@@ -138,10 +138,8 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let service_control = Arc::new(ServiceControl::new(ServiceControlDeps {
         runners: runners.clone(),
         catalog: service_catalog.clone(),
-        installed: installed.clone(),
         settings: settings.clone(),
-        port_probe: port_probe.clone(),
-        paths: paths.clone(),
+        lifecycle: environment.clone(),
         env: env.clone(),
     }));
     // Every settings save (GUI page, `lampo settings set`, default PHP adoption, first-run

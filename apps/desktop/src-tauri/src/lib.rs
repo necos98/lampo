@@ -39,7 +39,12 @@ pub fn run() {
         .setup(move |app| {
             let built = composition::build(app.handle().clone()).map_err(|e| e.message)?;
             let startup = built.state.startup.clone();
+            let environment = built.state.environment.clone();
             app.manage(built.state);
+
+            // Service restarts/stops a sync postponed while a database operation used the
+            // service, applied once the operation finishes.
+            tauri::async_runtime::spawn(async move { environment.apply_deferred_changes().await });
 
             // Control pipe for the CLI (single owner of service processes).
             let (server, handler) = (built.control_server, built.control_handler);

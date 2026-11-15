@@ -1,4 +1,5 @@
-//! Reconciling the machine with the configuration: the heart of Lampo.
+//! Reconciling the machine with the configuration: the heart of Lampo, and the single owner of
+//! the service lifecycle (full syncs and single-service starts/restarts/stops share one lock).
 
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
@@ -17,7 +18,11 @@ use lampo_domain::PortError;
 
 use super::generation::{ConfigSnapshot, php_ini_specs, runner_for, shim_index, web_config};
 use super::service_catalog::ServiceCatalog;
-use super::web_state::{WebOutcome, WebState};
+use super::service_leases::{ServiceLease, ServiceLeases};
+use super::support::sync_without_elevation;
+use super::sync_outcome::Outcome;
+use super::web_apply::apply_web_config;
+use super::web_state::WebState;
 use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::SyncReportDto;
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -33,6 +38,26 @@ pub trait EnvironmentSync: Send + Sync {
     /// shims and services using it move to the build that remains (restarted) or stop, so its
     /// files are no longer in use when the uninstall deletes them.
     async fn sync_without(&self, retiring: &PackageId, ctx: &CallContext) -> AppResult<SyncReportDto>;
+}
+
+/// One service outside a full sync (`lampo up/down/restart <service>`, database operations),
+/// serialised with the syncs so that both agree on what runs and with which launch.
+#[async_trait]
+pub trait ServiceLifecycle: Send + Sync {
+    /// Starts `service` unless it is up (its ports checked first: `PortInUse`). `Ok(true)` when
+    /// it was started now.
+    async fn ensure(&self, service: &ServiceId) -> AppResult<bool>;
+
+    /// [`Self::ensure`], then a lease keeping `service` running as it is until dropped: syncs
+    /// postpone stopping or restarting it, and apply that once the last lease is released.
+    async fn lease(&self, service: &ServiceId) -> AppResult<ServiceLease>;
+
+    /// Restarts `service` with its current configuration. `Conflict` while it is leased.
+    async fn restart(&self, service: &ServiceId) -> AppResult<()>;
+
+    /// Stops `service` unless it is stopped. `Ok(true)` when it was stopped now; `Conflict`
+    /// while it is leased.
+    async fn stop(&self, service: &ServiceId) -> AppResult<bool>;
 }
 
 pub struct ApplyEnvironmentDeps {
@@ -57,68 +82,56 @@ pub struct ApplyEnvironmentDeps {
 #[derive(Default)]
 struct SyncState {
     web: Option<WebState>,
-    /// Launch last used for each service this instance started or adopted.
+    /// Launch last used for each service this instance started or restarted.
     launches: HashMap<ServiceId, ServiceLaunch>,
 }
 
-/// Collects the outcome of one sync. Failures that do not prevent the other steps are kept as
-/// the *pending* error (the first one wins, later ones become warnings) and returned at the
-/// end, after everything else was applied.
-#[derive(Default)]
-struct Outcome {
-    report: SyncReportDto,
-    pending: Option<AppError>,
-}
-
-impl Outcome {
-    fn fail(&mut self, error: AppError) {
-        match &self.pending {
-            None => self.pending = Some(error),
-            Some(_) => self.report.warnings.push(error.message),
-        }
-    }
-
-    fn finish(self) -> AppResult<SyncReportDto> {
-        match self.pending {
-            None => Ok(self.report),
-            Some(mut e) => {
-                let report = serde_json::to_value(&self.report).unwrap_or_default();
-                let mut details = match e.details.take() {
-                    Some(serde_json::Value::Object(map)) => map,
-                    _ => serde_json::Map::new(),
-                };
-                details.insert("report".into(), report);
-                Err(e.with_details(serde_json::Value::Object(details)))
-            }
-        }
-    }
+/// `Running` or `Starting`.
+pub(crate) fn is_up(state: ServiceState) -> bool {
+    matches!(state, ServiceState::Running | ServiceState::Starting)
 }
 
 /// Steps, in order (each idempotent):
 /// 1. load projects, worktree environments, settings, installed packages;
 /// 2. write php.ini for every site and the default CLI ini, then regenerate the shim index;
 /// 3. build `WebServerConfig` (vhosts for active projects + all worktree environments) and
-///    `apply` it (staged + `httpd -t`). If Apache rejects it, every vhost is validated on its
-///    own, the broken ones are left out and the rest is applied, so one broken project never
-///    takes the others down; the rejection is still returned at the end. An unchanged rejected
+///    `apply` it (staged + `httpd -t`). If Apache rejects it, the broken vhosts are isolated
+///    (`web_apply`), left out and the rest is applied, so one broken project never takes the
+///    others down; the rejection is still returned at the end. An unchanged rejected
 ///    configuration is not validated again, an apply that failed for another reason (I/O, the
 ///    validator not starting) is retried on every sync;
 /// 4. hosts block: compute `HostsBlock::for_projects`; if different from `read_block`, write it —
 ///    only when `ctx.elevation == Allow`, otherwise remember the failure and continue;
 /// 5. `plan_services`: stop unneeded services, start missing ones (port check first), restart
-///    the ones whose configuration changed (Apache: config or php.ini);
-/// 6. return the report, or the first pending error (`ConfigRejected`, `ElevationRequired`,
-///    `ElevationDenied`, `PortInUse`, …) with the report in `details.report`.
+///    the ones whose configuration changed (Apache: config or php.ini). A leased service is
+///    neither stopped nor restarted: a warning says so and the change waits for the release;
+/// 6. return the report, or the first failure (`ConfigRejected`, `ElevationRequired`,
+///    `ElevationDenied`, `PortInUse`, …) with the report in `details.report` and every failure
+///    in `details.errors`.
 ///
-/// Missing packages are warnings, not errors. Serialises concurrent calls internally.
+/// Missing packages are warnings, not errors. Serialises concurrent calls, and the
+/// [`ServiceLifecycle`] calls, internally.
 pub struct ApplyEnvironment {
     deps: ApplyEnvironmentDeps,
     lock: tokio::sync::Mutex<SyncState>,
+    leases: Arc<ServiceLeases>,
 }
 
 impl ApplyEnvironment {
     pub fn new(deps: ApplyEnvironmentDeps) -> Self {
-        Self { deps, lock: tokio::sync::Mutex::new(SyncState::default()) }
+        Self { deps, lock: tokio::sync::Mutex::new(SyncState::default()), leases: Arc::default() }
+    }
+
+    /// Applies, with a sync, the changes postponed because a lease held the service, each time
+    /// the last such lease is released. Never returns: the composition root spawns it for the
+    /// app's lifetime. Never prompts for elevation; failures are only logged.
+    pub async fn apply_deferred_changes(&self) {
+        loop {
+            self.leases.deferred_released().await;
+            if let Err(e) = sync_without_elevation(self, &CallContext::GUI).await {
+                tracing::warn!("applying the service changes postponed by a database operation failed: {}", e.message);
+            }
+        }
     }
 
     /// The configuration and the installed packages, leaving out `retiring` (being uninstalled).
@@ -154,40 +167,8 @@ impl ApplyEnvironment {
         Ok(())
     }
 
-    /// Applies `desired`. Sites whose custom directives break the policy (stored before a rule
-    /// existed) are left out up front; on an Apache rejection the broken vhosts are isolated.
-    /// The rest is applied.
     async fn apply_web(&self, desired: &WebServerConfig, ini: &[PhpIniSpec]) -> WebState {
-        WebState { desired: desired.clone(), ini: ini.to_vec(), outcome: self.web_outcome(desired).await }
-    }
-
-    async fn web_outcome(&self, desired: &WebServerConfig) -> WebOutcome {
-        let (allowed, mut excluded) = leave_out_refused_directives(desired);
-        let output = match self.deps.web_config.apply(&allowed).await {
-            Ok(()) => return WebOutcome::Applied { exclusion: exclusion_error(&excluded) },
-            Err(PortError::ConfigRejected { output }) => output,
-            Err(e) => return WebOutcome::Failed(e.into()),
-        };
-        let refused = excluded.len();
-        let mut good = allowed.clone();
-        good.vhosts.clear();
-        for vhost in &allowed.vhosts {
-            let mut probe = good.clone();
-            probe.vhosts = vec![vhost.clone()];
-            match self.deps.web_config.apply(&probe).await {
-                Ok(()) => good.vhosts.push(vhost.clone()),
-                Err(PortError::ConfigRejected { output }) => excluded.push((vhost.site.to_string(), output)),
-                Err(e) => return WebOutcome::Failed(e.into()),
-            }
-        }
-        if excluded.len() == refused {
-            // Every vhost is fine alone: the problem is global or a combination.
-            return WebOutcome::Rejected(PortError::ConfigRejected { output }.into());
-        }
-        match self.deps.web_config.apply(&good).await {
-            Ok(()) => WebOutcome::Applied { exclusion: exclusion_error(&excluded) },
-            Err(e) => WebOutcome::from_port_error(e),
-        }
+        WebState { desired: desired.clone(), ini: ini.to_vec(), outcome: apply_web_config(self.deps.web_config.as_ref(), desired).await }
     }
 
     async fn sync_hosts(&self, snap: &ConfigSnapshot, ctx: &CallContext, out: &mut Outcome) {
@@ -224,6 +205,49 @@ impl ApplyEnvironment {
         })
     }
 
+    fn runner(&self, id: &ServiceId) -> AppResult<&Arc<dyn ServiceRunner>> {
+        runner_for(&self.deps.runners, id.kind()).ok_or_else(|| AppError::new(ErrorCode::Unsupported, format!("no runner is registered for {id}")))
+    }
+
+    /// The launch of `id` for the current configuration.
+    fn current_launch(&self, id: &ServiceId) -> AppResult<ServiceLaunch> {
+        self.deps.services.launch(id, &self.deps.settings.load()?, &self.deps.installed.list()?, &self.deps.paths)
+    }
+
+    /// `PortInUse` if one of `ports` is taken, otherwise `prepare` + `start`.
+    async fn start_with(&self, runner: &dyn ServiceRunner, launch: &ServiceLaunch, ports: &[u16]) -> AppResult<()> {
+        if let Some(busy) = self.port_busy(ports) {
+            return Err(busy);
+        }
+        runner.prepare(launch).await?;
+        Ok(runner.start(launch).await?)
+    }
+
+    async fn restart_with(runner: &dyn ServiceRunner, launch: &ServiceLaunch) -> AppResult<()> {
+        runner.prepare(launch).await?;
+        Ok(runner.restart(launch).await?)
+    }
+
+    /// `Conflict` while `id` is leased.
+    fn refuse_if_leased(&self, id: &ServiceId, action: &str) -> AppResult<()> {
+        if !self.leases.is_leased(id) {
+            return Ok(());
+        }
+        Err(AppError::new(ErrorCode::Conflict, format!("{id} is in use by a running database operation (import, export, clone): {action} it when the operation finishes")))
+    }
+
+    /// [`ServiceLifecycle::ensure`], with the lock held.
+    async fn ensure_locked(&self, state: &mut SyncState, id: &ServiceId) -> AppResult<bool> {
+        let runner = self.runner(id)?;
+        if is_up(runner.status(id).state) {
+            return Ok(false);
+        }
+        let launch = self.current_launch(id)?;
+        self.start_with(runner.as_ref(), &launch, &launch.ports()).await?;
+        state.launches.insert(id.clone(), launch);
+        Ok(true)
+    }
+
     async fn sync_services(&self, snap: &ConfigSnapshot, state: &mut SyncState, web_changed: bool, out: &mut Outcome) {
         let plan = plan_services(&snap.projects, &snap.worktrees, &snap.settings);
         let runners = &self.deps.runners;
@@ -233,7 +257,11 @@ impl ApplyEnvironment {
         let candidates: BTreeSet<ServiceId> = catalog.configured(&snap.settings).into_iter().chain(state.launches.keys().cloned()).collect();
         for id in candidates.iter().filter(|id| !plan.contains_key(id)) {
             let Some(runner) = runner_for(runners, id.kind()) else { continue };
-            if matches!(runner.status(id).state, ServiceState::Running | ServiceState::Starting) {
+            if is_up(runner.status(id).state) {
+                if self.leases.defer(id) {
+                    out.report.warnings.push(format!("{id} is no longer needed but a database operation is using it: it stops when the operation finishes"));
+                    continue;
+                }
                 match runner.stop(id).await {
                     Ok(()) => out.report.stopped.push(id.to_string()),
                     Err(e) => out.fail(e.into()),
@@ -267,20 +295,19 @@ impl ApplyEnvironment {
             if id.is_apache() && web.is_none_or(|w| w.outcome.blocks_apache()) {
                 continue;
             }
-            let running = matches!(runner.status(&id).state, ServiceState::Running | ServiceState::Starting);
-            if running {
+            if is_up(runner.status(&id).state) {
                 let changed = match web {
                     Some(_) => web_changed,
                     None => state.launches.get(&id).is_some_and(|previous| previous != &launch),
                 };
                 if changed {
-                    let result = match runner.prepare(&launch).await {
-                        Ok(()) => runner.restart(&launch).await,
-                        Err(e) => Err(e),
-                    };
-                    match result {
+                    if self.leases.defer(&id) {
+                        out.report.warnings.push(format!("{id} keeps its previous configuration while a database operation is using it: it restarts when the operation finishes"));
+                        continue;
+                    }
+                    match Self::restart_with(runner.as_ref(), &launch).await {
                         Ok(()) => out.report.restarted.push(id.to_string()),
-                        Err(e) => out.fail(e.into()),
+                        Err(e) => out.fail(e),
                     }
                 }
             } else {
@@ -288,66 +315,16 @@ impl ApplyEnvironment {
                     Some(w) => w.desired.listen_ports(),
                     None => launch.ports(),
                 };
-                if let Some(busy) = self.port_busy(&ports) {
-                    out.fail(busy);
+                if let Err(e) = self.start_with(runner.as_ref(), &launch, &ports).await {
+                    out.fail(e);
                     continue;
                 }
-                let result = match runner.prepare(&launch).await {
-                    Ok(()) => runner.start(&launch).await,
-                    Err(e) => Err(e),
-                };
-                match result {
-                    Ok(()) => out.report.started.push(id.to_string()),
-                    Err(e) => {
-                        out.fail(e.into());
-                        continue;
-                    }
-                }
+                out.report.started.push(id.to_string());
             }
             state.launches.insert(id, launch);
         }
     }
-}
 
-/// Splits `desired` into the config to apply and the `(site, reason)` of the vhosts whose custom
-/// directives the policy refuses (`ApacheDirectives::validate`).
-fn leave_out_refused_directives(desired: &WebServerConfig) -> (WebServerConfig, Vec<(String, String)>) {
-    let mut allowed = desired.clone();
-    let mut refused = Vec::new();
-    allowed.vhosts.retain(|vhost| match vhost.custom_directives.validate() {
-        Ok(()) => true,
-        Err(e) => {
-            refused.push((vhost.site.to_string(), e.to_string()));
-            false
-        }
-    });
-    (allowed, refused)
-}
-
-/// The `ConfigRejected` error naming the left-out sites, `None` when every site is served.
-fn exclusion_error(excluded: &[(String, String)]) -> Option<AppError> {
-    let (_, first) = excluded.first()?;
-    let sites: Vec<&str> = excluded.iter().map(|(s, _)| s.as_str()).collect();
-    let message = format!("the configuration of {} was rejected and is not served; the other sites are still served", sites.join(", "));
-    Some(AppError::new(ErrorCode::ConfigRejected, message).with_details(serde_json::json!({
-        "output": first,
-        "excludedSites": sites,
-        "rejections": excluded.iter().map(|(s, o)| serde_json::json!({ "site": s, "output": o })).collect::<Vec<_>>(),
-    })))
-}
-
-#[async_trait]
-impl EnvironmentSync for ApplyEnvironment {
-    async fn sync(&self, ctx: &CallContext) -> AppResult<SyncReportDto> {
-        self.reconcile(None, ctx).await
-    }
-
-    async fn sync_without(&self, retiring: &PackageId, ctx: &CallContext) -> AppResult<SyncReportDto> {
-        self.reconcile(Some(retiring), ctx).await
-    }
-}
-
-impl ApplyEnvironment {
     /// The steps of the type docs, against the installed packages minus `retiring`.
     async fn reconcile(&self, retiring: Option<&PackageId>, ctx: &CallContext) -> AppResult<SyncReportDto> {
         let mut state = self.lock.lock().await;
@@ -380,5 +357,53 @@ impl ApplyEnvironment {
         self.sync_hosts(&snap, ctx, &mut out).await;
         self.sync_services(&snap, &mut state, web_changed, &mut out).await;
         out.finish()
+    }
+}
+
+#[async_trait]
+impl EnvironmentSync for ApplyEnvironment {
+    async fn sync(&self, ctx: &CallContext) -> AppResult<SyncReportDto> {
+        self.reconcile(None, ctx).await
+    }
+
+    async fn sync_without(&self, retiring: &PackageId, ctx: &CallContext) -> AppResult<SyncReportDto> {
+        self.reconcile(Some(retiring), ctx).await
+    }
+}
+
+#[async_trait]
+impl ServiceLifecycle for ApplyEnvironment {
+    async fn ensure(&self, service: &ServiceId) -> AppResult<bool> {
+        let mut state = self.lock.lock().await;
+        self.ensure_locked(&mut state, service).await
+    }
+
+    async fn lease(&self, service: &ServiceId) -> AppResult<ServiceLease> {
+        let mut state = self.lock.lock().await;
+        self.ensure_locked(&mut state, service).await?;
+        // Taken before the lock is released: no sync can slip in between.
+        Ok(self.leases.acquire(service.clone()))
+    }
+
+    async fn restart(&self, service: &ServiceId) -> AppResult<()> {
+        let mut state = self.lock.lock().await;
+        self.refuse_if_leased(service, "restart")?;
+        let runner = self.runner(service)?;
+        let launch = self.current_launch(service)?;
+        Self::restart_with(runner.as_ref(), &launch).await?;
+        state.launches.insert(service.clone(), launch);
+        Ok(())
+    }
+
+    async fn stop(&self, service: &ServiceId) -> AppResult<bool> {
+        let mut state = self.lock.lock().await;
+        self.refuse_if_leased(service, "stop")?;
+        let runner = self.runner(service)?;
+        let stopped = runner.status(service).state != ServiceState::Stopped;
+        if stopped {
+            runner.stop(service).await?;
+        }
+        state.launches.remove(service);
+        Ok(stopped)
     }
 }

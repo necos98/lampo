@@ -1,14 +1,13 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use lampo_domain::paths::LampoPaths;
-use lampo_domain::ports::{InstalledPackageRegistry, PortAvailability, PortProbe, ProjectRepository, ServiceRunner, SettingsRepository, WorktreeRepository};
-use lampo_domain::service::{ServiceId, ServiceState, plan_services};
-use lampo_domain::PortError;
+use lampo_domain::ports::{ProjectRepository, ServiceRunner, SettingsRepository, WorktreeRepository};
+use lampo_domain::service::{ServiceId, plan_services};
 
-use super::environment::EnvironmentSync;
+use super::environment::{EnvironmentSync, ServiceLifecycle, is_up};
 use super::generation::runner_for;
 use super::service_catalog::ServiceCatalog;
+use super::service_leases::ServiceLease;
 use crate::context::CallContext;
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -20,10 +19,12 @@ pub trait ServiceStatusSource: Send + Sync {
     async fn statuses(&self) -> AppResult<Vec<ServiceStatusDto>>;
 }
 
-/// Makes sure one service is running (used by database operations, worktree DB cloning).
+/// Makes sure one service is running for an operation that needs it (database operations,
+/// worktree DB cloning): the returned lease keeps it running, neither stopped nor restarted by
+/// a sync, until the operation drops it.
 #[async_trait]
 pub trait ServiceEnsurer: Send + Sync {
-    async fn ensure_running(&self, service: ServiceId) -> AppResult<()>;
+    async fn ensure_running(&self, service: ServiceId) -> AppResult<ServiceLease>;
 }
 
 pub struct ServiceQueries {
@@ -118,39 +119,29 @@ impl ServiceStatusSource for OfflineServiceStatus {
     }
 }
 
-/// Manual service control (GUI buttons, `lampo up/down/restart`).
+/// Manual service control (GUI buttons, `lampo up/down/restart`). Every start, restart and stop
+/// goes through the [`ServiceLifecycle`] owner, under the lock of the environment sync.
 pub struct ServiceControl {
     runners: Vec<Arc<dyn ServiceRunner>>,
     catalog: Arc<ServiceCatalog>,
-    installed: Arc<dyn InstalledPackageRegistry>,
     settings: Arc<dyn SettingsRepository>,
-    port_probe: Arc<dyn PortProbe>,
-    paths: LampoPaths,
+    lifecycle: Arc<dyn ServiceLifecycle>,
     env: Arc<dyn EnvironmentSync>,
 }
 
 pub struct ServiceControlDeps {
+    /// Read only (which services are running).
     pub runners: Vec<Arc<dyn ServiceRunner>>,
     pub catalog: Arc<ServiceCatalog>,
-    pub installed: Arc<dyn InstalledPackageRegistry>,
     pub settings: Arc<dyn SettingsRepository>,
-    pub port_probe: Arc<dyn PortProbe>,
-    pub paths: LampoPaths,
+    pub lifecycle: Arc<dyn ServiceLifecycle>,
     pub env: Arc<dyn EnvironmentSync>,
-}
-
-fn is_up(state: ServiceState) -> bool {
-    matches!(state, ServiceState::Running | ServiceState::Starting)
 }
 
 impl ServiceControl {
     pub fn new(deps: ServiceControlDeps) -> Self {
-        let ServiceControlDeps { runners, catalog, installed, settings, port_probe, paths, env } = deps;
-        Self { runners, catalog, installed, settings, port_probe, paths, env }
-    }
-
-    fn runner(&self, id: &ServiceId) -> AppResult<&Arc<dyn ServiceRunner>> {
-        runner_for(&self.runners, id.kind()).ok_or_else(|| AppError::new(ErrorCode::Unsupported, format!("no runner is registered for {id}")))
+        let ServiceControlDeps { runners, catalog, settings, lifecycle, env } = deps;
+        Self { runners, catalog, settings, lifecycle, env }
     }
 
     /// Service ids of registered kinds (`Validation` otherwise).
@@ -168,23 +159,6 @@ impl ServiceControl {
             .collect()
     }
 
-    /// Starts `id` if it is not running. `Ok(true)` when it was started.
-    async fn start_one(&self, id: &ServiceId) -> AppResult<bool> {
-        let runner = self.runner(id)?;
-        if is_up(runner.status(id).state) {
-            return Ok(false);
-        }
-        let launch = self.catalog.launch(id, &self.settings.load()?, &self.installed.list()?, &self.paths)?;
-        for port in launch.ports() {
-            if let PortAvailability::InUse { owner } = self.port_probe.check(port)? {
-                return Err(PortError::PortInUse { port, owner }.into());
-            }
-        }
-        runner.prepare(&launch).await?;
-        runner.start(&launch).await?;
-        Ok(true)
-    }
-
     /// `lampo up`: with no services, a full environment sync; otherwise starts the given ones
     /// (`prepare` + `start`, `PortInUse`/`PackageMissing` on failure).
     pub async fn up(&self, request: ServicesRequest, ctx: &CallContext) -> AppResult<SyncReportDto> {
@@ -193,7 +167,7 @@ impl ServiceControl {
         }
         let mut report = SyncReportDto::default();
         for id in self.parse(&request)? {
-            if self.start_one(&id).await? {
+            if self.lifecycle.ensure(&id).await? {
                 report.started.push(id.to_string());
             }
         }
@@ -201,14 +175,13 @@ impl ServiceControl {
     }
 
     /// `lampo down`: stops the given services (all configured ones when empty). The always-on
-    /// MySQL stays down until the next `up`/sync.
+    /// MySQL stays down until the next `up`/sync. `Conflict` for a service a database operation
+    /// is using.
     pub async fn down(&self, request: ServicesRequest) -> AppResult<SyncReportDto> {
         let ids = if request.services.is_empty() { self.catalog.configured(&self.settings.load()?) } else { self.parse(&request)? };
         let mut report = SyncReportDto::default();
         for id in ids {
-            let runner = self.runner(&id)?;
-            if runner.status(&id).state != ServiceState::Stopped {
-                runner.stop(&id).await?;
+            if self.lifecycle.stop(&id).await? {
                 report.stopped.push(id.to_string());
             }
         }
@@ -216,20 +189,16 @@ impl ServiceControl {
     }
 
     /// Restarts the given services (every running one when empty), re-rendering their config.
+    /// `Conflict` for a service a database operation is using.
     pub async fn restart(&self, request: ServicesRequest) -> AppResult<SyncReportDto> {
-        let settings = self.settings.load()?;
         let ids = if request.services.is_empty() {
-            self.catalog.configured(&settings).into_iter().filter(|id| self.runner(id).is_ok_and(|r| is_up(r.status(id).state))).collect()
+            self.catalog.configured(&self.settings.load()?).into_iter().filter(|id| runner_for(&self.runners, id.kind()).is_some_and(|r| is_up(r.status(id).state))).collect()
         } else {
             self.parse(&request)?
         };
-        let installed = self.installed.list()?;
         let mut report = SyncReportDto::default();
         for id in ids {
-            let runner = self.runner(&id)?;
-            let launch = self.catalog.launch(&id, &settings, &installed, &self.paths)?;
-            runner.prepare(&launch).await?;
-            runner.restart(&launch).await?;
+            self.lifecycle.restart(&id).await?;
             report.restarted.push(id.to_string());
         }
         Ok(report)
@@ -238,7 +207,7 @@ impl ServiceControl {
 
 #[async_trait]
 impl ServiceEnsurer for ServiceControl {
-    async fn ensure_running(&self, service: ServiceId) -> AppResult<()> {
-        self.start_one(&service).await.map(|_| ())
+    async fn ensure_running(&self, service: ServiceId) -> AppResult<ServiceLease> {
+        self.lifecycle.lease(&service).await
     }
 }
