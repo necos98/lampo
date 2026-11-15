@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::database::DatabaseConnectionDto;
+use super::database::{DatabaseConnectionDto, MailConnectionDto};
 use super::logs::LogSourceDto;
 
 /// Bumped on incompatible changes to [`AgentContextDto`].
@@ -67,6 +67,9 @@ pub struct ServiceEndpointDto {
     pub label: String,
     pub host: String,
     pub port: u16,
+    /// Web UI of kinds that have one (Mailpit: `http://127.0.0.1:8025`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,6 +113,9 @@ pub struct AgentContextDto {
     pub document_root: Option<String>,
     pub php: AgentPhpDto,
     pub database: Option<DatabaseConnectionDto>,
+    /// SMTP endpoint and web UI of Mailpit, when the site uses it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mail: Option<MailConnectionDto>,
     /// Every service the site uses (version 2; version 1 had only `redis`).
     pub services: Vec<ServiceEndpointDto>,
     pub logs: Vec<LogSourceDto>,

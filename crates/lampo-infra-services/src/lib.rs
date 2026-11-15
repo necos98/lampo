@@ -1,13 +1,14 @@
 ﻿//! # lampo-infra-services
 //!
 //! Processes and local IPC on Windows. One reason to change: *how Lampo runs and talks to local
-//! processes* (Job Objects, MySQL/Redis command lines, TCP ports, log files, the control pipe).
+//! processes* (Job Objects, MySQL/Redis/Mailpit command lines, TCP ports, log files, the control pipe).
 //!
 //! | Adapter                      | Ports                                        |
 //! |------------------------------|----------------------------------------------|
 //! | [`JobObjectSupervisor`]      | `ProcessSupervisor`, `CommandRunner`, `PipedCommandRunner`, `StreamingCommandRunner` (nested job per run: cancel kills the tree) |
 //! | [`MysqlRunner`]              | `ServiceRunner` for `ServiceKind::Mysql`     |
 //! | [`RedisRunner`]              | `ServiceRunner` for `ServiceKind::Redis`     |
+//! | [`MailpitRunner`]            | `ServiceRunner` for `ServiceKind::MAILPIT`   |
 //! | [`TcpPortProbe`]             | `PortProbe`                                  |
 //! | [`FileLogReader`]            | `LogFileReader`                              |
 //! | [`MysqlCliAdmin`]            | `DatabaseAdmin` (compressed dumps via [`compression`]) |
@@ -30,6 +31,7 @@ pub mod control_pipe;
 pub mod database;
 pub mod launcher;
 pub mod logs;
+pub mod mailpit;
 pub mod mysql;
 pub mod ports;
 mod process;
@@ -44,6 +46,7 @@ pub use control_pipe::{NamedPipeControlClient, NamedPipeControlServer};
 pub use database::MysqlCliAdmin;
 pub use launcher::HeadlessAppLauncher;
 pub use logs::FileLogReader;
+pub use mailpit::MailpitRunner;
 pub use mysql::MysqlRunner;
 pub use ports::TcpPortProbe;
 pub use redis::RedisRunner;

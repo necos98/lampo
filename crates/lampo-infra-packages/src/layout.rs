@@ -24,6 +24,7 @@ const LAYOUTS: &[Layout] = &[
     Layout { kind: "mod-fcgid", entries: &[(EntryRole::ApacheModule, "mod_fcgid.so")], php_extension: None },
     Layout { kind: "mysql", entries: &[(EntryRole::ClientDir, "bin")], php_extension: None },
     Layout { kind: "redis", entries: &[(EntryRole::Cli, "redis-cli.exe"), (EntryRole::ClientDir, "")], php_extension: None },
+    Layout { kind: "mailpit", entries: &[(EntryRole::Cli, "mailpit.exe"), (EntryRole::ClientDir, "")], php_extension: None },
     Layout { kind: "composer", entries: &[(EntryRole::Phar, "composer.phar")], php_extension: None },
     Layout { kind: "xdebug", entries: &[(EntryRole::PhpExtension, "php_xdebug.dll")], php_extension: Some("xdebug") },
     Layout { kind: "php-redis", entries: &[(EntryRole::PhpExtension, "php_redis.dll")], php_extension: Some("redis") },

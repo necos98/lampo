@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::database::DatabaseConnectionDto;
+use super::database::{DatabaseConnectionDto, MailConnectionDto};
 use super::worktree::WorktreeEnvironmentDto;
 
 /// How a site is reached. Wire form: `{ "kind": "hostname", "host": "shop.test" }`,
@@ -77,6 +77,9 @@ pub struct ProjectDto {
     pub database_name: Option<String>,
     /// Connection details to show (never written to `.env`).
     pub database: Option<DatabaseConnectionDto>,
+    /// SMTP endpoint and web UI of Mailpit, when the project uses it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mail: Option<MailConnectionDto>,
     pub tls: TlsModeDto,
     pub active: bool,
     pub origin_preset: Option<String>,
@@ -298,7 +301,7 @@ pub struct DetectionDto {
     /// Service kinds the folder's own files show it uses (`mysql`, `redis`; from a Docker
     /// Compose file). Creation adds the unversioned ones the preset lacks.
     pub services: Vec<String>,
-    /// What Lampo cannot provide for this folder (PostgreSQL, Mailpit…), developer-facing.
+    /// What Lampo cannot provide for this folder (PostgreSQL, search engines…), developer-facing.
     pub warnings: Vec<String>,
     /// Id of the project already registered for this folder, if any.
     pub already_registered: Option<String>,

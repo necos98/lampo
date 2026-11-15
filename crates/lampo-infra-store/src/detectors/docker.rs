@@ -1,7 +1,8 @@
 //! Docker Compose files and Dockerfiles (Laravel Sail included) → an environment-only hint
 //! ([`ENVIRONMENT_ONLY`]): the PHP of the `php:8.2-*` / `laravelsail/php82-composer` image or
-//! the Sail runtime (`vendor/laravel/sail/runtimes/8.3`), the MySQL/MariaDB/Redis services,
-//! and warnings for what Lampo does not provide (PostgreSQL, Mailpit, search engines…).
+//! the Sail runtime (`vendor/laravel/sail/runtimes/8.3`), the MySQL/MariaDB/Redis/Mailpit (and
+//! MailHog, mapped to Mailpit) services,
+//! and warnings for what Lampo does not provide (PostgreSQL, search engines…).
 //!
 //! Line-based on purpose (no YAML parser): it only looks at `image:`, `context:`/`dockerfile:`
 //! values, the service names under `services:` and `FROM` / `docker-php-ext-install` lines.
@@ -34,6 +35,10 @@ enum Component {
     MariaDb,
     Redis,
     Postgres,
+    /// Mailpit, or MailHog (`true`), which Lampo replaces with Mailpit.
+    Mail {
+        mailhog: bool,
+    },
     /// Something Lampo does not run (its label).
     Unsupported(&'static str),
     Other,
@@ -41,8 +46,6 @@ enum Component {
 
 /// Images Lampo has no counterpart for, by repository-name fragment.
 const UNSUPPORTED: &[(&str, &str)] = &[
-    ("mailpit", "Mailpit"),
-    ("mailhog", "MailHog"),
     ("meilisearch", "Meilisearch"),
     ("elasticsearch", "Elasticsearch"),
     ("opensearch", "OpenSearch"),
@@ -134,6 +137,8 @@ fn classify_image(image: &str) -> Component {
         "mariadb" => return Component::MariaDb,
         "redis" | "redis-stack" | "valkey" => return Component::Redis,
         "postgres" | "postgresql" | "postgis" => return Component::Postgres,
+        _ if name.contains("mailpit") => return Component::Mail { mailhog: false },
+        _ if name.contains("mailhog") => return Component::Mail { mailhog: true },
         _ => {}
     }
     UNSUPPORTED.iter().find(|(fragment, _)| name.contains(fragment)).map_or(Component::Other, |(_, label)| Component::Unsupported(label))
@@ -184,6 +189,16 @@ impl Findings {
             Component::Redis => {
                 self.service(ServiceKind::REDIS);
                 self.evidence.push(format!("{source} uses Redis ({reference})"));
+            }
+            Component::Mail { mailhog } => {
+                self.service(ServiceKind::MAILPIT);
+                match mailhog {
+                    false => self.evidence.push(format!("{source} uses Mailpit ({reference})")),
+                    true => {
+                        self.evidence.push(format!("{source} uses MailHog ({reference})"));
+                        self.warn("MailHog is not available in Lampo: the project gets Mailpit, a drop-in replacement (SMTP on the same port, web UI and API differ)".into());
+                    }
+                }
             }
             Component::Postgres => {
                 self.evidence.push(format!("{source} uses PostgreSQL ({reference})"));
@@ -414,14 +429,25 @@ volumes:
 "#;
         let hint = detect(&[("compose.yaml", sail)]).unwrap();
         assert_eq!(hint.php, php("8.3"));
-        assert_eq!(hint.services, [ServiceKind::MYSQL]);
+        assert_eq!(hint.services, [ServiceKind::MYSQL, ServiceKind::MAILPIT]);
         assert!(hint.evidence.iter().any(|e| e.contains("service `laravel.test` uses PHP 8.3")), "{:?}", hint.evidence);
+        assert!(hint.evidence.contains(&"compose.yaml service `mailpit` uses Mailpit (axllent/mailpit:latest)".to_string()), "{:?}", hint.evidence);
         assert!(hint.warnings.iter().any(|w| w.starts_with("MariaDB")));
         assert!(hint.warnings.iter().any(|w| w.starts_with("PostgreSQL is not supported")));
-        assert!(hint.warnings.iter().any(|w| w.starts_with("Mailpit")));
+        assert!(!hint.warnings.iter().any(|w| w.contains("Mailpit")), "Mailpit is supported: {:?}", hint.warnings);
         // Older Sail: a prebuilt image per PHP.
         let old = detect(&[("docker-compose.yml", "services:\n  laravel.test:\n    image: laravelsail/php74-composer:latest\n")]).unwrap();
         assert_eq!(old.php, php("7.4"));
+    }
+
+    #[test]
+    fn mailhog_is_replaced_by_mailpit_with_a_note() {
+        let hint = detect(&[("docker-compose.yml", "services:\n  mail:\n    image: mailhog/mailhog:v1.0.1\n")]).unwrap();
+        assert_eq!(hint.services, [ServiceKind::MAILPIT]);
+        assert!(hint.evidence.contains(&"docker-compose.yml service `mail` uses MailHog (mailhog/mailhog:v1.0.1)".to_string()), "{:?}", hint.evidence);
+        assert_eq!(hint.warnings.len(), 1);
+        assert!(hint.warnings[0].starts_with("MailHog is not available in Lampo: the project gets Mailpit"), "{:?}", hint.warnings);
+        assert_eq!(classify_image("docker.io/axllent/mailpit:v1.33"), Component::Mail { mailhog: false });
     }
 
     #[test]

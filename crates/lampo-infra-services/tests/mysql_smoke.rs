@@ -42,6 +42,7 @@ async fn mysql_end_to_end() {
         service: series.service_id(),
         install_dir: install.into(),
         port: free_port(),
+        ui_port: None,
         config_dir: root.path().join("generated").join("mysql"),
         data_dir: Some(root.path().join("mysql").join("data")),
         log_dir: root.path().join("logs").join("mysql"),

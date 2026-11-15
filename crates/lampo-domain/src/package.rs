@@ -1,4 +1,4 @@
-//! Downloadable packages: Apache, PHP, MySQL, Redis, Composer and pinned PHP add-on extensions.
+//! Downloadable packages: Apache, PHP, MySQL, Redis, Mailpit, Composer and pinned PHP add-on extensions.
 //!
 //! A package *kind* is an open identifier ([`PackageKind`]), not a closed enum: a new kind is
 //! added by registering a [`crate::ports::PackageCatalogSource`] that serves it (and, if needed,
@@ -31,6 +31,8 @@ impl PackageKind {
     pub const PHP: PackageKind = PackageKind(Cow::Borrowed("php"));
     pub const MYSQL: PackageKind = PackageKind(Cow::Borrowed("mysql"));
     pub const REDIS: PackageKind = PackageKind(Cow::Borrowed("redis"));
+    /// Mailpit (official Windows amd64 release).
+    pub const MAILPIT: PackageKind = PackageKind(Cow::Borrowed("mailpit"));
     pub const COMPOSER: PackageKind = PackageKind(Cow::Borrowed("composer"));
     /// Xdebug, pinned per PHP minor.
     pub const XDEBUG: PackageKind = PackageKind(Cow::Borrowed("xdebug"));

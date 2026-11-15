@@ -243,10 +243,12 @@ impl ServiceHost {
                 return Ok(());
             }
         }
-        if let Ok(Some(pid)) = win::tcp_listener_pid(launch.port) {
-            let owner = win::describe_process(pid);
-            self.fail(service, format!("port {} is already in use by {owner}", launch.port));
-            return Err(PortError::PortInUse { port: launch.port, owner: Some(owner) });
+        for port in launch.ports() {
+            if let Ok(Some(pid)) = win::tcp_listener_pid(port) {
+                let owner = win::describe_process(pid);
+                self.fail(service, format!("port {port} is already in use by {owner}"));
+                return Err(PortError::PortInUse { port, owner: Some(owner) });
+            }
         }
         let spec = driver.command(launch)?;
         let marker = driver.start_marker(launch);

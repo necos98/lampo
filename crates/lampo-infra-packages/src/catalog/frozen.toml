@@ -176,6 +176,20 @@ size_bytes = 14036243
 end_of_life = false
 payload = { type = "zip", strip_prefix = "Redis-8.10.3-Windows-x64-msys2" }
 
+# ---------------------------------------------------------------- Mailpit (axllent/mailpit)
+# Official Windows amd64 release asset (v1.33.1, 2026-11-07). The release publishes no
+# checksums file: the SHA-256 was computed from the downloaded zip and matches the asset digest
+# GitHub publishes. A single Go executable (mailpit.exe, plus LICENSE and README.md at the zip
+# root), no VC++ runtime needed.
+[[entry]]
+kind = "mailpit"
+version = "1.33.1"
+url = "https://github.com/axllent/mailpit/releases/download/v1.33.1/mailpit-windows-amd64.zip"
+sha256 = "0bcf8f1e7c21005b30c206064ff2f37dac602ef66774e558379d326f5673d652"
+size_bytes = 11186131
+end_of_life = false
+payload = { type = "zip" }
+
 # ---------------------------------------------------------------- Composer
 # SHA-256 from getcomposer.org/download/<v>/composer.phar.sha256sum. The live source
 # (catalog::composer) tracks newer releases.

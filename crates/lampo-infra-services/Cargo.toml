@@ -1,6 +1,6 @@
 ﻿[package]
 name = "lampo-infra-services"
-description = "Lampo service adapters: Job Object process supervisor, MySQL/Redis runners, port probe, log files, database admin (compressed dumps), control named pipe, headless app launcher."
+description = "Lampo service adapters: Job Object process supervisor, MySQL/Redis/Mailpit runners, port probe, log files, database admin (compressed dumps), control named pipe, headless app launcher."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

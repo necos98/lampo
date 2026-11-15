@@ -13,8 +13,13 @@ pub struct ServiceInstanceDto {
     /// Display label from the kind's descriptor (`MySQL 8.4`); ignored on input.
     #[serde(default)]
     pub label: String,
+    /// The main port (Mailpit: SMTP).
     pub port: u16,
     pub always_on: bool,
+    /// Web UI port of kinds that have one (Mailpit), else `null`. On output the effective value
+    /// (configured, else the default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_port: Option<u16>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +70,8 @@ pub struct SettingsPatchRequest {
     pub apache_port: Option<u16>,
     /// Ports of configured service instances, by service id (`mysql-8.4`, `redis`).
     pub service_ports: BTreeMap<String, u16>,
+    /// Web UI ports of configured instances whose kind has one (`mailpit`).
+    pub service_ui_ports: BTreeMap<String, u16>,
     /// PHP used by the shims outside any project (`8.4`); must be installed.
     pub default_php_version: Option<String>,
     /// Range new dedicated loopback ports (worktree environments) are taken from.
@@ -77,7 +84,7 @@ impl SettingsPatchRequest {
     }
 }
 
-/// One changed setting: `setting` is `apache.port`, `<service>.port` (`mysql-8.4.port`),
+/// One changed setting: `setting` is `apache.port`, `<service>.port` (`mysql-8.4.port`), `<service>.ui-port` (`mailpit.ui-port`),
 /// `default-php` or `loopback-port-range`; `from`/`to` are display values.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

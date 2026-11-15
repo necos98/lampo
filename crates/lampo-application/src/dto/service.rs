@@ -26,6 +26,12 @@ pub struct ServiceStatusDto {
     pub state: ServiceStateDto,
     pub pid: Option<u32>,
     pub port: Option<u16>,
+    /// Web UI port of kinds that have one (Mailpit), configured or default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_port: Option<u16>,
+    /// `http://127.0.0.1:<uiPort>`: what "open the web UI" opens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_url: Option<String>,
     pub message: Option<String>,
     /// Whether the current plan needs it running.
     pub required: bool,

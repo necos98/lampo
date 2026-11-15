@@ -14,6 +14,7 @@ use crate::error::DomainError;
 use crate::mysql::MysqlSeries;
 use crate::php::{ExtensionName, PhpMinor, php_ini_overrides};
 use crate::project::{ApacheDirectives, DisplayName, Project, ProjectEnvironment, PublicDir};
+use crate::service::ServiceKind;
 
 pub use crate::project::PresetId;
 
@@ -90,6 +91,12 @@ pub mod builtin {
         env
     }
 
+    /// Adds Mailpit, so the site's mail is caught locally instead of failing.
+    fn with_mail(mut env: ProjectEnvironment) -> ProjectEnvironment {
+        env.use_service(ServiceKind::MAILPIT, None);
+        env
+    }
+
     const COMMON_INI: &[(&str, &str)] = &[("memory_limit", "512M"), ("upload_max_filesize", "64M"), ("post_max_size", "64M"), ("max_execution_time", "120")];
 
     pub struct Laravel;
@@ -101,8 +108,14 @@ pub mod builtin {
             make(
                 "laravel",
                 "Laravel",
-                "Laravel: document root `public`, MySQL, latest PHP.",
-                env(ctx.latest_php, &["curl", "fileinfo", "intl", "mbstring", "openssl", "pdo_mysql", "pdo_sqlite", "sqlite3", "zip"], COMMON_INI, "public", Some(ctx.default_mysql)),
+                "Laravel: document root `public`, MySQL, Mailpit, latest PHP.",
+                with_mail(env(
+                    ctx.latest_php,
+                    &["curl", "fileinfo", "intl", "mbstring", "openssl", "pdo_mysql", "pdo_sqlite", "sqlite3", "zip"],
+                    COMMON_INI,
+                    "public",
+                    Some(ctx.default_mysql),
+                )),
             )
         }
     }
@@ -116,8 +129,8 @@ pub mod builtin {
             make(
                 "wordpress",
                 "WordPress",
-                "WordPress: document root = project folder, MySQL, image extensions.",
-                env(ctx.latest_php, &["curl", "exif", "fileinfo", "gd", "intl", "mbstring", "mysqli", "openssl", "zip"], COMMON_INI, "", Some(ctx.default_mysql)),
+                "WordPress: document root = project folder, MySQL, Mailpit, image extensions.",
+                with_mail(env(ctx.latest_php, &["curl", "exif", "fileinfo", "gd", "intl", "mbstring", "mysqli", "openssl", "zip"], COMMON_INI, "", Some(ctx.default_mysql))),
             )
         }
     }
@@ -131,8 +144,8 @@ pub mod builtin {
             make(
                 "symfony",
                 "Symfony",
-                "Symfony: document root `public`, MySQL, intl.",
-                env(ctx.latest_php, &["curl", "intl", "mbstring", "openssl", "pdo_mysql", "sodium", "zip"], COMMON_INI, "public", Some(ctx.default_mysql)),
+                "Symfony: document root `public`, MySQL, Mailpit, intl.",
+                with_mail(env(ctx.latest_php, &["curl", "intl", "mbstring", "openssl", "pdo_mysql", "sodium", "zip"], COMMON_INI, "public", Some(ctx.default_mysql))),
             )
         }
     }
@@ -146,8 +159,8 @@ pub mod builtin {
             make(
                 "generic-php",
                 "Generic PHP",
-                "Plain PHP site served from the project folder.",
-                env(ctx.latest_php, &["curl", "fileinfo", "mbstring", "mysqli", "openssl", "pdo_mysql"], &[], "", Some(ctx.default_mysql)),
+                "Plain PHP site served from the project folder, Mailpit for mail.",
+                with_mail(env(ctx.latest_php, &["curl", "fileinfo", "mbstring", "mysqli", "openssl", "pdo_mysql"], &[], "", Some(ctx.default_mysql))),
             )
         }
     }
@@ -207,6 +220,15 @@ mod tests {
         let p = builtin::Laravel.build(&ctx());
         assert_eq!(p.environment.php.to_string(), "8.4");
         assert_eq!(p.environment.public_dir.as_str(), "public");
+    }
+
+    #[test]
+    fn web_app_presets_use_mailpit_legacy_does_not() {
+        for d in builtin::all() {
+            let p = d.build(&ctx());
+            let expected = p.id.as_str() != "legacy";
+            assert_eq!(p.environment.uses(&ServiceKind::MAILPIT), expected, "{}", p.id);
+        }
     }
 
     #[test]

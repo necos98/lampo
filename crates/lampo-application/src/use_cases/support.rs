@@ -10,6 +10,7 @@ use lampo_domain::package::{EntryRole, InstalledPackage, PackageKind};
 use lampo_domain::php::{ComposerChannel, PhpMinor};
 use lampo_domain::ports::{FileSystemInspector, InstalledPackageRegistry, MysqlEndpoint, ProjectRepository, WorktreeRepository};
 use lampo_domain::project::{Project, ProjectEnvironment, ProjectId, ProjectRoot, TlsMode};
+use lampo_domain::service::ServiceKind;
 use lampo_domain::settings::Settings;
 use lampo_domain::site::SiteId;
 use lampo_domain::version::VersionSeries;
@@ -20,7 +21,7 @@ use super::environment::EnvironmentSync;
 use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::mapping::{address_to_dto, connection_to_dto, environment_to_dto, tls_to_dto};
+use crate::mapping::{address_to_dto, connection_to_dto, environment_to_dto, mail_to_dto, tls_to_dto};
 
 // ---------------------------------------------------------------------------------------------
 // Identifiers and lookups
@@ -212,6 +213,7 @@ pub(crate) fn project_dto(project: &Project, worktrees: &[WorktreeEnvironment], 
         environment: environment_to_dto(&project.environment),
         database_name: project.database.as_ref().map(|d| d.to_string()),
         database: project.database_connection(settings).ok().flatten().as_ref().map(connection_to_dto),
+        mail: project.environment.uses(&ServiceKind::MAILPIT).then(|| mail_to_dto(&settings.mail_connection())),
         tls: tls_to_dto(project.tls),
         active: project.active,
         origin_preset: project.origin_preset.as_ref().map(|p| p.to_string()),

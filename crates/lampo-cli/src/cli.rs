@@ -121,7 +121,7 @@ pub enum Command {
     /// their folder to the user PATH.
     #[command(subcommand)]
     Shims(ShimsCommand),
-    /// Lampo's global settings: ports (Apache, MySQL instances, Redis), default PHP, loopback
+    /// Lampo's global settings: ports (Apache, MySQL instances, Redis, Mailpit), default PHP, loopback
     /// port range. Without a subcommand: `settings get`.
     Settings {
         #[command(subcommand)]
@@ -623,12 +623,15 @@ pub enum SettingsCommand {
     /// service or by a site's dedicated loopback port (exit 5), not taken by another program
     /// (exit 5, port-in-use). Running services whose port changed are restarted on the new one,
     /// as after a GUI save; stopped ones use it when they next start. Projects' own files are
-    /// not edited: update DB_PORT / REDIS_PORT / APP_URL yourself (the output lists the sites).
+    /// not edited: update DB_PORT / REDIS_PORT / MAIL_PORT / APP_URL yourself (the output lists
+    /// the sites). Mailpit has two ports: SMTP (`--port mailpit=PORT`) and its web UI
+    /// (`--ui-port mailpit=PORT`).
     /// MySQL instances (series) cannot be added or removed: only their ports change.
     ///
     /// Examples:
     ///   lampo settings set --apache-port 8080
     ///   lampo settings set --mysql-port 8.4=3310 --mysql-port 5.7=3311 --redis-port 6380
+    ///   lampo settings set --port mailpit=2025 --ui-port mailpit=9025
     ///   lampo settings set --default-php 8.4 --json
     ///   lampo settings set --loopback-range 8100-8299
     #[command(verbatim_doc_comment)]
@@ -636,7 +639,7 @@ pub enum SettingsCommand {
 }
 
 #[derive(Debug, Args)]
-#[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args(["apache_port", "mysql_port", "redis_port", "port", "default_php", "loopback_range"])))]
+#[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args(["apache_port", "mysql_port", "redis_port", "port", "ui_port", "default_php", "loopback_range"])))]
 pub struct SettingsSetArgs {
     /// Apache's shared port (host-name URLs use it; loopback-port URLs keep their own port).
     #[arg(long, value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
@@ -649,9 +652,13 @@ pub struct SettingsSetArgs {
     #[arg(long, value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
     pub redis_port: Option<u16>,
     /// Port of any configured service instance by id: `SERVICE=PORT` (`mysql-8.4=3310`,
-    /// `redis=6380`); repeatable or comma-separated.
+    /// `redis=6380`, `mailpit=1025` for Mailpit's SMTP); repeatable or comma-separated.
     #[arg(long, value_name = "SERVICE=PORT", value_delimiter = ',')]
     pub port: Vec<String>,
+    /// Web UI port of an instance that has one: `SERVICE=PORT` (`mailpit=8025`); repeatable
+    /// or comma-separated.
+    #[arg(long, value_name = "SERVICE=PORT", value_delimiter = ',')]
+    pub ui_port: Vec<String>,
     /// PHP minor the shims use outside any project (`8.4`); must be installed.
     #[arg(long, value_name = "MINOR")]
     pub default_php: Option<String>,

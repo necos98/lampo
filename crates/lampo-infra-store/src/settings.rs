@@ -69,11 +69,12 @@ mod tests {
         assert!(s.first_run_completed);
         assert_eq!(
             s.services.iter().map(|i| (i.service.to_string(), i.port)).collect::<Vec<_>>(),
-            [("mysql-8.4".to_string(), 3306), ("mysql-5.7".to_string(), 3307), ("redis".to_string(), 6390)]
+            [("mysql-8.4".to_string(), 3306), ("mysql-5.7".to_string(), 3307), ("redis".to_string(), 6390), ("mailpit".to_string(), 1025)]
         );
         repo.save(&s).unwrap();
         let text = std::fs::read_to_string(p.settings_file()).unwrap();
         assert!(text.contains("[[services]]") && !text.contains("mysql_instances") && !text.contains("redis_port"), "{text}");
+        assert!(text.contains("ui_port = 8025"), "Mailpit's web UI port is written: {text}");
         assert_eq!(repo.load().unwrap(), s);
     }
 }

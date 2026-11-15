@@ -10,6 +10,7 @@
 //!   mysql-8.4\                bin\mysqld.exe …            (mysql-8.4.x-winx64\ stripped)
 //!   mysql-5.7\
 //!   redis-8.10\               redis-server.exe, redis-cli.exe, msys-2.0.dll
+//!   mailpit-1.33\             mailpit.exe
 //!   composer-2.11\            composer.phar   (latest stable)
 //!   composer-2.2\             composer.phar   (2.2 LTS, PHP < 7.2)
 //!   xdebug-3.5-php8.3\        php_xdebug.dll

@@ -323,6 +323,7 @@ mod tests {
             service: series.service_id(),
             install_dir: r"C:\Lampo\packages\mysql".into(),
             port: 3307,
+            ui_port: None,
             config_dir: r"C:\Lampo\generated\mysql\5.7".into(),
             data_dir: Some(r"C:\Users\Mario Rossi\Lampo\mysql\5.7\data".into()),
             log_dir: r"C:\Lampo\logs\mysql-5.7".into(),

@@ -90,7 +90,7 @@ function Stack-Processes {
         $p -and ($roots | Where-Object { $p.ToLowerInvariant().StartsWith($_) }) -and $_.ProcessName -ne 'lampo'
     }
 }
-function Service-Processes { Stack-Processes | Where-Object { $_.ProcessName -in 'httpd', 'php-cgi', 'mysqld', 'redis-server' } }
+function Service-Processes { Stack-Processes | Where-Object { $_.ProcessName -in 'httpd', 'php-cgi', 'mysqld', 'redis-server', 'mailpit' } }
 function App-Processes { Stack-Processes | Where-Object { $_.ProcessName -eq 'lampo-desktop' } }
 function Stop-Stack {
     & $lampo quit 2>$null | Out-Null

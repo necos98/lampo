@@ -35,6 +35,8 @@ impl ServiceKind {
     pub const APACHE: ServiceKind = ServiceKind(Cow::Borrowed("apache"));
     pub const MYSQL: ServiceKind = ServiceKind(Cow::Borrowed("mysql"));
     pub const REDIS: ServiceKind = ServiceKind(Cow::Borrowed("redis"));
+    /// Local SMTP catcher with a web UI.
+    pub const MAILPIT: ServiceKind = ServiceKind(Cow::Borrowed("mailpit"));
 
     pub fn new(kind: impl Into<String>) -> Result<Self, DomainError> {
         let k: String = kind.into();
@@ -169,6 +171,17 @@ pub trait ServiceDescriptor: Send + Sync {
     fn has_error_log(&self) -> bool;
     /// Connection defaults for clients; `None` when there is no client to shim.
     fn client(&self) -> Option<ServiceClient>;
+    /// Default port of the instance's second listener, its web UI (Mailpit's 8025); `None`
+    /// for kinds with a single port. Configurable per instance
+    /// (`ServiceInstanceSettings::ui_port`).
+    fn default_ui_port(&self) -> Option<u16> {
+        None
+    }
+    /// php.ini values every site using an instance of this kind gets, given the instance's
+    /// port (Mailpit: `SMTP`/`smtp_port` for `mail()`). The project's php.ini values win.
+    fn php_ini(&self, _port: u16) -> Vec<(&'static str, String)> {
+        Vec::new()
+    }
     /// Validates the version series a project asks for.
     fn validate_version(&self, version: Option<VersionSeries>) -> Result<(), DomainError> {
         match (self.versioned(), version) {
@@ -278,9 +291,48 @@ pub mod builtin {
         }
     }
 
-    /// Apache, MySQL, Redis.
+    /// Mailpit: catches every mail the sites send over SMTP and shows it in a web UI.
+    pub struct Mailpit;
+    impl ServiceDescriptor for Mailpit {
+        fn kind(&self) -> ServiceKind {
+            ServiceKind::MAILPIT
+        }
+        fn display_name(&self) -> &'static str {
+            "Mailpit"
+        }
+        fn package_kind(&self) -> PackageKind {
+            PackageKind::MAILPIT
+        }
+        fn versioned(&self) -> bool {
+            false
+        }
+        /// SMTP.
+        fn default_port(&self) -> u16 {
+            1025
+        }
+        fn has_data_dir(&self) -> bool {
+            true
+        }
+        fn has_error_log(&self) -> bool {
+            false
+        }
+        /// No client to shim: `LAMPO_MAIL_HOST`/`_PORT` for `lampo env`/`exec`, with the package
+        /// folder on their PATH (`mailpit sendmail`).
+        fn client(&self) -> Option<ServiceClient> {
+            Some(ServiceClient { user: None, env_prefix: "MAIL", client_dir: EntryRole::ClientDir })
+        }
+        fn default_ui_port(&self) -> Option<u16> {
+            Some(8025)
+        }
+        /// Windows PHP's `mail()` speaks SMTP to `SMTP`:`smtp_port` (no auth, no TLS).
+        fn php_ini(&self, port: u16) -> Vec<(&'static str, String)> {
+            vec![("SMTP", "127.0.0.1".into()), ("smtp_port", port.to_string()), ("sendmail_from", "lampo@localhost".into())]
+        }
+    }
+
+    /// Apache, MySQL, Redis, Mailpit.
     pub fn all() -> Vec<Arc<dyn ServiceDescriptor>> {
-        vec![Arc::new(Apache), Arc::new(Mysql), Arc::new(Redis)]
+        vec![Arc::new(Apache), Arc::new(Mysql), Arc::new(Redis), Arc::new(Mailpit)]
     }
 }
 
@@ -320,11 +372,21 @@ pub struct ServiceLaunch {
     /// Root of the installed package (`...\packages\mysql-8.4`).
     pub install_dir: PathBuf,
     pub port: u16,
+    /// Second listener (the web UI) of kinds that have one
+    /// ([`ServiceDescriptor::default_ui_port`]).
+    pub ui_port: Option<u16>,
     /// Generated configuration for this instance (`httpd.conf`, `my.ini`, `redis.conf` live here).
     pub config_dir: PathBuf,
     /// Persistent data (MySQL data dir, Redis dump dir). `None` for Apache.
     pub data_dir: Option<PathBuf>,
     pub log_dir: PathBuf,
+}
+
+impl ServiceLaunch {
+    /// Every port the instance listens on (all must be free before a start).
+    pub fn ports(&self) -> Vec<u16> {
+        std::iter::once(self.port).chain(self.ui_port).collect()
+    }
 }
 
 /// Which output stream a log line came from.
@@ -402,6 +464,31 @@ mod tests {
         assert!(builtin::Redis.validate_version(None).is_ok());
         assert!(builtin::Redis.validate_version(Some(VersionSeries { major: 7, minor: 0 })).is_err());
         assert_eq!(builtin::Mysql.label(&mysql(MysqlSeries::LEGACY_5_7)), "MySQL 5.7");
+        assert!(builtin::Mailpit.validate_version(None).is_ok());
+        assert!(builtin::Mailpit.validate_version(Some(VersionSeries { major: 1, minor: 33 })).is_err());
+    }
+
+    #[test]
+    fn mailpit_has_smtp_and_ui_ports_and_php_mail_settings() {
+        let d = builtin::Mailpit;
+        assert_eq!((d.kind(), d.default_port(), d.default_ui_port()), (ServiceKind::MAILPIT, 1025, Some(8025)));
+        assert!(d.has_data_dir() && !d.versioned());
+        assert_eq!(d.client().unwrap().env_prefix, "MAIL");
+        assert_eq!(d.php_ini(2025), [("SMTP", "127.0.0.1".to_string()), ("smtp_port", "2025".to_string()), ("sendmail_from", "lampo@localhost".to_string())]);
+        assert_eq!(builtin::Redis.default_ui_port(), None);
+        assert!(builtin::Redis.php_ini(6379).is_empty());
+        assert!(builtin::all().iter().any(|d| d.kind() == ServiceKind::MAILPIT));
+        let launch = ServiceLaunch {
+            service: ServiceId::new(ServiceKind::MAILPIT, None),
+            install_dir: "C:\\m".into(),
+            port: 1025,
+            ui_port: Some(8025),
+            config_dir: "C:\\c".into(),
+            data_dir: None,
+            log_dir: "C:\\l".into(),
+        };
+        assert_eq!(launch.ports(), [1025, 8025]);
+        assert_eq!(ServiceLaunch { ui_port: None, ..launch }.ports(), [1025]);
     }
 
     #[test]

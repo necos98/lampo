@@ -46,7 +46,11 @@ pub fn status(status: &StatusDto) -> String {
         rows.push(vec![
             s.service.clone(),
             state_name(s.state).into(),
-            s.port.map(|p| p.to_string()).unwrap_or_else(|| "-".into()),
+            match (s.port, s.ui_port) {
+                (Some(p), Some(ui)) => format!("{p}, ui {ui}"),
+                (Some(p), None) => p.to_string(),
+                _ => "-".into(),
+            },
             s.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".into()),
             s.message.clone().unwrap_or_default(),
         ]);
@@ -74,6 +78,11 @@ pub fn project_summaries(projects: &[ProjectSummaryDto]) -> String {
         ]);
     }
     table(&rows)
+}
+
+/// `SMTP 127.0.0.1:1025, no auth/TLS, web UI http://127.0.0.1:8025`.
+fn mail_line(mail: &MailConnectionDto) -> String {
+    format!("SMTP {}:{}, no auth/TLS, web UI {}", mail.host, mail.smtp_port, mail.web_url)
 }
 
 fn database_lines(db: &DatabaseConnectionDto, indent: &str) -> String {
@@ -121,6 +130,9 @@ pub fn project(p: &ProjectDto) -> String {
     match &p.database {
         Some(db) => out.push_str(&format!("  database:\n{}\n", database_lines(db, "    "))),
         None => out.push_str("  database:  none\n"),
+    }
+    if let Some(mail) = &p.mail {
+        out.push_str(&format!("  mail:      {}\n", mail_line(mail)));
     }
     let services: Vec<String> = p.environment.services.iter().map(|s| s.version.as_ref().map(|v| format!("{}-{v}", s.kind)).unwrap_or_else(|| s.kind.clone())).collect();
     out.push_str(&format!("  services:  {}\n", if services.is_empty() { "none".to_string() } else { services.join(", ") }));
@@ -454,10 +466,16 @@ pub fn agent_context(ctx: &AgentContextDto) -> String {
         }
         None => out.push_str("  none for this site\n"),
     }
+    if let Some(mail) = &ctx.mail {
+        out.push_str("\n## Mail (Mailpit)\n");
+        out.push_str(&format!("  smtp:      {}:{} (no authentication, no encryption)\n  web UI:    {}\n", mail.host, mail.smtp_port, mail.web_url));
+        out.push_str("  PHP mail() already sends there (php.ini SMTP/smtp_port). Frameworks: MAIL_MAILER=smtp, MAIL_HOST, MAIL_PORT.\n");
+    }
     if !ctx.services.is_empty() {
         out.push_str("\n## Services\n");
         for s in &ctx.services {
-            out.push_str(&format!("  {:<12} {}:{}\n", s.label, s.host, s.port));
+            let ui = s.ui_url.as_ref().map(|u| format!(" (web UI {u})")).unwrap_or_default();
+            out.push_str(&format!("  {:<12} {}:{}{ui}\n", s.label, s.host, s.port));
         }
     }
     out.push_str("\n## Logs (read with `lampo logs <source> [--tail N] [--follow]`)\n");
@@ -557,6 +575,9 @@ pub fn session_context(ctx: &AgentContextDto, live: Option<&[ServiceStatusDto]>)
         }
         None => out.push_str("- Database: none\n"),
     }
+    if let Some(mail) = &ctx.mail {
+        out.push_str(&format!("- Mail: caught by Mailpit, {}\n", mail_line(mail)));
+    }
     if !ctx.services.is_empty() {
         let services: Vec<String> = ctx
             .services
@@ -593,6 +614,9 @@ pub fn settings(s: &SettingsDto) -> String {
     for i in &s.services {
         let mode = if i.always_on { "always on" } else { "on demand" };
         rows.push(vec![format!("{} port", i.service), format!("{} ({}, {mode})", i.port, i.label)]);
+        if let Some(ui) = i.ui_port {
+            rows.push(vec![format!("{} ui-port", i.service), format!("{ui} ({} web UI, http://127.0.0.1:{ui})", i.label)]);
+        }
     }
     rows.push(vec!["loopback port range".into(), format!("{}-{}", s.loopback_port_range.start, s.loopback_port_range.end)]);
     rows.push(vec!["close to tray".into(), yes_no(s.close_to_tray).into()]);

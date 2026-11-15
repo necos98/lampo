@@ -81,7 +81,8 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let runners: Vec<Arc<dyn ServiceRunner>> = vec![
         Arc::new(web::ApacheRunner::new(process_supervisor.clone(), events.clone())),
         Arc::new(services::MysqlRunner::new(process_supervisor.clone(), commands.clone(), events.clone())),
-        Arc::new(services::RedisRunner::new(process_supervisor, events.clone())),
+        Arc::new(services::RedisRunner::new(process_supervisor.clone(), events.clone())),
+        Arc::new(services::MailpitRunner::new(process_supervisor, events.clone())),
     ];
     let user = std::env::var("USERNAME").unwrap_or_else(|_| "user".into());
     let pipe = instance_pipe_name(&user, isolated_home.as_deref());

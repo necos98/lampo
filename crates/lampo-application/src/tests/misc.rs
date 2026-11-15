@@ -214,7 +214,9 @@ async fn service_queries_and_manual_control() {
     w.hosts_in_sync();
     let queries = Arc::new(ServiceQueries::new(w.runners(), w.services.clone(), w.projects.clone(), w.worktrees.clone(), w.settings.clone()));
     let list = queries.list().unwrap();
-    assert_eq!(list.iter().map(|s| s.service.as_str()).collect::<Vec<_>>(), ["apache", "mysql-8.4", "mysql-5.7", "redis"]);
+    assert_eq!(list.iter().map(|s| s.service.as_str()).collect::<Vec<_>>(), ["apache", "mysql-8.4", "mysql-5.7", "redis", "mailpit"]);
+    assert_eq!((list[4].port, list[4].ui_port, list[4].ui_url.as_deref()), (Some(1025), Some(8025), Some("http://127.0.0.1:8025")));
+    assert_eq!((list[3].ui_port, list[3].ui_url.as_deref()), (None, None));
     let mysql = &list[1];
     assert_eq!((mysql.required, mysql.required_by.clone(), mysql.state), (true, vec!["shop".to_string()], ServiceStateDto::Stopped));
     assert!(!list[2].required);
@@ -240,7 +242,7 @@ async fn service_queries_and_manual_control() {
     let status = StatusQuery::new(w.project_queries(), queries, Arc::new(|| true)).execute().await.unwrap();
     assert!(status.app_running);
     assert_eq!(status.projects.len(), 1);
-    assert_eq!(status.services.len(), 4);
+    assert_eq!(status.services.len(), 5);
 }
 
 #[tokio::test]

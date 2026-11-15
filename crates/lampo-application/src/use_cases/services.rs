@@ -63,6 +63,8 @@ impl ServiceQueries {
                     state: payload.as_ref().map(|p| p.state).unwrap_or(ServiceStateDto::Unknown),
                     pid: status.as_ref().and_then(|s| s.pid),
                     port: status.as_ref().and_then(|s| s.port).or_else(|| self.catalog.port(&id, &settings)),
+                    ui_port: self.catalog.ui_port(&id, &settings),
+                    ui_url: self.catalog.ui_url(&id, &settings),
                     message: status.and_then(|s| s.message),
                     required: plan.contains_key(&id),
                     required_by: plan.get(&id).map(|sites| sites.iter().map(|s| s.to_string()).collect()).unwrap_or_default(),
@@ -106,6 +108,8 @@ impl ServiceStatusSource for OfflineServiceStatus {
                 state: ServiceStateDto::Unknown,
                 pid: None,
                 port: self.catalog.port(&id, &settings),
+                ui_port: self.catalog.ui_port(&id, &settings),
+                ui_url: self.catalog.ui_url(&id, &settings),
                 message: Some("the Lampo app is not running".into()),
                 required: false,
                 required_by: Vec::new(),
@@ -171,8 +175,10 @@ impl ServiceControl {
             return Ok(false);
         }
         let launch = self.catalog.launch(id, &self.settings.load()?, &self.installed.list()?, &self.paths)?;
-        if let PortAvailability::InUse { owner } = self.port_probe.check(launch.port)? {
-            return Err(PortError::PortInUse { port: launch.port, owner }.into());
+        for port in launch.ports() {
+            if let PortAvailability::InUse { owner } = self.port_probe.check(port)? {
+                return Err(PortError::PortInUse { port, owner }.into());
+            }
         }
         runner.prepare(&launch).await?;
         runner.start(&launch).await?;

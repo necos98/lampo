@@ -458,7 +458,7 @@ async fn shutdown_stops_custom_mysql_series_too() {
     use lampo_domain::settings::ServiceInstanceSettings;
     let w = World::with_basics();
     let custom = MysqlSeries::parse("8.0").unwrap();
-    w.settings.0.lock().unwrap().services.push(ServiceInstanceSettings { service: custom.service_id(), port: 3308, always_on: false });
+    w.settings.0.lock().unwrap().services.push(ServiceInstanceSettings::new(custom.service_id(), 3308, false));
     w.mysql.set(&custom.service_id(), ServiceState::Running);
     w.apache.set(&ServiceId::apache(), ServiceState::Running);
     Shutdown::new(w.runners(), w.services.clone(), w.settings.clone()).run().await.unwrap();

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use lampo_domain::logs::LogSource;
 use lampo_domain::paths::LampoPaths;
 use lampo_domain::ports::{ControlChannelClient, FileSystemInspector, GitInspector, ProjectRepository, SettingsRepository, WorktreeRepository};
+use lampo_domain::service::ServiceKind;
 use lampo_domain::site::SiteId;
 
 use super::resolution::{SiteResolver, resolution_to_dto};
@@ -12,7 +13,7 @@ use super::service_catalog::ServiceCatalog;
 use super::support::{composer_channel_name, validation, worktree_dto};
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::mapping::connection_to_dto;
+use crate::mapping::{connection_to_dto, mail_to_dto};
 
 /// `lampo agent context`. Inside a git worktree with an environment: that environment's URL
 /// and database; without one: the parent's data plus a hint to run `lampo worktree up`.
@@ -79,6 +80,7 @@ impl AgentContextQuery {
             document_root: None,
             php,
             database: None,
+            mail: None,
             services: Vec::new(),
             logs: Vec::new(),
             commands: cli_command_catalog(),
@@ -132,12 +134,22 @@ impl AgentContextQuery {
                     project.id
                 ));
             }
+            if project.environment.uses(&ServiceKind::MAILPIT) {
+                ctx.mail = Some(mail_to_dto(&settings.mail_connection()));
+            }
             ctx.services = project
                 .environment
                 .service_ids()
                 .filter_map(|id| {
                     let port = self.services.port(&id, &settings)?;
-                    Some(ServiceEndpointDto { service: id.to_string(), kind: id.kind().to_string(), label: self.services.label(&id), host: "127.0.0.1".into(), port })
+                    Some(ServiceEndpointDto {
+                        service: id.to_string(),
+                        kind: id.kind().to_string(),
+                        label: self.services.label(&id),
+                        host: "127.0.0.1".into(),
+                        port,
+                        ui_url: self.services.ui_url(&id, &settings),
+                    })
                 })
                 .collect();
             ctx.logs = LogSource::for_site(site, self.services.with_error_log(project.environment.service_ids()))
@@ -202,7 +214,7 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         c("lampo project set-php", "lampo project set-php <minor> [<id>]", "Switch the project's PHP minor.", true, true),
         c(
             "lampo project set",
-            "lampo project set [<id>] [--ext <name>] [--no-ext <name>] [--addon xdebug|php-redis] [--no-addon <kind>] [--ini <key>=<value>] [--no-ini <key>] [--service redis|mysql[@<series>]] [--no-service <kind>] [--database <name>] [--public-dir <dir>] [--apache-directives <text>] [--name <name>] [--address <addr>] [--no-address <addr>]",
+            "lampo project set [<id>] [--ext <name>] [--no-ext <name>] [--addon xdebug|php-redis] [--no-addon <kind>] [--ini <key>=<value>] [--no-ini <key>] [--service redis|mailpit|mysql[@<series>]] [--no-service <kind>] [--database <name>] [--public-dir <dir>] [--apache-directives <text>] [--name <name>] [--address <addr>] [--no-address <addr>]",
             "Change the project's extensions, add-ons, php.ini values, services, database name, public folder, Apache directives, display name or addresses (repeatable flags, one atomic edit). Addresses: <name>.localhost, 127.0.0.1:<port>, loopback (free port), or a hosts-file <name>.<tld> (needs --allow-elevation).",
             true,
             true,
@@ -242,10 +254,16 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         c("lampo doctor", "lampo doctor [--json]", "Diagnose the installation (VC++ runtimes, ports, PATH shadowing…).", false, false),
         c("lampo shims status", "lampo shims status [--json]", "Whether the php/composer/mysql shims are installed, on PATH and not shadowed.", false, false),
         c("lampo shims install", "lampo shims install", "Install the shims and add their folder to the user PATH (no elevation).", true, false),
-        c("lampo settings get", "lampo settings [get] [--json]", "Show the global settings: Apache, MySQL and Redis ports, default PHP, loopback port range.", false, false),
+        c(
+            "lampo settings get",
+            "lampo settings [get] [--json]",
+            "Show the global settings: Apache, MySQL, Redis and Mailpit (SMTP + web UI) ports, default PHP, loopback port range.",
+            false,
+            false,
+        ),
         c(
             "lampo settings set",
-            "lampo settings set [--apache-port <port>] [--mysql-port <series>=<port>] [--redis-port <port>] [--port <service>=<port>] [--default-php <minor>] [--loopback-range <start>-<end>]",
+            "lampo settings set [--apache-port <port>] [--mysql-port <series>=<port>] [--redis-port <port>] [--port <service>=<port>] [--ui-port <service>=<port>] [--default-php <minor>] [--loopback-range <start>-<end>]",
             "Change ports (checked for conflicts and use; running services restart on the new port), the default PHP or the loopback range. Ask the user before changing ports.",
             true,
             true,

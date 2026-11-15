@@ -117,6 +117,7 @@ pub fn all() -> Vec<Arc<dyn PackageInstallHook>> {
         Arc::new(RequiredFilesHook { kind: PackageKind::APACHE, files: &["bin/httpd.exe"] }),
         Arc::new(RequiredFilesHook { kind: PackageKind::MYSQL, files: &["bin/mysqld.exe", "bin/mysql.exe", "bin/mysqldump.exe"] }),
         Arc::new(RequiredFilesHook { kind: PackageKind::REDIS, files: &["redis-server.exe", "redis-cli.exe"] }),
+        Arc::new(RequiredFilesHook { kind: PackageKind::MAILPIT, files: &["mailpit.exe"] }),
         Arc::new(RequiredFilesHook { kind: PackageKind::COMPOSER, files: &["composer.phar"] }),
         Arc::new(RequiredFilesHook { kind: PackageKind::XDEBUG, files: &["php_xdebug.dll"] }),
         Arc::new(RequiredFilesHook { kind: PackageKind::PHP_REDIS, files: &["php_redis.dll"] }),

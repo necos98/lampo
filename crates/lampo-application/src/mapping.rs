@@ -10,7 +10,7 @@ use lampo_domain::package::{PackageId, PackageKind};
 use lampo_domain::php::{ExtensionName, PhpMinor, php_ini_overrides};
 use lampo_domain::project::{ApacheDirectives, ProjectEnvironment, PublicDir, TlsMode};
 use lampo_domain::service::ServiceKind;
-use lampo_domain::settings::{ServiceInstanceSettings, Settings};
+use lampo_domain::settings::{MailConnection, ServiceInstanceSettings, Settings};
 use lampo_domain::version::{PackageVersion, VersionSeries};
 use lampo_domain::worktree::{DatabaseMode, PortRange};
 use lampo_domain::DomainError;
@@ -78,6 +78,10 @@ pub fn connection_to_dto(c: &DatabaseConnection) -> DatabaseConnectionDto {
     DatabaseConnectionDto { mysql_version: c.series.to_string(), host: c.host.clone(), port: c.port, user: c.user.clone(), password: c.password.clone(), database: c.database.to_string() }
 }
 
+pub fn mail_to_dto(m: &MailConnection) -> MailConnectionDto {
+    MailConnectionDto { host: m.host.clone(), smtp_port: m.smtp_port, web_url: m.web_url() }
+}
+
 pub fn package_id_to_dto(id: &PackageId) -> PackageIdDto {
     PackageIdDto { kind: id.kind.to_string(), version: id.version.to_string(), php_version: id.php.map(|p| p.to_string()) }
 }
@@ -99,7 +103,11 @@ pub fn settings_to_dto(s: &Settings, catalog: &ServiceCatalog) -> SettingsDto {
         default_php_version: s.default_php.map(|p| p.to_string()),
         tld: s.tld.to_string(),
         apache_port: s.apache_port,
-        services: s.services.iter().map(|i| ServiceInstanceDto { service: i.service.to_string(), label: catalog.label(&i.service), port: i.port, always_on: i.always_on }).collect(),
+        services: s
+            .services
+            .iter()
+            .map(|i| ServiceInstanceDto { service: i.service.to_string(), label: catalog.label(&i.service), port: i.port, always_on: i.always_on, ui_port: catalog.ui_port(&i.service, s) })
+            .collect(),
         loopback_port_range: PortRangeDto { start: s.loopback_ports.start, end: s.loopback_ports.end },
         close_to_tray: s.close_to_tray,
         first_run_completed: s.first_run_completed,
@@ -115,7 +123,7 @@ pub fn settings_from_dto(dto: &SettingsDto, current: &Settings) -> Result<Settin
         services: dto
             .services
             .iter()
-            .map(|i| Ok(ServiceInstanceSettings { service: i.service.trim().parse()?, port: i.port, always_on: i.always_on }))
+            .map(|i| Ok(ServiceInstanceSettings { service: i.service.trim().parse()?, port: i.port, always_on: i.always_on, ui_port: i.ui_port }))
             .collect::<Result<_, DomainError>>()?,
         loopback_ports: PortRange::new(dto.loopback_port_range.start, dto.loopback_port_range.end)?,
         close_to_tray: dto.close_to_tray,
@@ -182,7 +190,7 @@ mod tests {
     #[test]
     fn service_kinds_come_from_the_registered_descriptors() {
         let kinds = service_kinds_to_dto(&catalog(), &Settings::default());
-        assert_eq!(kinds.iter().map(|k| (k.kind.as_str(), k.versioned)).collect::<Vec<_>>(), [("mysql", true), ("redis", false)]);
+        assert_eq!(kinds.iter().map(|k| (k.kind.as_str(), k.versioned)).collect::<Vec<_>>(), [("mysql", true), ("redis", false), ("mailpit", false)]);
         assert_eq!(kinds[0].versions, ["8.4", "5.7"]);
         assert_eq!(kinds[0].default_version.as_deref(), Some("8.4"));
         let _ = Arc::new(0);

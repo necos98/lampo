@@ -79,3 +79,14 @@ pub struct DatabaseSetupDto {
     /// Why, for `package-missing` and `failed`.
     pub message: Option<String>,
 }
+
+/// Where a site's mail goes (the shared Mailpit), shown like the database connection.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailConnectionDto {
+    pub host: String,
+    /// Plain SMTP: no authentication needed (any credentials are accepted), no encryption.
+    pub smtp_port: u16,
+    /// The web UI showing the caught messages (`http://127.0.0.1:8025`).
+    pub web_url: String,
+}

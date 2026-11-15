@@ -299,8 +299,15 @@ async fn real_apache_serves_php_sites() {
     // 2. Start through the runner.
     let supervisor = Arc::new(TokioSupervisor::default());
     let runner = ApacheRunner::new(supervisor.clone(), Arc::new(PrintEvents));
-    let launch =
-        ServiceLaunch { service: ServiceId::apache(), install_dir: apache.clone(), port: shared, config_dir: config.config_dir.clone(), data_dir: None, log_dir: config.log_dir.clone() };
+    let launch = ServiceLaunch {
+        service: ServiceId::apache(),
+        install_dir: apache.clone(),
+        port: shared,
+        ui_port: None,
+        config_dir: config.config_dir.clone(),
+        data_dir: None,
+        log_dir: config.log_dir.clone(),
+    };
     runner.prepare(&launch).await.unwrap();
     runner.start(&launch).await.expect("httpd starts");
     let pid = runner.status(&ServiceId::apache()).pid;

@@ -212,6 +212,17 @@ mod tests {
         assert_snapshot("php56-xdebug2.ini", &PhpIniRenderer.render(&s, &inputs));
     }
 
+    /// The Mailpit values the application merges in for sites using it render as plain
+    /// directives `mail()` reads.
+    #[test]
+    fn mail_settings_render_as_plain_directives() {
+        let s = spec("8.4", r"C:\Lampo\php-8.4.1", vec![], &[("SMTP", "127.0.0.1"), ("smtp_port", "1025"), ("sendmail_from", "lampo@localhost")]);
+        let ini = PhpIniRenderer.render(&s, &IniInputs::default());
+        for line in ["SMTP = 127.0.0.1\n", "smtp_port = 1025\n", "sendmail_from = lampo@localhost\n"] {
+            assert!(ini.contains(line), "{line:?} missing from:\n{ini}");
+        }
+    }
+
     #[test]
     fn writer_uses_php_ini_development_and_creates_site_dirs() {
         let root = tempfile::tempdir().unwrap();

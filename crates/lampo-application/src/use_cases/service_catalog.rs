@@ -63,6 +63,24 @@ impl ServiceCatalog {
         settings.service_port(id).or_else(|| self.descriptor(id.kind()).filter(|d| !d.versioned()).map(|d| d.default_port()))
     }
 
+    /// Web UI port of `id` for kinds with a second listener (Mailpit): the configured one,
+    /// else the kind's default. `None` for single-port kinds.
+    pub fn ui_port(&self, id: &ServiceId, settings: &Settings) -> Option<u16> {
+        let default = self.descriptor(id.kind())?.default_ui_port()?;
+        Some(settings.service_ui_port(id).unwrap_or(default))
+    }
+
+    /// `http://127.0.0.1:<ui port>` for kinds with a web UI.
+    pub fn ui_url(&self, id: &ServiceId, settings: &Settings) -> Option<String> {
+        self.ui_port(id, settings).map(|p| format!("http://127.0.0.1:{p}"))
+    }
+
+    /// The php.ini values the services `env` uses contribute (Mailpit's `SMTP`/`smtp_port`),
+    /// in service order; the project's own php.ini values are merged on top by the caller.
+    pub fn php_ini(&self, env: &ProjectEnvironment, settings: &Settings) -> Vec<(&'static str, String)> {
+        env.service_ids().filter_map(|id| Some((self.descriptor(id.kind())?, self.port(&id, settings)?))).flat_map(|(d, port)| d.php_ini(port)).collect()
+    }
+
     /// `MySQL 8.4`; the id itself for unknown kinds.
     pub fn label(&self, id: &ServiceId) -> String {
         self.descriptor(id.kind()).map(|d| d.label(id)).unwrap_or_else(|| id.to_string())
@@ -70,7 +88,12 @@ impl ServiceCatalog {
 
     /// Ports of the services the configuration plans to run, with the service id text.
     pub fn planned_ports(&self, projects: &[Project], worktrees: &[WorktreeEnvironment], settings: &Settings) -> Vec<(String, u16)> {
-        plan_services(projects, worktrees, settings).keys().filter_map(|id| self.port(id, settings).map(|p| (id.to_string(), p))).collect()
+        let mut out = Vec::new();
+        for id in plan_services(projects, worktrees, settings).keys() {
+            out.extend(self.port(id, settings).map(|p| (id.to_string(), p)));
+            out.extend(self.ui_port(id, settings).map(|p| (format!("{id} (web UI)"), p)));
+        }
+        out
     }
 
     /// Rejects services of unknown kinds and versions the kind does not accept.
@@ -95,6 +118,7 @@ impl ServiceCatalog {
             service: service.clone(),
             install_dir: package.install_dir.clone(),
             port,
+            ui_port: self.ui_port(service, settings),
             config_dir: paths.service_config_dir(service),
             data_dir: d.has_data_dir().then(|| paths.service_data_dir(service)),
             log_dir: paths.service_log_dir(service),

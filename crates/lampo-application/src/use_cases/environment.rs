@@ -136,7 +136,7 @@ impl ApplyEnvironment {
 
     /// Writes the php.ini files and the shim index; returns the specs written.
     fn write_files(&self, snap: &ConfigSnapshot, warnings: &mut Vec<String>) -> AppResult<Vec<PhpIniSpec>> {
-        let specs = php_ini_specs(snap, &self.deps.paths, warnings);
+        let specs = php_ini_specs(snap, &self.deps.services, &self.deps.paths, warnings);
         for spec in &specs {
             if let Err(e) = self.deps.php_ini.write(spec) {
                 warnings.push(format!("php.ini of `{}` not written: {e}", spec.site));
@@ -293,7 +293,7 @@ impl ApplyEnvironment {
             } else {
                 let ports = match web {
                     Some(w) => w.desired.listen_ports(),
-                    None => vec![launch.port],
+                    None => launch.ports(),
                 };
                 if let Some(busy) = self.port_busy(&ports) {
                     out.fail(busy);

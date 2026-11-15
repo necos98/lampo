@@ -44,6 +44,14 @@ fn patch_request(args: SettingsSetArgs) -> AppResult<SettingsPatchRequest> {
         let (service, port) = assignment("--port", "SERVICE=PORT", pair)?;
         put(service.to_ascii_lowercase(), port)?;
     }
+    let mut service_ui_ports = BTreeMap::new();
+    for pair in &args.ui_port {
+        let (service, port) = assignment("--ui-port", "SERVICE=PORT", pair)?;
+        let service = service.to_ascii_lowercase();
+        if service_ui_ports.insert(service.clone(), port).is_some() {
+            return Err(validation(format!("the web UI port of {service} is given twice")));
+        }
+    }
     let loopback_port_range = args
         .loopback_range
         .as_deref()
@@ -52,7 +60,7 @@ fn patch_request(args: SettingsSetArgs) -> AppResult<SettingsPatchRequest> {
             parsed.ok_or_else(|| validation(format!("--loopback-range expects START-END (`8100-8199`), got `{range}`")))
         })
         .transpose()?;
-    Ok(SettingsPatchRequest { apache_port: args.apache_port, service_ports, default_php_version: args.default_php, loopback_port_range })
+    Ok(SettingsPatchRequest { apache_port: args.apache_port, service_ports, service_ui_ports, default_php_version: args.default_php, loopback_port_range })
 }
 
 /// `NAME=PORT` with a port in 1-65535.

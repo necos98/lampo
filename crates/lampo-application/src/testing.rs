@@ -764,6 +764,7 @@ pub struct World {
     pub apache: Arc<FakeRunner>,
     pub mysql: Arc<FakeRunner>,
     pub redis: Arc<FakeRunner>,
+    pub mailpit: Arc<FakeRunner>,
     pub ports: Arc<FakePorts>,
     pub fs: Arc<FakeFs>,
     pub git: Arc<FakeGit>,
@@ -798,12 +799,13 @@ impl World {
         let apache = FakeRunner::new(ServiceKind::APACHE);
         let mysql = FakeRunner::new(ServiceKind::MYSQL);
         let redis = FakeRunner::new(ServiceKind::REDIS);
+        let mailpit = FakeRunner::new(ServiceKind::MAILPIT);
         let mut kinds = lampo_domain::service::builtin::all();
         kinds.extend(extra_kinds);
         let services = Arc::new(ServiceCatalog::new(kinds));
         let ports = Arc::new(FakePorts::default());
         let events = Arc::new(RecordingEvents::default());
-        let mut runners: Vec<Arc<dyn ServiceRunner>> = vec![apache.clone(), mysql.clone(), redis.clone()];
+        let mut runners: Vec<Arc<dyn ServiceRunner>> = vec![apache.clone(), mysql.clone(), redis.clone(), mailpit.clone()];
         runners.extend(extra_runners);
         let env = Arc::new(ApplyEnvironment::new(ApplyEnvironmentDeps {
             projects: projects.clone(),
@@ -845,6 +847,7 @@ impl World {
             apache,
             mysql,
             redis,
+            mailpit,
             ports,
             fs: Arc::new(FakeFs::default()),
             git: Arc::new(FakeGit::default()),
@@ -996,17 +999,18 @@ impl World {
     }
 
     pub fn runners(&self) -> Vec<Arc<dyn ServiceRunner>> {
-        vec![self.apache.clone(), self.mysql.clone(), self.redis.clone()]
+        vec![self.apache.clone(), self.mysql.clone(), self.redis.clone(), self.mailpit.clone()]
     }
 
     pub fn all_calls(&self) -> Vec<String> {
-        [self.apache.calls(), self.mysql.calls(), self.redis.calls()].concat()
+        [self.apache.calls(), self.mysql.calls(), self.redis.calls(), self.mailpit.calls()].concat()
     }
 
     pub fn clear_calls(&self) {
         self.apache.clear();
         self.mysql.clear();
         self.redis.clear();
+        self.mailpit.clear();
     }
 }
 
@@ -1076,6 +1080,7 @@ pub fn fake_layout(mut p: InstalledPackage) -> InstalledPackage {
         "mod-fcgid" => vec![(EntryRole::ApacheModule, dir.join("mod_fcgid.so"))],
         "mysql" => vec![(EntryRole::ClientDir, dir.join("bin"))],
         "redis" => vec![(EntryRole::Cli, dir.join("redis-cli.exe")), (EntryRole::ClientDir, dir.clone())],
+        "mailpit" => vec![(EntryRole::Cli, dir.join("mailpit.exe")), (EntryRole::ClientDir, dir.clone())],
         "composer" => vec![(EntryRole::Phar, dir.join("composer.phar"))],
         "xdebug" | "php-redis" => {
             let name = if p.id.kind.as_str() == "xdebug" { "xdebug" } else { "redis" };

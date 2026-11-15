@@ -67,14 +67,20 @@ pub(crate) fn base_ini() -> PhpIniOverrides {
     php_ini_overrides(BASE_INI.iter().copied()).expect("built-in ini values are valid")
 }
 
+/// The php.ini values contributed by the services `env` uses (`ServiceDescriptor::php_ini`).
+pub(crate) fn service_ini(catalog: &ServiceCatalog, env: &ProjectEnvironment, settings: &Settings) -> PhpIniOverrides {
+    php_ini_overrides(catalog.php_ini(env, settings)).expect("built-in service ini values are valid")
+}
+
 pub(crate) fn bundled(name: &ExtensionName) -> ExtensionLoad {
     ExtensionLoad { name: name.clone(), zend: is_zend_extension(name), dll: None }
 }
 
 /// One php.ini per site (projects active or not, so the shims get the right extensions, and
 /// every worktree environment), plus the default CLI one. Sites whose PHP is not installed are
-/// skipped with a warning.
-pub(crate) fn php_ini_specs(snap: &ConfigSnapshot, paths: &LampoPaths, warnings: &mut Vec<String>) -> Vec<PhpIniSpec> {
+/// skipped with a warning. A site gets the php.ini values of the services it uses (Mailpit:
+/// `SMTP`/`smtp_port` for `mail()`) between Lampo's base values and its own, which win.
+pub(crate) fn php_ini_specs(snap: &ConfigSnapshot, catalog: &ServiceCatalog, paths: &LampoPaths, warnings: &mut Vec<String>) -> Vec<PhpIniSpec> {
     let mut specs = Vec::new();
     for site in snap.sites() {
         let env = site.environment();
@@ -96,7 +102,7 @@ pub(crate) fn php_ini_specs(snap: &ConfigSnapshot, paths: &LampoPaths, warnings:
             php_dir: dir,
             output_dir: paths.php_ini_dir(&site.id),
             extensions,
-            values: merge_ini(&base_ini(), &env.php_ini),
+            values: merge_ini(&merge_ini(&base_ini(), &service_ini(catalog, env, &snap.settings)), &env.php_ini),
             error_log: LogSource::SitePhp(site.id.clone()).file(paths),
         });
     }

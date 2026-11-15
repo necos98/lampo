@@ -354,7 +354,7 @@ mod tests {
         std::fs::write(config_dir.join("httpd.conf"), b"").unwrap();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
-        let launch = ServiceLaunch { service: ServiceId::apache(), install_dir: install, port, config_dir, data_dir: None, log_dir: dir.path().join("logs") };
+        let launch = ServiceLaunch { service: ServiceId::apache(), install_dir: install, port, ui_port: None, config_dir, data_dir: None, log_dir: dir.path().join("logs") };
         let supervisor = Arc::new(FakeSupervisor::default());
         let events = Arc::new(Events::default());
         let signals = Arc::new(Signals::default());

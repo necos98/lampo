@@ -29,7 +29,7 @@ pub struct DetectionHint {
     /// Service kinds the project's own files show it uses (`mysql`, `redis`).
     #[serde(default)]
     pub services: Vec<ServiceKind>,
-    /// What Lampo cannot provide for this project (PostgreSQL, Mailpit…), developer-facing.
+    /// What Lampo cannot provide for this project (PostgreSQL, search engines…), developer-facing.
     #[serde(default)]
     pub warnings: Vec<String>,
 }

@@ -1,5 +1,5 @@
 //! Entries compiled into the binary from `frozen.toml`: EOL PHP builds (5.6–8.1), Apache
-//! Lounge + mod_fcgid, MySQL 8.4/5.7 zips, Redis for Windows, Composer stable + 2.2 LTS phar,
+//! Lounge + mod_fcgid, MySQL 8.4/5.7 zips, Redis for Windows, Mailpit, Composer stable + 2.2 LTS phar,
 //! Xdebug and phpredis DLLs pinned per PHP minor. Every entry has a SHA-256.
 
 use std::collections::BTreeSet;
@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn has_the_service_packages() {
         let entries = catalog();
-        for kind in [PackageKind::APACHE, PackageKind::MOD_FCGID, PackageKind::MYSQL, PackageKind::REDIS, PackageKind::COMPOSER] {
+        for kind in [PackageKind::APACHE, PackageKind::MOD_FCGID, PackageKind::MYSQL, PackageKind::REDIS, PackageKind::MAILPIT, PackageKind::COMPOSER] {
             assert!(latest(&entries, &kind, None).is_some(), "{kind}");
         }
         let mysql: Vec<_> = entries.iter().filter(|e| e.id.kind == PackageKind::MYSQL).map(|e| e.id.series().to_string()).collect();

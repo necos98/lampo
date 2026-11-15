@@ -13,6 +13,7 @@ use lampo_domain::site::SiteId;
 use lampo_domain::worktree::{DatabaseMode, WorktreeEnvironment};
 
 use super::{cli, gui};
+use crate::dto::SettingsPatchRequest;
 use crate::error::ErrorCode;
 use crate::testing::{FakeLocator, FakeRunner, World, mysql_id, php, redis_id};
 use crate::use_cases::{Doctor, EnvironmentSync, ServiceQueries};
@@ -295,7 +296,7 @@ async fn uninstalling_a_php_regenerates_the_shim_index() {
     assert_eq!(w.shim_index.writes.load(Ordering::SeqCst), writes + 1);
 }
 
-/// H2: a service kind the code has never heard of (Mailpit) works end to end once a descriptor
+/// H2: a service kind the code has never heard of (Memcached) works end to end once a descriptor
 /// and a runner are registered: projects name it, the plan starts it on its default port with a
 /// generated config dir, listings and package requirements include it.
 #[tokio::test]
@@ -304,22 +305,22 @@ async fn a_new_service_kind_is_added_by_registering_a_descriptor_and_a_runner() 
     use lampo_domain::service::{ServiceClient, ServiceDescriptor, ServiceKind};
     use std::sync::Arc;
 
-    struct Mailpit;
-    impl ServiceDescriptor for Mailpit {
+    struct Memcached;
+    impl ServiceDescriptor for Memcached {
         fn kind(&self) -> ServiceKind {
-            ServiceKind::new("mailpit").unwrap()
+            ServiceKind::new("memcached").unwrap()
         }
         fn display_name(&self) -> &'static str {
-            "Mailpit"
+            "Memcached"
         }
         fn package_kind(&self) -> PackageKind {
-            PackageKind::new("mailpit").unwrap()
+            PackageKind::new("memcached").unwrap()
         }
         fn versioned(&self) -> bool {
             false
         }
         fn default_port(&self) -> u16 {
-            8025
+            11211
         }
         fn has_data_dir(&self) -> bool {
             false
@@ -332,32 +333,128 @@ async fn a_new_service_kind_is_added_by_registering_a_descriptor_and_a_runner() 
         }
     }
 
-    let runner = FakeRunner::new(ServiceKind::new("mailpit").unwrap());
-    let w = World::with_kinds(vec![Arc::new(Mailpit)], vec![runner.clone()]);
+    let runner = FakeRunner::new(ServiceKind::new("memcached").unwrap());
+    let w = World::with_kinds(vec![Arc::new(Memcached)], vec![runner.clone()]);
     for (kind, v) in
-        [(PackageKind::APACHE, "2.4.62"), (PackageKind::MOD_FCGID, "2.3.10"), (PackageKind::PHP, "8.3.14"), (PackageKind::MYSQL, "8.4.3"), (PackageKind::new("mailpit").unwrap(), "1.21.0")]
+        [(PackageKind::APACHE, "2.4.62"), (PackageKind::MOD_FCGID, "2.3.10"), (PackageKind::PHP, "8.3.14"), (PackageKind::MYSQL, "8.4.3"), (PackageKind::new("memcached").unwrap(), "1.6.38")]
     {
         w.installed.add(kind, v, None);
     }
     w.settings.0.lock().unwrap().first_run_completed = true;
     w.project("shop", r"C:\sites\shop", true);
-    w.update_project("shop", |p| p.environment.use_service(ServiceKind::new("mailpit").unwrap(), None));
+    w.update_project("shop", |p| p.environment.use_service(ServiceKind::new("memcached").unwrap(), None));
     w.hosts_in_sync();
 
     let report = w.env.sync(&gui()).await.unwrap();
-    assert!(report.started.contains(&"mailpit".to_string()), "{report:?}");
+    assert!(report.started.contains(&"memcached".to_string()), "{report:?}");
     let launch = runner.launches.lock().unwrap().last().cloned().unwrap();
-    assert_eq!((launch.port, launch.data_dir.is_none()), (8025, true));
-    assert_eq!(launch.config_dir, w.paths.generated_dir().join("mailpit"));
+    assert_eq!((launch.port, launch.data_dir.is_none()), (11211, true));
+    assert_eq!(launch.config_dir, w.paths.generated_dir().join("memcached"));
 
     let listed = ServiceQueries::new(w.runners(), w.services.clone(), w.projects.clone(), w.worktrees.clone(), w.settings.clone()).list().unwrap();
-    let mailpit = listed.iter().find(|s| s.service == "mailpit").unwrap();
-    assert_eq!((mailpit.label.as_str(), mailpit.required_by.clone()), ("Mailpit", vec!["shop".to_string()]));
+    let memcached = listed.iter().find(|s| s.service == "memcached").unwrap();
+    assert_eq!((memcached.label.as_str(), memcached.required_by.clone()), ("Memcached", vec!["shop".to_string()]));
     assert!(listed.iter().any(|s| s.service == redis_id().to_string()));
     assert!(listed.iter().any(|s| s.service == mysql_id("8.4").to_string()));
 
     // Without the package the doctor reports it like any other.
-    w.installed.remove(&w.installed.list().unwrap().into_iter().find(|p| p.id.kind.as_str() == "mailpit").unwrap().id).unwrap();
+    w.installed.remove(&w.installed.list().unwrap().into_iter().find(|p| p.id.kind.as_str() == "memcached").unwrap().id).unwrap();
     let report = Doctor::new(w.doctor_deps(Arc::new(FakeLocator::default()))).run().await.unwrap();
-    assert!(report.missing_packages.contains(&"mailpit".to_string()), "{:?}", report.missing_packages);
+    assert!(report.missing_packages.contains(&"memcached".to_string()), "{:?}", report.missing_packages);
+}
+
+/// Mailpit, the built-in mail catcher: started for the sites using it on its SMTP and web UI
+/// ports with a persistent data dir, `mail()` pointed at it through php.ini (project values
+/// win), shown in listings and project details, its web UI port editable like any port.
+#[tokio::test]
+async fn mailpit_runs_for_its_sites_and_feeds_php_mail() {
+    use lampo_domain::php::php_ini_overrides;
+
+    let w = World::with_basics();
+    w.installed.add(PackageKind::MAILPIT, "1.33.1", None);
+    w.project("shop", r"C:\sites\shop", true);
+    w.project("blog", r"C:\sites\blog", true);
+    w.project("old", r"C:\sites\old", true);
+    w.update_project("shop", |p| p.environment.use_service(ServiceKind::MAILPIT, None));
+    w.update_project("old", |p| {
+        p.environment.use_service(ServiceKind::MAILPIT, None);
+        p.environment.php_ini = php_ini_overrides([("smtp_port", "2525")]).unwrap();
+    });
+    w.hosts_in_sync();
+
+    let report = w.env.sync(&gui()).await.unwrap();
+    assert!(report.started.contains(&"mailpit".to_string()), "{report:?}");
+    let mailpit = ServiceId::new(ServiceKind::MAILPIT, None);
+    let launch = w.mailpit.launches.lock().unwrap().last().cloned().unwrap();
+    assert_eq!((launch.port, launch.ui_port), (1025, Some(8025)));
+    assert_eq!(launch.data_dir, Some(w.paths.service_data_dir(&mailpit)));
+
+    let ini = |site: &str| w.ini.0.lock().unwrap().iter().find(|s| s.site.to_string() == site).cloned().unwrap();
+    let value = |site: &str, key: &str| ini(site).values.iter().find(|(k, _)| k.as_str() == key).map(|(_, v)| v.as_str().to_string());
+    assert_eq!((value("shop", "SMTP"), value("shop", "smtp_port")), (Some("127.0.0.1".into()), Some("1025".into())));
+    assert_eq!(value("shop", "sendmail_from").as_deref(), Some("lampo@localhost"));
+    assert_eq!(value("old", "smtp_port").as_deref(), Some("2525"), "the project's own php.ini value wins");
+    assert_eq!((value("blog", "SMTP"), value("blog", "smtp_port")), (None, None), "sites without Mailpit are unchanged");
+
+    let shop = w.project_queries().get("shop").unwrap();
+    let mail = shop.mail.unwrap();
+    assert_eq!((mail.host.as_str(), mail.smtp_port, mail.web_url.as_str()), ("127.0.0.1", 1025, "http://127.0.0.1:8025"));
+    assert!(w.project_queries().get("blog").unwrap().mail.is_none());
+
+    // `lampo env` exports the SMTP endpoint (LAMPO_* only) and puts mailpit.exe on PATH.
+    let tc = crate::use_cases::ToolchainQuery::new(w.resolver(), w.paths.clone());
+    let shop_dir = || crate::dto::ResolveRequestDto { cwd: r"C:\sites\shop".into(), explicit_site: None };
+    let env = tc.env(&shop_dir()).unwrap();
+    assert_eq!(env.site.as_deref(), Some("shop"));
+    assert_eq!((env.vars["LAMPO_MAIL_HOST"].as_str(), env.vars["LAMPO_MAIL_PORT"].as_str()), ("127.0.0.1", "1025"));
+    assert!(env.path_prepend.iter().any(|p| p.ends_with("mailpit-1.33.1")), "{:?}", env.path_prepend);
+    assert!(!env.vars.contains_key("MAIL_PORT"));
+    let agent = crate::use_cases::AgentContextQuery::new(crate::use_cases::AgentContextDeps {
+        resolver: w.resolver(),
+        projects: w.projects.clone(),
+        worktrees: w.worktrees.clone(),
+        settings: w.settings.clone(),
+        git: w.git.clone(),
+        fs: w.fs.clone(),
+        control: w.control.clone(),
+        paths: w.paths.clone(),
+        services: w.services.clone(),
+    });
+    let ctx = agent.execute(&shop_dir()).unwrap();
+    assert_eq!(ctx.mail.as_ref().map(|m| (m.smtp_port, m.web_url.as_str())), Some((1025, "http://127.0.0.1:8025")));
+    let endpoint = ctx.services.iter().find(|s| s.service == "mailpit").unwrap();
+    assert_eq!((endpoint.port, endpoint.ui_url.as_deref()), (1025, Some("http://127.0.0.1:8025")));
+
+    // The web UI port changes like any port: the running instance restarts on it.
+    let request = SettingsPatchRequest { service_ui_ports: [("mailpit".to_string(), 9025)].into(), ..Default::default() };
+    let result = w.patch_settings().execute(request, &cli()).await.unwrap();
+    let changes: Vec<(&str, &str, &str)> = result.changes.iter().map(|c| (c.setting.as_str(), c.from.as_str(), c.to.as_str())).collect();
+    assert_eq!(changes, [("mailpit.ui-port", "8025", "9025")]);
+    assert!(result.sync.restarted.contains(&"mailpit".to_string()), "{:?}", result.sync);
+    assert_eq!(w.mailpit.launches.lock().unwrap().last().unwrap().ui_port, Some(9025));
+    assert!(result.notes.iter().any(|n| n.contains("web UI is now at http://127.0.0.1:9025")), "{:?}", result.notes);
+    assert_eq!(w.settings.load().unwrap().service_ui_port(&mailpit), Some(9025));
+
+    let no_ui = SettingsPatchRequest { service_ui_ports: [("redis".to_string(), 9026)].into(), ..Default::default() };
+    let e = w.patch_settings().execute(no_ui, &cli()).await.unwrap_err();
+    assert_eq!(e.code, ErrorCode::Validation);
+    assert!(e.message.contains("redis has no web UI port"), "{}", e.message);
+    let clash = SettingsPatchRequest { service_ui_ports: [("mailpit".to_string(), 3306)].into(), ..Default::default() };
+    assert_eq!(w.patch_settings().execute(clash, &cli()).await.unwrap_err().code, ErrorCode::Conflict);
+}
+
+/// A web UI port taken by another program blocks the start like the main port does.
+#[tokio::test]
+async fn mailpit_needs_its_web_ui_port_free() {
+    let w = World::with_basics();
+    w.installed.add(PackageKind::MAILPIT, "1.33.1", None);
+    w.project("shop", r"C:\sites\shop", true);
+    w.update_project("shop", |p| p.environment.use_service(ServiceKind::MAILPIT, None));
+    w.hosts_in_sync();
+    w.ports.busy(8025, "other.exe (pid 7)");
+    let e = w.env.sync(&gui()).await.unwrap_err();
+    assert_eq!(e.code, ErrorCode::PortInUse, "{e:?}");
+    assert!(w.mailpit.launches.lock().unwrap().is_empty());
+    let up = w.service_control.up(crate::dto::ServicesRequest { services: vec!["mailpit".into()] }, &cli()).await.unwrap_err();
+    assert_eq!(up.code, ErrorCode::PortInUse);
 }

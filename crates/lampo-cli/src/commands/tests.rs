@@ -981,6 +981,8 @@ async fn settings_set_maps_every_flag_to_one_patch() {
         "6380",
         "--port",
         "Mailpit=1025",
+        "--ui-port",
+        "mailpit=9025",
         "--default-php",
         "8.3",
         "--loopback-range",
@@ -993,6 +995,7 @@ async fn settings_set_maps_every_flag_to_one_patch() {
     let r = sent_settings_patch(&fake);
     assert_eq!(r.apache_port, Some(8080));
     assert_eq!(r.service_ports.into_iter().collect::<Vec<_>>(), [("mailpit".into(), 1025), ("mysql-5.7".into(), 3311), ("mysql-8.4".into(), 3310), ("redis".into(), 6380)]);
+    assert_eq!(r.service_ui_ports.into_iter().collect::<Vec<_>>(), [("mailpit".into(), 9025)]);
     assert_eq!(r.default_php_version.as_deref(), Some("8.3"));
     assert_eq!(r.loopback_port_range, Some(PortRangeDto { start: 8100, end: 8299 }));
 }
@@ -1023,6 +1026,8 @@ async fn settings_set_errors_keep_their_exit_codes() {
         &["settings", "set", "--mysql-port", "8.4", "--json"][..],
         &["settings", "set", "--mysql-port", "8.4=0", "--json"],
         &["settings", "set", "--redis-port", "6380", "--port", "redis=6381", "--json"],
+        &["settings", "set", "--ui-port", "mailpit", "--json"],
+        &["settings", "set", "--ui-port", "mailpit=9025,mailpit=9026", "--json"],
         &["settings", "set", "--loopback-range", "8100", "--json"],
     ] {
         let (code, out, _) = run_cli(&fake, args).await;
