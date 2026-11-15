@@ -120,6 +120,8 @@ async fn install_runs_the_whole_pipeline_and_adopts_the_first_php_as_default() {
     assert_eq!(dto.id, PackageIdDto { kind: "php".into(), version: "8.3.15".into(), php_version: None });
     assert_eq!(dto.path, "C:\\lampo\\packages\\php-8.3.15");
     assert_eq!(progress.stages(), [ProgressStage::Resolving, ProgressStage::Downloading, ProgressStage::Verifying, ProgressStage::Extracting, ProgressStage::Configuring]);
+    let subjects: Vec<Option<String>> = progress.0.lock().unwrap().iter().map(|p| p.subject.clone()).collect();
+    assert!(subjects.iter().all(|s| s.as_deref() == Some("php")), "every stage names the requested kind, so the UI can follow it: {subjects:?}");
     let downloads = k.downloader.downloads.lock().unwrap().clone();
     assert_eq!(downloads, [k.w.paths.downloads_dir().join("php-8.3.15-php-8.3.15.zip")]);
     assert_eq!(*k.downloader.discarded.lock().unwrap(), downloads, "the archive is deleted once extracted");

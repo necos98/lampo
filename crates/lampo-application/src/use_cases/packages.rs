@@ -258,6 +258,18 @@ pub struct InstallPackageDeps {
     pub events: Arc<dyn EventPublisher>,
 }
 
+/// Forwards every report with the same subject (the requested package kind).
+struct SubjectProgress<'a> {
+    inner: &'a dyn ProgressSink,
+    subject: String,
+}
+
+impl ProgressSink for SubjectProgress<'_> {
+    fn report(&self, progress: Progress) {
+        self.inner.report(progress.with_subject(self.subject.clone()));
+    }
+}
+
 /// Resolve → VC++ runtime check → download → verify SHA-256 → extract → hook → record → sync.
 /// Also used for one-click patch updates (install latest in series; projects bind to minors so
 /// they follow).
@@ -360,7 +372,10 @@ impl InstallPackage {
     /// package *is* installed; `lampo up` reports the environment problem).
     pub async fn execute(&self, request: InstallPackageRequest, ctx: &CallContext, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<InstalledPackageDto> {
         let d = &self.deps;
-        progress.report(Progress::new(ProgressStage::Resolving, 0, None).with_subject(request.kind.clone()));
+        // One subject for every stage, so a UI can follow one package through resolve,
+        // download (the downloader would name the file), extraction (unnamed) and configure.
+        let progress = &SubjectProgress { inner: progress, subject: request.kind.clone() };
+        progress.report(Progress::new(ProgressStage::Resolving, 0, None));
         let entry = self.resolve(&request).await?;
         if let Some(existing) = d.installed.list()?.into_iter().find(|p| p.id == entry.id) {
             // Settings may have been reset while packages stayed: still adopt it as the default.
