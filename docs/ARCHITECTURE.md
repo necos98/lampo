@@ -28,7 +28,7 @@ and `redis-cli`.
 | `crates/lampo-infra-store` | TOML repositories (projects, worktrees, settings, presets), app paths, app location file, shim index file, shim installer (shims + CLI copy), project detectors, git metadata reader, user PATH, clock, generated agent-plugin files | Lampo's own files |
 | `crates/lampo-infra-packages` | Embedded + windows.php.net catalogs, downloader, SHA-256, zip extraction, installed registry, VC++ runtime detection, post-install hooks | Where binaries come from |
 | `crates/lampo-infra-web` | Apache config templates + `httpd -t` + runner, php.ini rendering, hosts-file block via the elevated `lampo-hosts-helper` | Apache/PHP/hosts specifics |
-| `crates/lampo-infra-services` | Job Object supervisor, MySQL/Redis runners, port probe, log files, `DatabaseAdmin`, control named pipe, headless app launcher, `claude` CLI runner | Local processes and IPC |
+| `crates/lampo-infra-services` | Job Object supervisor, MySQL/Redis runners, port probe, log files, `DatabaseAdmin` (plain, `.sql.gz` and single-`.sql` `.zip` dumps, (de)compressed while streaming), control named pipe, headless app launcher, `claude` CLI runner | Local processes and IPC |
 | `crates/lampo-cli` | `lampo` CLI and `lampo-shim` (copied as `php.exe` etc.): two composition roots (`src/composition.rs`, `src/bin/lampo-shim.rs`, which registers the shim tools) | CLI surface |
 | `claude-plugin` | Claude Code plugin sources: `skills/<skill-id>/SKILL.md` + reference files and `icon.png` (embedded as is), trigger evals and a dev manifest (repository only) | What agents are taught |
 | `apps/desktop` | SvelteKit GUI (`src/lib/api` typed API, `src/lib/messages` Italian strings) and `src-tauri` (Tauri commands, tray, composition root) | GUI |

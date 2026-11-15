@@ -10,7 +10,7 @@
 //! | [`RedisRunner`]              | `ServiceRunner` for `ServiceKind::Redis`     |
 //! | [`TcpPortProbe`]             | `PortProbe`                                  |
 //! | [`FileLogReader`]            | `LogFileReader`                              |
-//! | [`MysqlCliAdmin`]            | `DatabaseAdmin`                              |
+//! | [`MysqlCliAdmin`]            | `DatabaseAdmin` (compressed dumps via [`compression`]) |
 //! | [`NamedPipeControlServer`]   | `ControlChannelServer`                       |
 //! | [`NamedPipeControlClient`]   | `ControlChannelClient`                       |
 //! | [`HeadlessAppLauncher`]      | `AppLauncher`                                |
@@ -25,6 +25,7 @@
 compile_error!("lampo-infra-services targets Windows only");
 
 pub mod claude_code;
+pub mod compression;
 pub mod control_pipe;
 pub mod database;
 pub mod launcher;

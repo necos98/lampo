@@ -13,13 +13,15 @@
 
 use std::collections::HashMap;
 use std::os::windows::io::OwnedHandle;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use lampo_domain::ports::{ChildId, CommandOutput, CommandRunner, CommandSpec, PipedCommand, PipedCommandRunner, ProcessObserver, ProcessSupervisor, SpawnedChild, StreamingCommandRunner};
+use lampo_domain::ports::{
+    ChildId, CommandOutput, CommandRunner, CommandSpec, PipedCommand, PipedCommandRunner, ProcessObserver, ProcessSupervisor, SpawnedChild, StreamCompression, StreamingCommandRunner,
+};
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::service::LogStream;
 use lampo_domain::{PortError, PortResult};
@@ -32,6 +34,7 @@ use windows_sys::Win32::System::JobObjects::{
 };
 use windows_sys::Win32::System::Threading::TerminateProcess;
 
+use crate::compression;
 use crate::process::{self, Input, Output};
 use crate::win::{self, owned, raw};
 
@@ -177,6 +180,61 @@ async fn relay(mut from: NamedPipeServer, mut to: NamedPipeServer, counter: Opti
     let _ = to.flush().await;
 }
 
+fn open_input(path: &Path) -> PortResult<std::fs::File> {
+    std::fs::File::open(path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound { PortError::not_found("file", path.display().to_string()) } else { PortError::io(format!("opening {}", path.display()), e) }
+    })
+}
+
+/// Why feeding a compressed input failed, with the stage's stdin still open (see [`feed`]).
+type FeedFailure = (String, NamedPipeServer);
+
+/// Decompresses `path` (on a blocking thread, a few chunks in flight) into the first stage's
+/// stdin; `position` = bytes of the compressed file consumed. A stage that stops reading ends it
+/// quietly (its own failure is reported by its exit code). On corrupt data the pipe is returned
+/// still open, so the caller can kill the stages before they see EOF.
+async fn feed(path: PathBuf, compression: StreamCompression, position: Arc<AtomicU64>, mut stdin: NamedPipeServer) -> Result<(), FeedFailure> {
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(4);
+    let decoder = tokio::task::spawn_blocking(move || compression::decode(&path, compression, &position, |chunk| tx.blocking_send(chunk).is_ok()));
+    let mut consumer_gone = false;
+    while let Some(chunk) = rx.recv().await {
+        if stdin.write_all(&chunk).await.is_err() {
+            consumer_gone = true;
+            break;
+        }
+    }
+    drop(rx);
+    match decoder.await {
+        Ok(Err(message)) if !consumer_gone => Err((message, stdin)),
+        Err(e) if !consumer_gone => Err((e.to_string(), stdin)),
+        _ => {
+            let _ = stdin.flush().await;
+            Ok(())
+        }
+    }
+}
+
+/// Gzips the last stage's stdout into `file` (on a blocking thread); `counter` = uncompressed
+/// bytes. A write failure drops the pipe, so the stage fails fast with a broken pipe.
+async fn encode_gzip(mut from: NamedPipeServer, file: std::fs::File, counter: Arc<AtomicU64>) -> std::io::Result<()> {
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(4);
+    let writer = tokio::task::spawn_blocking(move || compression::encode_gzip(file, || rx.blocking_recv()));
+    let mut buf = vec![0u8; compression::CHUNK];
+    loop {
+        let n = match from.read(&mut buf).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => n,
+        };
+        counter.fetch_add(n as u64, Ordering::Relaxed);
+        if tx.send(buf[..n].to_vec()).await.is_err() {
+            break;
+        }
+    }
+    drop(tx);
+    drop(from);
+    writer.await.map_err(std::io::Error::other)?
+}
+
 fn file_position(h: &OwnedHandle) -> u64 {
     let mut pos = 0i64;
     // SAFETY: valid file handle; zero move just reads the shared position.
@@ -286,25 +344,24 @@ impl PipedCommandRunner for JobObjectSupervisor {
             return Err(PortError::invalid_data("piped command", "no stages"));
         };
         let program = program_name(&first.program);
+        if command.stdout_compression == StreamCompression::Zip {
+            return Err(PortError::Unsupported("zip-compressed command output".into()));
+        }
         let job = self.job()?;
+        // A compressed input is decoded here and written into a pipe; a plain one is inherited.
+        let feed_path = command.stdin_file.clone().filter(|_| command.stdin_compression != StreamCompression::None);
         let stdin_file: Option<OwnedHandle> = match &command.stdin_file {
-            Some(path) => Some(
-                std::fs::File::open(path)
-                    .map_err(|e| {
-                        if e.kind() == std::io::ErrorKind::NotFound {
-                            PortError::not_found("file", path.display().to_string())
-                        } else {
-                            PortError::io(format!("opening {}", path.display()), e)
-                        }
-                    })?
-                    .into(),
-            ),
+            Some(path) => {
+                let file = open_input(path)?;
+                if feed_path.is_some() { None } else { Some(file.into()) }
+            }
             None => None,
         };
-        let stdout_file: Option<OwnedHandle> = match &command.stdout_file {
-            Some(path) => Some(std::fs::File::create(path).map_err(|e| PortError::io(format!("creating {}", path.display()), e))?.into()),
+        let out_file = match &command.stdout_file {
+            Some(path) => Some(std::fs::File::create(path).map_err(|e| PortError::io(format!("creating {}", path.display()), e))?),
             None => None,
         };
+        let (stdout_file, encode_into): (Option<OwnedHandle>, _) = if command.stdout_compression == StreamCompression::None { (out_file.map(Into::into), None) } else { (None, out_file) };
 
         let n = command.stages.len();
         let mut guard = KillOnDrop(Vec::with_capacity(n));
@@ -312,7 +369,7 @@ impl PipedCommandRunner for JobObjectSupervisor {
         for (i, spec) in command.stages.iter().enumerate() {
             let input = match (i, &stdin_file) {
                 (0, Some(f)) => Input::File(f),
-                (0, None) => Input::Null,
+                (0, None) if feed_path.is_none() => Input::Null,
                 _ => Input::Pipe,
             };
             let output = match (i + 1 == n, &stdout_file) {
@@ -332,6 +389,19 @@ impl PipedCommandRunner for JobObjectSupervisor {
                 tokio::spawn(relay(from, to, (i == 0).then(|| relayed.clone())));
             }
         }
+        let fed = Arc::new(AtomicU64::new(0));
+        let feeder = match (&feed_path, procs[0].stdin.take()) {
+            (Some(path), Some(stdin)) => Some(tokio::spawn(feed(path.clone(), command.stdin_compression, fed.clone(), stdin))),
+            _ => None,
+        };
+        let encoded = Arc::new(AtomicU64::new(0));
+        let encoder = match (encode_into, procs[n - 1].stdout.take()) {
+            (Some(file), Some(stdout)) => Some(tokio::spawn(encode_gzip(stdout, file, encoded.clone()))),
+            (_, stdout) => {
+                procs[n - 1].stdout = stdout;
+                None
+            }
+        };
         let stdout_capture = procs[n - 1].stdout.take().map(|p| tokio::spawn(read_capped(p, MAX_CAPTURED_STDOUT)));
         let mut handles = Vec::with_capacity(n);
         let mut stderr_captures = Vec::with_capacity(n);
@@ -340,12 +410,23 @@ impl PipedCommandRunner for JobObjectSupervisor {
             stderr_captures.push(tokio::spawn(read_capped(p.stderr, MAX_CAPTURED_STDERR)));
         }
 
+        let has_feeder = feeder.is_some();
         let measure = || match (&stdin_file, &stdout_file) {
+            _ if has_feeder => fed.load(Ordering::Relaxed),
             (Some(f), _) => file_position(f),
             (None, _) if n > 1 => relayed.load(Ordering::Relaxed),
             (None, Some(f)) => file_size(f),
-            (None, None) => 0,
+            (None, None) => encoded.load(Ordering::Relaxed),
         };
+        let input_name = feed_path.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+        let feeding = async {
+            match feeder {
+                Some(task) => task.await.unwrap_or(Ok(())),
+                None => std::future::pending().await,
+            }
+        };
+        tokio::pin!(feeding);
+        let mut feeding_done = !has_feeder;
 
         let finished = async {
             for h in &handles {
@@ -370,6 +451,15 @@ impl PipedCommandRunner for JobObjectSupervisor {
         let (stderrs, stdout) = loop {
             tokio::select! {
                 out = &mut finished => break out,
+                result = &mut feeding, if !feeding_done => {
+                    feeding_done = true;
+                    if let Err((message, stdin)) = result {
+                        // Kill before the pipe closes: the stages never see a truncated input end.
+                        drop(guard);
+                        drop(stdin);
+                        return Err(PortError::invalid_data(input_name, message));
+                    }
+                }
                 _ = tick.tick() => {
                     if cancel.is_cancelled() {
                         return Err(PortError::Cancelled);
@@ -383,6 +473,13 @@ impl PipedCommandRunner for JobObjectSupervisor {
                 _ = &mut deadline => return Err(PortError::process(program, format!("timed out after {}s", timeout.as_secs()))),
             }
         };
+        if !feeding_done && let Ok(Err((message, _))) = tokio::time::timeout(DRAIN_AFTER_EXIT, &mut feeding).await {
+            return Err(PortError::invalid_data(input_name, message));
+        }
+        if let Some(task) = encoder {
+            let path = command.stdout_file.as_deref().map(Path::display).map(|p| p.to_string()).unwrap_or_default();
+            task.await.map_err(std::io::Error::other).and_then(|r| r).map_err(|e| PortError::io(format!("writing {path}"), e))?;
+        }
         let bytes = measure();
         if last != Some(bytes) {
             on_bytes(bytes);

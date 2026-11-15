@@ -1,6 +1,6 @@
 ---
 name: database
-description: MySQL databases of a Lampo project: connection details, `lampo db list/create/import/export/drop`, the mysql and mysqldump shims, writing DB_* values into the app's .env, worktree database modes (shared, fresh, clone) and the safety rules for destructive operations. Use when the user asks "what are the database credentials", "create a database", "import this dump/.sql file", "export/backup the database", "reset/drop the database", "connect with mysql", "the app cannot connect to MySQL", or needs a separate database for tests or a worktree.
+description: MySQL databases of a Lampo project: connection details, `lampo db list/create/import/export/drop`, the mysql and mysqldump shims, writing DB_* values into the app's .env, worktree database modes (shared, fresh, clone) and the safety rules for destructive operations. Use when the user asks "what are the database credentials", "create a database", "import this dump/.sql/.sql.gz/.zip file", "export/backup the database", "reset/drop the database", "connect with mysql", "the app cannot connect to MySQL", or needs a separate database for tests or a worktree.
 ---
 
 # Databases on Lampo
@@ -61,10 +61,12 @@ lampo db create
 lampo db create my_shop_testing
 lampo db export backup.sql
 lampo db export C:\backups\shop.sql my_shop
+lampo db export C:\backups\shop.sql.gz my_shop
 ```
 
-`db export` writes a complete dump (atomically: a partial file is never left behind). It is
-read-only for the database and allowed without asking; prefer it before any risky change.
+`db export` writes a complete dump (atomically: a partial file is never left behind); a file
+name ending in `.gz` is written gzip-compressed (`.zip` is refused). It is read-only for the
+database and allowed without asking; prefer it before any risky change.
 
 ### Import: always ask first
 
@@ -76,17 +78,28 @@ ask the user before an import, naming the target database, and offer an export f
 lampo db export before-import.sql
 lampo db import dump.sql
 lampo db import C:\dumps\legacy.sql legacy_copy
+lampo db import C:\dumps\shop.sql.gz
+lampo db import C:\dumps\backup.zip shop_copy
 ```
+
+Compressed dumps import as they are, never extract them first: gzip (`.sql.gz`, `.gz`) and a
+`.zip` that holds exactly one `.sql` file are recognised from their content and decompressed on
+the fly; the progress counts bytes of the compressed file. A zip with no `.sql` or with several
+(`contains 2 .sql files`, exit 4) must be split: extract it (`Expand-Archive`) and import the
+files one at a time, in the order the user confirms. Tar archives (`.tar.gz`, `.tgz`) and other
+compressors (`.bz2`, `.xz`, `.zst`, `.7z`, `.rar`) are refused: extract the `.sql` first
+(`tar -xf` handles `.tar.gz`). A corrupt or truncated archive stops the import with exit 4
+(`corrupt or truncated gzip data`).
 
 Dump caveats:
 
 - A dump made with `--databases` / `--all-databases` contains `CREATE DATABASE` and `USE`
   lines that send the data to the original name, whatever target you pass. Check the head of
-  the file (`Select-String -Path dump.sql -Pattern '^USE ', '^CREATE DATABASE' | Select -First 5`)
-  and, with the user's approval, import into that name or dump again without those options.
+  the file (`Select-String -Path dump.sql -Pattern '^USE ', '^CREATE DATABASE' | Select -First 5`;
+  for a compressed dump ask the user, or look inside a `.zip` with `Expand-Archive` into a
+  temporary folder) and, with the user's approval, import into that name or dump again without
+  those options.
 - Dumps from MariaDB may use syntax MySQL rejects (see `lampo:migrate`, "MariaDB").
-- Compressed dumps (`.sql.gz`, `.zip`) must be extracted first (`tar -xf` or
-  `Expand-Archive`); `lampo db import` reads plain SQL.
 - Exit code 12 means the mysql client failed: the message has the SQL error and its line.
 
 ### Drop: always ask first

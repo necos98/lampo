@@ -81,6 +81,22 @@ pub struct PipedCommand {
     /// Created/truncated and filled with the last stage's stdout (`None`: captured into the last
     /// [`CommandOutput::stdout`]; meant for small outputs).
     pub stdout_file: Option<PathBuf>,
+    /// How `stdin_file` is decoded on its way into the first stage (streamed, never buffered).
+    pub stdin_compression: StreamCompression,
+    /// How the last stage's stdout is encoded into `stdout_file` (`Zip` is not supported).
+    pub stdout_compression: StreamCompression,
+}
+
+/// Compression of a file streamed by a [`PipedCommand`] (compressed SQL dumps). The domain only
+/// names the format; adapters detect and (de)compress it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StreamCompression {
+    #[default]
+    None,
+    /// gzip (`.sql.gz`), concatenated members included.
+    Gzip,
+    /// A zip archive whose single `.sql` entry is the stream (decoding only).
+    Zip,
 }
 
 /// Short-lived commands run to completion (`httpd -t`, `mysqld --initialize-insecure`).
@@ -165,9 +181,11 @@ pub trait DatabaseAdmin: Send + Sync {
     async fn create(&self, endpoint: &MysqlEndpoint, name: &DatabaseName) -> PortResult<()>;
     /// Ok if absent.
     async fn drop_database(&self, endpoint: &MysqlEndpoint, name: &DatabaseName) -> PortResult<()>;
-    /// Runs an SQL dump file into `name` (created if missing). Reports bytes read.
+    /// Runs an SQL dump file into `name` (created if missing): plain SQL, gzip (`.sql.gz`) or a
+    /// zip holding exactly one `.sql` file, streamed. Reports bytes of the file read.
     async fn import(&self, endpoint: &MysqlEndpoint, name: &DatabaseName, sql_file: &Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()>;
-    /// Dumps `name` to `sql_file` (`--single-transaction --routines --triggers`).
+    /// Dumps `name` to `sql_file` (`--single-transaction --routines --triggers`), gzipped when
+    /// its name ends in `.gz`.
     async fn export(&self, endpoint: &MysqlEndpoint, name: &DatabaseName, sql_file: &Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()>;
     /// Creates `target` as a copy of `source` on the same instance (dump piped into restore).
     async fn clone_database(&self, endpoint: &MysqlEndpoint, source: &DatabaseName, target: &DatabaseName, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()>;

@@ -306,6 +306,28 @@ async fn db_commands_target_the_resolved_site_and_absolute_files() {
 }
 
 #[tokio::test]
+async fn db_import_and_export_pass_compressed_files_through() {
+    let fake = Fake::new();
+    fake.reply(Ok(Value::Null));
+    let (code, out, _) = run_cli(&fake, &["db", "import", r"dumps\shop.sql.gz", "--json"]).await;
+    assert_eq!(code, 0);
+    let (ControlRequest::DbImport(r), _) = fake.last_request() else { panic!("wrong request") };
+    assert_eq!(r.file, r"C:\work\shop\dumps\shop.sql.gz", "the app detects and decompresses; the CLI only resolves the path");
+    assert_eq!(parse(&out), json!({"site": "shop", "action": "imported", "database": null, "file": r"C:\work\shop\dumps\shop.sql.gz"}));
+
+    fake.reply(Ok(Value::Null));
+    let (code, _, _) = run_cli(&fake, &["db", "export", "backup.sql.gz", "shop"]).await;
+    assert_eq!(code, 0);
+    let (ControlRequest::DbExport(r), _) = fake.last_request() else { panic!("wrong request") };
+    assert_eq!((r.name.as_deref(), r.file.as_str()), (Some("shop"), r"C:\work\shop\backup.sql.gz"));
+
+    fake.reply(Err(AppError::new(ErrorCode::Validation, "invalid data in two.zip: the zip archive contains 2 .sql files (a.sql, b.sql)")));
+    let (code, out, _) = run_cli(&fake, &["db", "import", "two.zip", "--json"]).await;
+    assert_eq!(code, 4);
+    assert!(parse(&out)["error"]["message"].as_str().unwrap().contains("2 .sql files"));
+}
+
+#[tokio::test]
 async fn worktree_up_and_down() {
     let fake = Fake::new();
     fake.reply(Err(AppError::new(ErrorCode::Validation, "stop here")));
