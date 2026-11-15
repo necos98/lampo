@@ -17,6 +17,7 @@ lampo-domain = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 minijinja = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "net", "process", "rt", "sync", "time"] }
 tempfile = { workspace = true }

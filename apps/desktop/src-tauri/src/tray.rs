@@ -105,6 +105,22 @@ fn set_running(app: &AppHandle, running: bool) {
     }
 }
 
+/// Raw `HWND` of the main window while it is shown, the owner of the UAC prompts the app
+/// raises. `None` when it is hidden or destroyed (closed to the tray).
+#[cfg(windows)]
+pub fn main_window_handle(app: &AppHandle) -> Option<isize> {
+    let window = app.get_webview_window(MAIN_WINDOW)?;
+    if !window.is_visible().unwrap_or(false) {
+        return None;
+    }
+    window.hwnd().ok().map(|hwnd| hwnd.0 as isize)
+}
+
+#[cfg(not(windows))]
+pub fn main_window_handle(_app: &AppHandle) -> Option<isize> {
+    None
+}
+
 /// Shows the main window, recreating it from `tauri.conf.json` if it was destroyed.
 pub fn show_main_window(app: &AppHandle) {
     open_main_window(app, None);

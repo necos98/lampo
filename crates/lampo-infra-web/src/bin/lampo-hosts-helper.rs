@@ -1,7 +1,7 @@
-﻿//! Elevated helper: `lampo-hosts-helper.exe --block <file.json>`.
+﻿//! Elevated helper: `lampo-hosts-helper.exe --block <file.json> --sha256 <hex> --tld <tld>`.
 //!
-//! Reads the desired `HostsBlock` (JSON) from `<file.json>`, validates it (loopback addresses
-//! only), splices it into the system hosts file preserving everything outside the Lampo
+//! Reads the desired `HostsBlock` (JSON) from `<file.json>`, checks it against its SHA-256,
+//! validates it (loopback addresses only, names under a local TLD or `<tld>`), splices it into the system hosts file preserving everything outside the Lampo
 //! markers byte for byte, writes atomically, and exits with
 //! `lampo_infra_web::hosts::helper_exit` codes. Does nothing else; see
 //! `lampo_infra_web::hosts::helper` for the security rules. Debug builds also accept

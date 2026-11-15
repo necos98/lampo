@@ -207,7 +207,7 @@ impl ApplyEnvironment {
             ElevationPolicy::Deny => {
                 out.fail(AppError::new(ErrorCode::ElevationRequired, "the hosts file must be updated, which needs administrator permission: re-run with --allow-elevation"))
             }
-            ElevationPolicy::Allow => match self.deps.hosts_writer.write_block(&desired).await {
+            ElevationPolicy::Allow => match self.deps.hosts_writer.write_block(&desired, &snap.settings.tld).await {
                 Ok(()) => out.report.hosts_file_updated = true,
                 Err(e) => out.fail(e.into()),
             },

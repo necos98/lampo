@@ -116,6 +116,43 @@ its instance, starting it on demand; an existing database is kept, and a failure
 the creation: the result reports it in `databaseSetup` (`lampo project create --no-database`
 or `createDatabase: false` skips it). Deleting a project never drops its database.
 
+### Hosts file and the elevated helper
+
+Lampo owns one marked block of the system hosts file (`<GetSystemDirectoryW()>\drivers\etc\hosts`,
+on whatever drive Windows lives; the composition roots use `ElevatedHostsFile::system`, never a
+hardcoded `C:\` path). Reading needs no rights; writing goes through `lampo-hosts-helper.exe`,
+started with `ShellExecuteExW` verb `runas` (UAC prompt, owned by the app window when it is shown,
+otherwise by the foreground window, i.e. the terminal for the CLI). The helper
+(`lampo_infra_web::hosts::helper`, `hosts::request`) is the only code that runs elevated, so it
+accepts as little as possible:
+
+* **Fixed target**: release builds write only the system hosts file (`--hosts` exists in debug
+  builds only, for tests).
+* **Narrow content**: loopback addresses only, at most 4096 entries, and only names under the
+  local TLDs (`lampo_domain::hostname::RESERVED_LOCAL_TLDS`: `.localhost`, `.test`, `.example`,
+  `.invalid`, `.local`) or the TLD set in the settings (`--tld`, itself a `Tld`, which refuses
+  `.com`, `.net`, `.org`, `.dev`, `.app`). `windowsupdate.com 127.0.0.1` is refused. The adapter
+  applies the same check first, so a refused block never shows a prompt; a project address under
+  another TLD makes the sync fail with an error naming it.
+* **Untampered request**: the block is a JSON file in the user's `%TEMP%` (UAC passes neither
+  stdin nor inherited handles, and the command line is too short for 4096 entries), removed when
+  the helper exits. Its SHA-256 is on the command line (`--sha256`): the helper reads the file once,
+  checks the digest and parses those same bytes, so a file swapped after the launch is refused.
+* **Byte-level merge**: everything outside the block (BOM, CRLF/LF, the user's entries) is kept
+  byte for byte; UTF-16 files and unterminated blocks are refused, not repaired.
+* **Atomic, patient write**: temp file in `etc`, then `ReplaceFileW` (keeps ACL and attributes),
+  retried up to 5 times with backoff (50 to 400 ms) while another process holds the file
+  (sharing/lock violation).
+
+**Residual risk.** The per-user installer puts the helper in `%LOCALAPPDATA%\Programs\Lampo`,
+which the user, and any program running as the user, can write. Such a program could replace
+`lampo-hosts-helper.exe` before Lampo starts it, and the user would then approve an elevated
+binary that is not Lampo's: the checks above only bind the genuine helper. The UAC prompt (program name, path and, for an
+unsigned binary, "Unknown publisher") is the remaining defence. Future mitigations: Authenticode-sign the helper
+(the prompt then shows a verified publisher, and the app can verify the signature before
+launching it) and/or install the helper per-machine under `%ProgramFiles%`, writable only by
+administrators.
+
 ### New projects: git clone or Laravel
 
 "Aggiungi progetto" (and `lampo project new`) can also *create* the folder before registering it:

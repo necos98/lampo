@@ -89,7 +89,10 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let control_server: Arc<dyn ControlChannelServer> = Arc::new(services::NamedPipeControlServer::new(pipe.clone()));
 
     // --- web ---
-    let hosts = Arc::new(web::ElevatedHostsFile::new(web::hosts::HOSTS_FILE.into(), exe_dir().join("lampo-hosts-helper.exe")));
+    // UAC prompts for the hosts file belong to the app window (when shown).
+    let owner_handle = handle.clone();
+    let hosts_launcher = web::hosts::elevation::RunAsLauncher::default().with_owner(Arc::new(move || crate::tray::main_window_handle(&owner_handle)));
+    let hosts = Arc::new(web::ElevatedHostsFile::system(exe_dir().join("lampo-hosts-helper.exe"), Arc::new(hosts_launcher))?);
 
     let php_ini: Arc<dyn PhpIniWriter> = Arc::new(web::PhpIniRenderer);
 

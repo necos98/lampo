@@ -10,6 +10,10 @@ fn valid_label(label: &str) -> bool {
     !label.is_empty() && label.len() <= 63 && label.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && !label.starts_with('-') && !label.ends_with('-')
 }
 
+/// Top-level domains reserved for local and test use, under which no public site can live:
+/// `test`, `example`, `invalid`, `localhost` (RFC 2606 / RFC 6761) and `local` (RFC 6762).
+pub const RESERVED_LOCAL_TLDS: [&str; 5] = ["localhost", "test", "example", "invalid", "local"];
+
 /// Top-level domain used for generated hostnames (default `test`, reserved by RFC 2606).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -89,6 +93,19 @@ impl Hostname {
         self.0.ends_with(".localhost")
     }
 
+    /// The last label (`test` for `api.shop.test`).
+    pub fn tld(&self) -> &str {
+        self.0.rsplit('.').next().unwrap_or(&self.0)
+    }
+
+    /// `true` when the name lives under one of the [`RESERVED_LOCAL_TLDS`] or under the TLD
+    /// configured in Lampo's settings: the only names Lampo may point at loopback in the hosts
+    /// file (a name like `windowsupdate.com` must never be redirected).
+    pub fn is_under_local_tld(&self, configured: &Tld) -> bool {
+        let tld = self.tld();
+        tld == configured.as_str() || RESERVED_LOCAL_TLDS.contains(&tld)
+    }
+
     /// The default hostname for a project: `<slug>.<tld>`.
     pub fn for_project(slug: &str, tld: &Tld) -> Result<Self, DomainError> {
         Self::new(format!("{slug}.{tld}"))
@@ -140,6 +157,19 @@ mod tests {
     fn localhost_names() {
         assert!(Hostname::new("shop.localhost").unwrap().is_localhost());
         assert!(!Hostname::new("localhost.test").unwrap().is_localhost());
+    }
+
+    #[test]
+    fn local_tld_policy() {
+        let configured = Tld::new("lan").unwrap();
+        for ok in ["shop.test", "a.b.example", "x.invalid", "shop.localhost", "printer.local", "shop.lan", "API.Shop.Test"] {
+            assert!(Hostname::new(ok).unwrap().is_under_local_tld(&configured), "{ok} should be allowed");
+        }
+        for bad in ["windowsupdate.com", "bank.co.uk", "test.com", "shop.dev", "localhost.net", "shop.testing", "shop.lan.com"] {
+            assert!(!Hostname::new(bad).unwrap().is_under_local_tld(&configured), "{bad} should be refused");
+        }
+        assert!(!Hostname::new("shop.lan").unwrap().is_under_local_tld(&Tld::default()), "only the configured TLD is added");
+        assert_eq!(Hostname::new("api.shop.test").unwrap().tld(), "test");
     }
 
     #[test]

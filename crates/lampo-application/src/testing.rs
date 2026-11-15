@@ -365,7 +365,7 @@ impl HostsFileReader for FakeHosts {
 }
 #[async_trait]
 impl HostsFileWriter for FakeHosts {
-    async fn write_block(&self, block: &HostsBlock) -> PortResult<()> {
+    async fn write_block(&self, block: &HostsBlock, _tld: &Tld) -> PortResult<()> {
         if self.deny.load(Ordering::SeqCst) {
             return Err(PortError::ElevationDenied);
         }

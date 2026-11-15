@@ -3,6 +3,7 @@
 //! directly against a temp file.
 
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use lampo_domain::{PortError, PortResult};
@@ -20,16 +21,41 @@ pub trait HelperLauncher: Send + Sync {
     fn run(&self, helper: &Path, args: &[String]) -> PortResult<LaunchOutcome>;
 }
 
+/// The window the UAC prompt belongs to, as a raw `HWND` value, asked for at each launch
+/// (the app's window can be closed to the tray and recreated). `None` when there is none.
+pub type OwnerWindow = Arc<dyn Fn() -> Option<isize> + Send + Sync>;
+
 /// Elevated launch through the UAC consent prompt.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone)]
 pub struct RunAsLauncher {
-    pub timeout: Duration,
+    timeout: Duration,
+    owner: Option<OwnerWindow>,
+}
+
+impl RunAsLauncher {
+    /// Covers the time the user takes to read the prompt.
+    pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
+
+    /// Attaches the prompt to `owner`'s window when it returns one. Without an owner (the CLI),
+    /// or when it returns `None`, the prompt belongs to the foreground window (the terminal).
+    pub fn with_owner(mut self, owner: OwnerWindow) -> Self {
+        self.owner = Some(owner);
+        self
+    }
+
+    #[cfg(windows)]
+    fn owner_hwnd(&self) -> windows_sys::Win32::Foundation::HWND {
+        match self.owner.as_ref().and_then(|owner| owner()) {
+            Some(hwnd) => hwnd as windows_sys::Win32::Foundation::HWND,
+            // SAFETY: no arguments; returns null when no window is in the foreground.
+            None => unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() },
+        }
+    }
 }
 
 impl Default for RunAsLauncher {
     fn default() -> Self {
-        // Covers the time the user takes to read the prompt.
-        Self { timeout: Duration::from_secs(300) }
+        Self { timeout: Self::DEFAULT_TIMEOUT, owner: None }
     }
 }
 
@@ -56,7 +82,7 @@ impl HelperLauncher for RunAsLauncher {
         use windows_sys::Win32::Foundation::{CloseHandle, ERROR_CANCELLED, WAIT_OBJECT_0};
         use windows_sys::Win32::System::Threading::{GetExitCodeProcess, WaitForSingleObject};
         use windows_sys::Win32::UI::Shell::{SEE_MASK_NOASYNC, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
-        use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SW_HIDE};
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
         if args.iter().any(|a| a.contains('"')) {
             return Err(PortError::invalid_data("hosts helper arguments", "quotes are not allowed"));
@@ -71,7 +97,7 @@ impl HelperLauncher for RunAsLauncher {
             let mut info: SHELLEXECUTEINFOW = std::mem::zeroed();
             info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
             info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
-            info.hwnd = GetForegroundWindow();
+            info.hwnd = self.owner_hwnd();
             info.lpVerb = verb.as_ptr();
             info.lpFile = file.as_ptr();
             info.lpParameters = params.as_ptr();
@@ -117,5 +143,13 @@ mod tests {
         let args = vec!["--block".to_string(), r"C:\Users\John Smith\AppData\Local\Temp\lampo-hosts.json".to_string()];
         assert_eq!(command_line(&args), r#"--block "C:\Users\John Smith\AppData\Local\Temp\lampo-hosts.json""#);
         assert_eq!(command_line(&["a".into(), String::new()]), "a \"\"");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_prompt_belongs_to_the_app_window_when_there_is_one() {
+        const APP_WINDOW: isize = 0x1234;
+        let launcher = RunAsLauncher::default().with_owner(Arc::new(|| Some(APP_WINDOW)));
+        assert_eq!(launcher.owner_hwnd() as isize, APP_WINDOW);
     }
 }

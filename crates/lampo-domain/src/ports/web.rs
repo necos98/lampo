@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 
 use crate::error::PortResult;
+use crate::hostname::Tld;
 use crate::hosts::HostsBlock;
 use crate::web::{PhpIniSpec, WebServerConfig};
 
@@ -31,6 +32,9 @@ pub trait HostsFileReader: Send + Sync {
 /// Callers must only invoke it when the block actually changed.
 #[async_trait]
 pub trait HostsFileWriter: Send + Sync {
-    /// `PortError::ElevationDenied` if the user refuses the prompt.
-    async fn write_block(&self, block: &HostsBlock) -> PortResult<()>;
+    /// `tld` is the TLD configured in the settings: besides the reserved local TLDs
+    /// (`RESERVED_LOCAL_TLDS`) it is the only one a block entry may use; any other name is
+    /// refused with `PortError::InvalidData`. `PortError::ElevationDenied` if the user refuses
+    /// the prompt.
+    async fn write_block(&self, block: &HostsBlock, tld: &Tld) -> PortResult<()>;
 }

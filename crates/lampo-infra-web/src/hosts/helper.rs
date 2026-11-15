@@ -5,79 +5,38 @@
 //! * **Fixed target.** Release builds write only `<GetSystemDirectoryW()>\drivers\etc\hosts`
 //!   (not taken from environment variables, which the caller controls). `--hosts <path>` exists
 //!   only in debug builds (`cfg(debug_assertions)`), for tests against a temp file.
-//! * **Narrow request.** The only input is a JSON `HostsBlock` (≤ 1 MiB, ≤ 4096 entries), parsed
-//!   with the domain's validating types (`Hostname`, `IpAddr`) and accepted only if every address
-//!   is a loopback address: the helper cannot be used to redirect a name elsewhere, and no
+//! * **Narrow request.** The only input is a JSON `HostsBlock` (≤ 1 MiB, ≤ 4096 entries) whose
+//!   SHA-256 is on the command line ([`super::request`]), parsed with the domain's validating
+//!   types (`Hostname`, `IpAddr`) and accepted only if every address is a loopback address and
+//!   every name is under a local TLD (`.test`, `.localhost`, … or the one set in Lampo's
+//!   settings): the helper cannot redirect a public name such as `windowsupdate.com`, and no
 //!   free text reaches the file (each line is rendered by `HostsBlock::render`).
 //! * **Only the block changes.** The new file is the old file with the block spliced in at byte
 //!   level ([`super::merge`]); nothing else is touched. Unparseable or ambiguous files (UTF-16,
 //!   unterminated block) are refused, not "repaired".
 //! * **Atomic write.** A temp file in the `etc` directory (writable by administrators only, so
 //!   no other user can plant a link there), flushed, then `ReplaceFileW` (keeps the hosts file's
-//!   ACL and attributes) or `MoveFileExW` when the file did not exist.
+//!   ACL and attributes) or `MoveFileExW` when the file did not exist, retried with backoff while
+//!   another process (DNS client, antivirus, an editor) holds the file open.
 //! * **Distinct outcomes.** Exit codes from [`super::helper_exit`]; no output is echoed (the
 //!   process has no console and the request content is never printed).
 
 use std::io::Write;
-use std::net::IpAddr;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use lampo_domain::hosts::HostsBlock;
 
 use super::helper_exit;
 use super::merge::{MergeError, merge_block};
+use super::request::{HelperArgs, load_request};
 
-/// Upper bound for the request file.
-pub const MAX_REQUEST_BYTES: u64 = 1024 * 1024;
-/// Upper bound for the number of block entries.
-pub const MAX_ENTRIES: usize = 4096;
 /// Upper bound for the hosts file we are willing to rewrite.
 const MAX_HOSTS_BYTES: u64 = 16 * 1024 * 1024;
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct HelperArgs {
-    pub block_file: PathBuf,
-    /// Debug builds only.
-    pub hosts_override: Option<PathBuf>,
-}
-
-/// Parses `--block <file.json> [--hosts <path>]` (the latter only in debug builds).
-pub fn parse_args(args: &[String]) -> Option<HelperArgs> {
-    let mut block_file = None;
-    let mut hosts_override = None;
-    let mut it = args.iter();
-    while let Some(flag) = it.next() {
-        let value = it.next()?;
-        match flag.as_str() {
-            "--block" if block_file.is_none() => block_file = Some(PathBuf::from(value)),
-            "--hosts" if cfg!(debug_assertions) && hosts_override.is_none() => hosts_override = Some(PathBuf::from(value)),
-            _ => return None,
-        }
-    }
-    Some(HelperArgs { block_file: block_file?, hosts_override })
-}
-
-/// Reads and validates the request. `None` if it is not an acceptable block.
-pub fn load_request(path: &Path) -> Option<HostsBlock> {
-    let file = std::fs::File::open(path).ok()?;
-    if file.metadata().ok()?.len() > MAX_REQUEST_BYTES {
-        return None;
-    }
-    let block: HostsBlock = serde_json::from_reader(std::io::BufReader::new(file)).ok()?;
-    validate_request(&block).then_some(block)
-}
-
-/// Only loopback addresses, bounded size.
-pub fn validate_request(block: &HostsBlock) -> bool {
-    block.entries().count() <= MAX_ENTRIES && block.entries().all(|e| is_loopback(e.ip))
-}
-
-fn is_loopback(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v4) => v4.is_loopback(),
-        IpAddr::V6(v6) => v6.is_loopback() || v6.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback()),
-    }
-}
+/// Attempts at swapping the new file in while the hosts file is locked by another process.
+const SWAP_ATTEMPTS: u32 = 5;
+/// Wait before the second attempt; doubled at each further one (50 + 100 + 200 + 400 ms).
+const SWAP_FIRST_BACKOFF: Duration = Duration::from_millis(50);
 
 /// The system hosts file.
 pub fn system_hosts_path() -> Option<PathBuf> {
@@ -101,8 +60,8 @@ fn system_directory() -> Option<PathBuf> {
 
 /// Entire helper run; returns the process exit code.
 pub fn run(args: &[String]) -> i32 {
-    let Some(args) = parse_args(args) else { return helper_exit::BAD_ARGUMENTS };
-    let Some(block) = load_request(&args.block_file) else { return helper_exit::INVALID_REQUEST };
+    let Some(args) = HelperArgs::parse(args) else { return helper_exit::BAD_ARGUMENTS };
+    let Some(block) = load_request(&args) else { return helper_exit::INVALID_REQUEST };
     let target = match args.hosts_override.or_else(system_hosts_path) {
         Some(t) => t,
         None => return helper_exit::READ_FAILED,
@@ -147,12 +106,42 @@ fn replace_atomically(target: &Path, contents: &[u8], exists: bool) -> std::io::
         f.write_all(contents)?;
         f.sync_all()?;
         drop(f);
-        swap_in(target, &temp, exists)
+        retry_while(SWAP_ATTEMPTS, SWAP_FIRST_BACKOFF, is_sharing_violation, || swap_in(target, &temp, exists))
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&temp);
     }
     result
+}
+
+/// Runs `op` up to `attempts` times while it fails with an error `is_transient` accepts,
+/// sleeping `first_backoff`, then twice as long at each further attempt.
+fn retry_while<T>(attempts: u32, first_backoff: Duration, is_transient: impl Fn(&std::io::Error) -> bool, mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    let mut backoff = first_backoff;
+    for _ in 1..attempts {
+        match op() {
+            Err(e) if is_transient(&e) => {
+                std::thread::sleep(backoff);
+                backoff = backoff.saturating_mul(2);
+            }
+            result => return result,
+        }
+    }
+    op()
+}
+
+/// Another process has the file open without sharing it. `ERROR_UNABLE_TO_REMOVE_REPLACED` is
+/// `ReplaceFileW`'s form of the same thing (the replacement is still in place under its own
+/// name, so the call can be repeated as is).
+#[cfg(windows)]
+fn is_sharing_violation(e: &std::io::Error) -> bool {
+    use windows_sys::Win32::Foundation::{ERROR_LOCK_VIOLATION, ERROR_SHARING_VIOLATION, ERROR_UNABLE_TO_REMOVE_REPLACED};
+    e.raw_os_error().is_some_and(|code| [ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION, ERROR_UNABLE_TO_REMOVE_REPLACED].map(|c| c as i32).contains(&code))
+}
+
+#[cfg(not(windows))]
+fn is_sharing_violation(_e: &std::io::Error) -> bool {
+    false
 }
 
 #[cfg(windows)]
@@ -179,61 +168,24 @@ fn swap_in(target: &Path, temp: &Path, _exists: bool) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::cell::Cell;
+    use std::net::{IpAddr, Ipv4Addr};
 
     use lampo_domain::hostname::Hostname;
     use lampo_domain::hosts::HostsEntry;
 
     use super::*;
 
-    fn s(v: &[&str]) -> Vec<String> {
-        v.iter().map(|x| x.to_string()).collect()
-    }
-
     fn entry(ip: IpAddr, host: &str) -> HostsEntry {
         HostsEntry { ip, hostname: Hostname::new(host).unwrap() }
     }
 
-    #[test]
-    fn argument_parsing_is_strict() {
-        assert_eq!(parse_args(&s(&["--block", "a.json"])), Some(HelperArgs { block_file: "a.json".into(), hosts_override: None }));
-        assert_eq!(parse_args(&s(&[])), None);
-        assert_eq!(parse_args(&s(&["--block"])), None);
-        assert_eq!(parse_args(&s(&["--block", "a", "--block", "b"])), None);
-        assert_eq!(parse_args(&s(&["--block", "a", "--other", "b"])), None);
-        assert_eq!(parse_args(&s(&["--hosts", "x"])), None, "a block is mandatory");
-        // Tests run in debug builds, where the override exists.
-        assert_eq!(parse_args(&s(&["--block", "a", "--hosts", "h"])).unwrap().hosts_override, Some(PathBuf::from("h")));
+    fn locked() -> std::io::Error {
+        std::io::Error::new(std::io::ErrorKind::ResourceBusy, "locked")
     }
 
-    #[test]
-    fn only_loopback_entries_are_accepted() {
-        let ok = HostsBlock::new([entry(IpAddr::V4(Ipv4Addr::LOCALHOST), "a.test"), entry(IpAddr::V6(Ipv6Addr::LOCALHOST), "a.test"), entry("127.0.0.2".parse().unwrap(), "b.test")]);
-        assert!(validate_request(&ok));
-        let bad = HostsBlock::new([entry("10.0.0.1".parse().unwrap(), "bank.test")]);
-        assert!(!validate_request(&bad));
-        let bad = HostsBlock::new([entry("::ffff:8.8.8.8".parse().unwrap(), "bank.test")]);
-        assert!(!validate_request(&bad));
-    }
-
-    #[test]
-    fn request_files_are_validated() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("req.json");
-        std::fs::write(&file, r#"{"entries":[{"ip":"127.0.0.1","hostname":"shop.test"}]}"#).unwrap();
-        assert_eq!(load_request(&file).unwrap().entries().count(), 1);
-        for bad in [
-            r#"{"entries":[{"ip":"127.0.0.1","hostname":"shop.test\r\n1.2.3.4 evil.test"}]}"#,
-            r#"{"entries":[{"ip":"1.2.3.4","hostname":"shop.test"}]}"#,
-            r#"{"entries":[{"ip":"127.0.0.1","hostname":"x"}]}"#,
-            "not json",
-        ] {
-            std::fs::write(&file, bad).unwrap();
-            assert!(load_request(&file).is_none(), "{bad}");
-        }
-        std::fs::write(&file, vec![b' '; (MAX_REQUEST_BYTES + 1) as usize]).unwrap();
-        assert!(load_request(&file).is_none());
-        assert!(load_request(&dir.path().join("missing.json")).is_none());
+    fn is_busy(e: &std::io::Error) -> bool {
+        e.kind() == std::io::ErrorKind::ResourceBusy
     }
 
     #[test]
@@ -242,6 +194,48 @@ mod tests {
             let p = system_hosts_path().unwrap();
             assert!(p.to_string_lossy().to_ascii_lowercase().ends_with(r"system32\drivers\etc\hosts"));
         }
+    }
+
+    #[test]
+    fn retries_transient_failures_until_success() {
+        let calls = Cell::new(0);
+        let result = retry_while(SWAP_ATTEMPTS, Duration::ZERO, is_busy, || {
+            calls.set(calls.get() + 1);
+            if calls.get() < 3 { Err(locked()) } else { Ok("swapped") }
+        });
+        assert_eq!(result.unwrap(), "swapped");
+        assert_eq!(calls.get(), 3);
+    }
+
+    #[test]
+    fn gives_up_after_the_last_attempt() {
+        let calls = Cell::new(0);
+        let result: std::io::Result<()> = retry_while(SWAP_ATTEMPTS, Duration::ZERO, is_busy, || {
+            calls.set(calls.get() + 1);
+            Err(locked())
+        });
+        assert!(is_busy(&result.unwrap_err()));
+        assert_eq!(calls.get(), SWAP_ATTEMPTS);
+    }
+
+    #[test]
+    fn other_errors_are_not_retried() {
+        let calls = Cell::new(0);
+        let result: std::io::Result<()> = retry_while(SWAP_ATTEMPTS, Duration::ZERO, is_busy, || {
+            calls.set(calls.get() + 1);
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        });
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(calls.get(), 1);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn sharing_violations_are_transient() {
+        use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_UNABLE_TO_REMOVE_REPLACED};
+        assert!(is_sharing_violation(&std::io::Error::from_raw_os_error(ERROR_SHARING_VIOLATION as i32)));
+        assert!(is_sharing_violation(&std::io::Error::from_raw_os_error(ERROR_UNABLE_TO_REMOVE_REPLACED as i32)));
+        assert!(!is_sharing_violation(&std::io::Error::from_raw_os_error(ERROR_ACCESS_DENIED as i32)));
     }
 
     #[test]

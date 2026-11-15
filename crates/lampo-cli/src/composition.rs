@@ -16,6 +16,8 @@ use lampo_domain::ports::{
 use lampo_domain::resolution::ResolverChain;
 use lampo_infra_services::{FileLogReader, HeadlessAppLauncher, NamedPipeControlClient, TcpPortProbe, TokioTimer};
 use lampo_infra_store as store;
+use lampo_infra_web::ElevatedHostsFile;
+use lampo_infra_web::hosts::elevation::RunAsLauncher;
 
 use crate::context::{CliContext, CliEnv};
 use crate::local::CtrlC;
@@ -68,7 +70,7 @@ pub fn build() -> AppResult<CliContext> {
         Arc::new(PortsCheck { probe: Arc::new(TcpPortProbe), services: services.clone() }),
         Arc::new(ShimsOnPathCheck { installer: shim_installer.clone(), user_path: user_path.clone(), shim_dir: shim_dir.clone() }),
         Arc::new(PathShadowingCheck { locator: locator.clone(), shim_dir, tools: shim_tools.clone() }),
-        Arc::new(HostsBlockCheck { hosts: Arc::new(lampo_infra_web::ElevatedHostsFile::new(lampo_infra_web::hosts::HOSTS_FILE.into(), app_dir.join("lampo-hosts-helper.exe"))) }),
+        Arc::new(HostsBlockCheck { hosts: Arc::new(ElevatedHostsFile::system(app_dir.join("lampo-hosts-helper.exe"), Arc::new(RunAsLauncher::default()))?) }),
         Arc::new(PackagesCheck { services: services.clone() }),
         Arc::new(FoldersCheck { fs: fs.clone() }),
         Arc::new(StaleWorktreesCheck { fs: fs.clone() }),
