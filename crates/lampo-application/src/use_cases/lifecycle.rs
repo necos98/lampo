@@ -102,8 +102,9 @@ impl ShutdownGate {
     }
 }
 
-/// App exit (tray "Quit") and app update (before the installer replaces the app): stop every
-/// service gracefully. The Job Object kills leftovers anyway. Does not exit the process.
+/// App exit (tray "Quit", end of the Windows session, any other exit) and app update (before
+/// the installer replaces the app): stop every service gracefully. The Job Object kills
+/// leftovers anyway. Does not exit the process.
 pub struct Shutdown {
     runners: Vec<Arc<dyn ServiceRunner>>,
     catalog: Arc<ServiceCatalog>,

@@ -10,6 +10,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle, RawHandle};
 use std::ptr::{null, null_mut};
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use tokio::sync::oneshot;
 use windows_sys::Win32::Foundation::{BOOLEAN, CloseHandle, ERROR_INSUFFICIENT_BUFFER, HANDLE, HLOCAL, INVALID_HANDLE_VALUE, LocalFree, NO_ERROR, SYSTEMTIME, WAIT_OBJECT_0};
@@ -20,8 +21,8 @@ use windows_sys::Win32::Security::{EqualSid, GetTokenInformation, OWNER_SECURITY
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
 use windows_sys::Win32::System::JobObjects::IsProcessInJob;
 use windows_sys::Win32::System::Threading::{
-    GetCurrentProcess, GetExitCodeProcess, INFINITE, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION, RegisterWaitForSingleObject, UnregisterWaitEx, WT_EXECUTEONLYONCE,
-    WaitForSingleObject,
+    GetCurrentProcess, GetExitCodeProcess, INFINITE, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, RegisterWaitForSingleObject, UnregisterWaitEx,
+    WT_EXECUTEONLYONCE, WaitForSingleObject,
 };
 use windows_sys::Win32::System::Time::TzSpecificLocalTimeToSystemTime;
 
@@ -225,6 +226,25 @@ pub(crate) fn exit_code(process: &OwnedHandle) -> Option<i32> {
     (unsafe { GetExitCodeProcess(raw(process), &mut code) } != 0).then_some(code as i32)
 }
 
+/// Calls `visit` on every process of one Toolhelp snapshot, until it returns `false`.
+fn each_process(mut visit: impl FnMut(&PROCESSENTRY32W) -> bool) {
+    // SAFETY: owned snapshot handle; `entry` is a correctly sized plain C struct.
+    unsafe {
+        let Ok(snap) = owned(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)) else { return };
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
+        let mut ok = Process32FirstW(raw(&snap), &mut entry) != 0;
+        while ok && visit(&entry) {
+            ok = Process32NextW(raw(&snap), &mut entry) != 0;
+        }
+    }
+}
+
+fn exe_name(entry: &PROCESSENTRY32W) -> String {
+    let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+    String::from_utf16_lossy(&entry.szExeFile[..len])
+}
+
 /// Executable names of running processes by pid (one Toolhelp snapshot; works for elevated
 /// and service processes too, unlike `OpenProcess`).
 pub(crate) fn process_name(pid: u32) -> Option<String> {
@@ -233,36 +253,51 @@ pub(crate) fn process_name(pid: u32) -> Option<String> {
         4 => return Some("System".into()),
         _ => {}
     }
-    unsafe {
-        let snap = owned(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)).ok()?;
-        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
-        entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
-        let mut ok = Process32FirstW(raw(&snap), &mut entry) != 0;
-        while ok {
-            if entry.th32ProcessID == pid {
-                let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
-                return Some(String::from_utf16_lossy(&entry.szExeFile[..len]));
-            }
-            ok = Process32NextW(raw(&snap), &mut entry) != 0;
+    let mut name = None;
+    each_process(|entry| {
+        if entry.th32ProcessID == pid {
+            name = Some(exe_name(entry));
         }
-    }
-    None
+        name.is_none()
+    });
+    name
 }
 
 /// `pid → parent pid` of every running process (one Toolhelp snapshot).
 fn parent_table() -> HashMap<u32, u32> {
     let mut parents = HashMap::new();
-    unsafe {
-        let Ok(snap) = owned(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)) else { return parents };
-        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
-        entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
-        let mut ok = Process32FirstW(raw(&snap), &mut entry) != 0;
-        while ok {
-            parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
-            ok = Process32NextW(raw(&snap), &mut entry) != 0;
-        }
-    }
+    each_process(|entry| {
+        parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
+        true
+    });
     parents
+}
+
+/// Running descendants of `ancestor` whose executable is `exe` (ASCII case-insensitive), from
+/// two snapshots (tree, then names). `ancestor` must be alive, as for [`descendants`].
+pub(crate) fn descendants_named(ancestor: u32, exe: &str) -> Vec<u32> {
+    let tree = descendants(ancestor);
+    let mut matching = Vec::new();
+    each_process(|entry| {
+        if tree.contains(&entry.th32ProcessID) && exe_name(entry).eq_ignore_ascii_case(exe) {
+            matching.push(entry.th32ProcessID);
+        }
+        true
+    });
+    matching
+}
+
+/// A handle to wait on the exit of process `pid` (`None` when it is gone or not ours to open).
+pub(crate) fn open_for_wait(pid: u32) -> Option<OwnedHandle> {
+    // SAFETY: plain call; the returned handle is owned.
+    owned(unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) }).ok()
+}
+
+/// Blocks the calling thread until the process exits or `timeout` passes; `true` once it exited.
+pub(crate) fn wait_for_exit_blocking(process: &OwnedHandle, timeout: Duration) -> bool {
+    let millis = u32::try_from(timeout.as_millis()).unwrap_or(INFINITE - 1).min(INFINITE - 1);
+    // SAFETY: valid process handle.
+    unsafe { WaitForSingleObject(raw(process), millis) == WAIT_OBJECT_0 }
 }
 
 /// Running descendants of `ancestor` (children first, then grandchildren…), from one snapshot.
@@ -401,5 +436,60 @@ mod tests {
         assert!(found.contains(&child.0.id()));
         assert!(!found.contains(&me));
         assert!(descendants(child.0.id()).len() >= 2, "both generations under the child");
+    }
+
+    #[test]
+    fn descendants_named_match_the_executable_case_insensitively() {
+        let child = test_support::Sleeper::spawn();
+        let me = std::process::id();
+        let named = descendants_named(me, "WAITFOR.exe");
+        let other = descendants_named(me, "mysqld.exe");
+        assert!(named.contains(&child.pid()), "{named:?}");
+        assert!(!other.contains(&child.pid()));
+    }
+
+    #[test]
+    fn a_blocking_wait_reports_the_exit_or_the_timeout() {
+        let mut child = test_support::Sleeper::spawn();
+        let handle = open_for_wait(child.pid()).unwrap();
+        assert!(!wait_for_exit_blocking(&handle, Duration::from_millis(50)));
+        child.kill();
+        assert!(wait_for_exit_blocking(&handle, Duration::from_secs(10)));
+    }
+}
+
+/// Test processes for the Win32 helpers and their callers.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use std::process::{Child, Command, Stdio};
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    static NEXT_SIGNAL: AtomicU32 = AtomicU32::new(0);
+
+    /// A `waitfor.exe` child idling for a minute (a program no other test spawns, so process
+    /// snapshots of concurrent tests do not see each other's), killed when dropped.
+    pub(crate) struct Sleeper(Child);
+
+    impl Sleeper {
+        pub(crate) fn spawn() -> Self {
+            // `waitfor` refuses a signal name another instance already waits on.
+            let signal = format!("LampoTest{}x{}", std::process::id(), NEXT_SIGNAL.fetch_add(1, Ordering::Relaxed));
+            Self(Command::new("waitfor.exe").args(["/t", "60", &signal]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap())
+        }
+
+        pub(crate) fn pid(&self) -> u32 {
+            self.0.id()
+        }
+
+        pub(crate) fn kill(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    impl Drop for Sleeper {
+        fn drop(&mut self) {
+            self.kill();
+        }
     }
 }

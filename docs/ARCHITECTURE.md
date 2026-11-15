@@ -249,6 +249,16 @@ CLI runs read-only, file-based commands itself (status offline, project/worktree
 named pipe (`lampo_application::control`), starting the app headless (`--headless`, tray only)
 when needed. Shims never talk to the app.
 
+The services are stopped gracefully however the app goes away, since the Job Object would
+otherwise kill mysqld (InnoDB crash recovery, corrupted MyISAM `mysql.*` tables on 5.7): the
+tray's "Esci" and an update run `Shutdown` themselves; at the end of the Windows session
+(logoff, shutdown) a hidden top-level window registers a shutdown block reason on
+`WM_QUERYENDSESSION` and stops the services on `WM_ENDSESSION`, bounded to a few seconds
+(`apps/desktop/src-tauri/src/session_end.rs`, `orderly_exit.rs`); `RunEvent::Exit` runs the same
+stop once (a no-op after a quit). Whatever is still running then, and on a panic of the main
+thread, gets a last-resort `MYSQLShutdown<pid>` request with a short wait
+(`lampo_infra_services::stop_mysql_servers`, synchronous, no app state needed).
+
 Inside the app, `ApplyEnvironment` is the single owner of the service lifecycle: full syncs and
 single-service starts, restarts and stops (`lampo up/down/restart <service>`, database
 operations) share its lock and its record of each service's launch, so a service started

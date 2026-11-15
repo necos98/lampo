@@ -78,7 +78,7 @@ fn is_empty_dir(p: &Path) -> bool {
 
 /// Signals the named event mysqld creates on Windows to request a normal shutdown
 /// (`MYSQLShutdown<pid>`, verified on 8.4: "Normal shutdown … Shutdown complete").
-fn signal_shutdown_event(pid: u32) -> bool {
+pub(crate) fn signal_shutdown_event(pid: u32) -> bool {
     let name = wide(format!("MYSQLShutdown{pid}"));
     // SAFETY: valid NUL-terminated name.
     let Ok(event) = owned(unsafe { OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr()) }) else { return false };

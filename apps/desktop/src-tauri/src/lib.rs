@@ -4,12 +4,17 @@
 //! * [`commands`] is the Tauri command surface (thin delegation);
 //! * [`events`] forwards domain events to the webview;
 //! * [`tray`] owns the tray icon and the destroy-on-close window lifecycle;
+//! * [`orderly_exit`] stops the services however the app goes away, [`session_end`] at the end
+//!   of the Windows session;
 //! * the control-pipe server is started here so the CLI can drive the running app.
 
 mod commands;
 mod composition;
 mod events;
 mod messages;
+mod orderly_exit;
+#[cfg(windows)]
+mod session_end;
 mod state;
 mod tray;
 
@@ -21,6 +26,7 @@ pub const HEADLESS_FLAG: &str = "--headless";
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let headless = std::env::args().any(|a| a == HEADLESS_FLAG);
+    orderly_exit::install_panic_hook();
 
     let app = tauri::Builder::default()
         // A second launch (e.g. from the Start menu) focuses the running instance.
@@ -62,6 +68,13 @@ pub fn run() {
             });
 
             tray::create(app.handle())?;
+            #[cfg(windows)]
+            {
+                let handle = app.handle().clone();
+                if let Err(e) = session_end::watch(messages::SESSION_END_BLOCK_REASON, move || orderly_exit::stop_services(&handle, "session end")) {
+                    log::error!("cannot watch for the end of the Windows session: {e}");
+                }
+            }
             if !headless {
                 tray::show_main_window(app.handle());
             }
@@ -71,11 +84,13 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building the Lampo application");
 
-    app.run(|_app, event| {
+    app.run(|app, event| match event {
         // Last window closed: the webview is already destroyed; keep the core alive in the tray.
         // An explicit `app.exit(code)` (tray "Esci", `quit_app`, control `quit`) has a code.
-        if let RunEvent::ExitRequested { code: None, api, .. } = event {
-            api.prevent_exit();
-        }
+        RunEvent::ExitRequested { code: None, api, .. } => api.prevent_exit(),
+        // Every way out, including tao's reaction to the end of the Windows session; after a quit
+        // or an update the services are already down and this only checks for MySQL leftovers.
+        RunEvent::Exit => orderly_exit::stop_services(app, "app exit"),
+        _ => {}
     });
 }

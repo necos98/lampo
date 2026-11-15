@@ -72,9 +72,15 @@ fn track_service_status(app: &AppHandle) {
     let running = any_running(&initial);
     set_running(app, running);
     let states = Mutex::new((initial, running));
+    let shutdown_gate = app.try_state::<AppState>().map(|state| state.shutdown.gate());
 
     let handle = app.clone();
     app.listen_any(names::SERVICE_STATUS, move |event| {
+        // While the app goes away the main thread may be blocked waiting for the services to
+        // stop (`orderly_exit`): an icon change, run on the main thread, would never return.
+        if shutdown_gate.as_ref().is_some_and(|gate| gate.is_closed()) {
+            return;
+        }
         let Ok(payload) = serde_json::from_str::<ServiceStatusPayload>(event.payload()) else {
             return;
         };

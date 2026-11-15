@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use lampo_application::control::{ControlDispatcher, ControlServices, instance_pipe_name};
 use lampo_application::tasks::TaskRegistry;
@@ -326,4 +327,10 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     };
 
     Ok(Built { state, control_server, control_handler })
+}
+
+/// Last-resort clean shutdown of the MySQL servers this app started, waiting up to `timeout`
+/// (synchronous and stateless, for a panic hook or the end of the Windows session).
+pub fn stop_mysql_last_resort(timeout: Duration) -> services::LastResortStop {
+    services::stop_mysql_servers(timeout)
 }

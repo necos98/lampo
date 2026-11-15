@@ -20,7 +20,8 @@
 //!
 //! Internal modules: `process` (process creation inside the job, IOCP stdio pipes),
 //! `service_host` (what every supervised runner shares; runners only describe their service),
-//! `startup_deadline` (when a slow but progressing start gives up),
+//! `startup_deadline` (when a slow but progressing start gives up), `last_resort` (synchronous
+//! clean MySQL shutdown when the app goes away without the graceful stop),
 //! `win` (thin Win32 wrappers). Windows only.
 
 #[cfg(not(windows))]
@@ -30,6 +31,7 @@ pub mod claude_code;
 pub mod compression;
 pub mod control_pipe;
 pub mod database;
+mod last_resort;
 pub mod launcher;
 pub mod logs;
 pub mod mailpit;
@@ -48,6 +50,7 @@ mod win;
 pub use claude_code::ClaudeCliRunner;
 pub use control_pipe::{NamedPipeControlClient, NamedPipeControlServer};
 pub use database::MysqlCliAdmin;
+pub use last_resort::{LastResortStop, stop_mysql_servers};
 pub use launcher::HeadlessAppLauncher;
 pub use logs::FileLogReader;
 pub use mailpit::MailpitRunner;
