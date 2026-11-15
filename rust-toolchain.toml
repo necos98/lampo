@@ -1,0 +1,8 @@
+# Toolchain fissata per sviluppo locale e CI (i workflow la installano con
+# `rustup toolchain install`): build riproducibili, niente "stable" che cambia da sola.
+# Va aggiornata a mano (insieme al codice che i nuovi lint di clippy segnalano);
+# deve restare >= rust-version di Cargo.toml ([workspace.package]).
+[toolchain]
+channel = "1.97.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

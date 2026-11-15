@@ -24,24 +24,28 @@ jobs:
         shell: pwsh
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
         with:
           version: 11
 
       - name: Setup Node
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
           cache-dependency-path: apps/desktop/pnpm-lock.yaml
 
-      - name: Setup Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
+      - name: Setup Rust (rust-toolchain.toml)
+        # rustup e' preinstallato sul runner: installa versione e componenti (clippy, rustfmt)
+        # fissati in rust-toolchain.toml.
+        run: |
+          rustup toolchain install
+          rustc --version
 
       - name: Format (rustfmt)
         # Stile in rustfmt.toml; non serve compilare, quindi fallisce subito.
@@ -49,7 +53,7 @@ jobs:
 
       - name: Cache Rust
         # shared-key diversa da quella di release: qui si compila in profilo dev.
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: . -> target
           shared-key: ci
@@ -73,8 +77,8 @@ jobs:
         run: pnpm build
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test (cargo)
         # I test che richiedono rete o binari reali sono #[ignore].
-        run: cargo test --workspace
+        run: cargo test --workspace --locked

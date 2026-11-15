@@ -56,7 +56,7 @@ installare, Lampo ferma Apache, MySQL e gli altri servizi in modo pulito.
 | `apps/desktop/src/lib/backend/ports.ts` | Porta `Updater` del `Backend` (reale in `tauri.ts`, simulata in `mock/`) |
 | `apps/desktop/src/lib/stores/updater.svelte.ts` | Stato e sequenza di installazione |
 | `apps/desktop/src/lib/components/settings/UpdatesPanel.svelte` | Sezione «Aggiornamenti» delle Impostazioni |
-| `.github/workflows/build-windows.yml` | Build firmata + `latest.json` + Release |
+| `.github/workflows/build-windows.yml` | Build non firmata (job `build-windows`), poi firma + `latest.json` + Release (job `release`) |
 | `scripts/bump-version.test.mjs` | Test: versioni sincronizzate, config updater, hook NSIS |
 
 Con `pnpm dev:mock` l'updater è simulato: trova sempre la 0.2.0, mostra il progresso e al
@@ -71,16 +71,19 @@ Gli aggiornamenti sono firmati con una chiave minisign generata con
   copia anche in `~/.tauri/lampo.key.pub`).
 - **Chiave privata**: in locale `~/.tauri/lampo.key` (password in `~/.tauri/lampo.key.password`).
   **Non va mai committata** né copiata nel repository o nei log.
-- **Secret GitHub** (Settings → Secrets and variables → Actions):
+- **Secret GitHub** dell'Environment `release` (Settings → Environments → release; non secret
+  di repository, vedi [RELEASE.md](RELEASE.md#1-repository-environment-e-secret-una-volta-sola)):
   - `TAURI_SIGNING_PRIVATE_KEY`: contenuto del file `lampo.key`;
   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: contenuto di `lampo.key.password`.
+  Li legge solo il job `release` di `build-windows.yml`, che non compila né installa le
+  dipendenze del progetto: firma l'installer già compilato con `tauri signer sign`.
 - **Se la chiave privata va persa** (o la password) le installazioni esistenti non potranno più
   verificare nuovi aggiornamenti: servirebbe una nuova coppia di chiavi e un'installazione manuale
   una tantum su ogni macchina. Tenere un backup sicuro fuori dal repository.
 
 ## latest.json
 
-Generato dalla CI (formato statico del plugin) e pubblicato come asset della Release;
+Generato dal job `release` della CI (formato statico del plugin) e pubblicato come asset della Release;
 l'endpoint `releases/latest/download/latest.json` punta sempre all'ultima release.
 
 ```json

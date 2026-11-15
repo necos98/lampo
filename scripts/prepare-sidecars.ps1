@@ -25,7 +25,7 @@ $triple = ((& rustc -vV) | Where-Object { $_ -like 'host: *' }) -replace '^host:
 if (-not $triple) { throw 'cannot determine the Rust host target triple (rustc -vV)' }
 
 $profileArgs = if ($Profile -eq 'debug') { @() } else { @('--profile', $Profile) }
-& cargo build --manifest-path (Join-Path $root 'Cargo.toml') -p lampo-cli -p lampo-infra-web --bins @profileArgs
+& cargo build --manifest-path (Join-Path $root 'Cargo.toml') -p lampo-cli -p lampo-infra-web --bins --locked @profileArgs
 if ($LASTEXITCODE -ne 0) { throw "cargo build failed with $LASTEXITCODE" }
 
 $targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $root 'target' }
