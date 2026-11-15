@@ -110,6 +110,14 @@ pub fn project(p: &ProjectDto) -> String {
         all.extend(p.environment.addons.iter().cloned());
         out.push_str(&format!("  extensions: {}\n", all.join(", ")));
     }
+    if !p.environment.php_ini.is_empty() {
+        let pairs: Vec<String> = p.environment.php_ini.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        out.push_str(&format!("  php.ini:   {}\n", pairs.join(", ")));
+    }
+    let directives = p.environment.apache_directives.lines().filter(|l| !l.trim().is_empty()).count();
+    if directives > 0 {
+        out.push_str(&format!("  apache:    {directives} extra directive line(s)\n"));
+    }
     match &p.database {
         Some(db) => out.push_str(&format!("  database:\n{}\n", database_lines(db, "    "))),
         None => out.push_str("  database:  none\n"),

@@ -103,8 +103,18 @@ lampo agent context --json
 `agent context` to verify, and look at `lampo logs php --tail 20` if it fails
 (`lampo:services-logs`).
 
+## Adjust the environment
+
+Detection and the preset pick PHP, extensions and services; change the rest after registering
+with `lampo project set` (only what you name changes; see `lampo:php` for extensions, add-ons
+and php.ini):
+
+```powershell
+lampo project set shop --ext intl --ini memory_limit=512M --service redis
+lampo project set shop --public-dir web
+```
+
 ## Not available from the CLI
 
-Removing a project, renaming it, changing its addresses, public folder, extensions, php.ini
-values or Apache directives is done in the Lampo app ("Progetti" > project). Removing a project
-never deletes its folder or its database.
+Removing a project, renaming it or changing its addresses is done in the Lampo app
+("Progetti" > project). Removing a project never deletes its folder or its database.

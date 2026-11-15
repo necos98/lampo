@@ -626,3 +626,105 @@ async fn agent_context_hook_prints_nothing_outside_a_lampo_project() {
     let (code, out, err) = run_cli(&fake, &["agent", "context", "--hook"]).await;
     assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""));
 }
+
+// --- `project set` ------------------------------------------------------------------------------
+
+fn sent_patch(fake: &Fake) -> ProjectPatchRequest {
+    match fake.last_request().0 {
+        ControlRequest::ProjectPatch(r) => r,
+        other => panic!("wrong request: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn project_set_maps_every_flag_to_one_patch_of_the_resolved_project() {
+    let fake = Fake::new();
+    fake.reply(Ok(project_json()));
+    let args = [
+        "project",
+        "set",
+        "--ext",
+        "intl,gd",
+        "--ext",
+        "zip",
+        "--no-ext",
+        "xdebug",
+        "--addon",
+        "xdebug",
+        "--no-addon",
+        "php-redis",
+        "--ini",
+        "memory_limit=512M",
+        "--ini",
+        "xdebug.mode=debug,develop",
+        "--ini",
+        "display_errors=",
+        "--no-ini",
+        "max_execution_time,upload_max_filesize",
+        "--service",
+        "redis",
+        "--service",
+        "mysql@5.7",
+        "--no-service",
+        "memcached",
+        "--database",
+        "shop_db",
+        "--public-dir",
+        "public",
+        "--apache-directives",
+        "",
+        "--json",
+    ];
+    let (code, out, _) = run_cli(&fake, &args).await;
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(parse(&out), project_json(), "the updated ProjectDto");
+    let r = sent_patch(&fake);
+    assert_eq!(r.project_id, "shop");
+    assert_eq!((r.extensions_add, r.extensions_remove), (vec!["intl".to_string(), "gd".into(), "zip".into()], vec!["xdebug".to_string()]));
+    assert_eq!((r.addons_add, r.addons_remove), (vec!["xdebug".to_string()], vec!["php-redis".to_string()]));
+    assert_eq!(r.ini_set.into_iter().collect::<Vec<_>>(), [("display_errors".into(), "".into()), ("memory_limit".into(), "512M".into()), ("xdebug.mode".into(), "debug,develop".into())]);
+    assert_eq!(r.ini_unset, ["max_execution_time", "upload_max_filesize"]);
+    assert_eq!(r.services_add, [ServiceUseDto { kind: "redis".into(), version: None }, ServiceUseDto { kind: "mysql".into(), version: Some("5.7".into()) }]);
+    assert_eq!(r.services_remove, ["memcached"]);
+    assert_eq!((r.database_name.as_deref(), r.public_dir.as_deref(), r.apache_directives.as_deref()), (Some("shop_db"), Some("public"), Some("")));
+    assert_eq!(fake.ensure_calls.load(Ordering::SeqCst), 0, "the app was already running");
+}
+
+#[tokio::test]
+async fn project_set_takes_an_explicit_id_and_the_service_id_form() {
+    let fake = Fake::new();
+    fake.reply(Ok(project_json()));
+    let (code, out, _) = run_cli(&fake, &["project", "set", "blog", "--service", "mysql-8.4"]).await;
+    assert_eq!(code, 0);
+    assert!(out.contains("services:  mysql-8.4"), "human output is the project view: {out}");
+    let r = sent_patch(&fake);
+    assert_eq!((r.project_id.as_str(), r.services_add), ("blog", vec![ServiceUseDto { kind: "mysql".into(), version: Some("8.4".into()) }]));
+    assert!(r.extensions_add.is_empty() && r.database_name.is_none() && r.apache_directives.is_none(), "only what is named");
+}
+
+#[tokio::test]
+async fn project_set_errors_keep_their_exit_codes() {
+    let fake = Fake::new();
+    let (code, out, _) = run_cli(&fake, &["project", "set", "--ini", "memory_limit", "--json"]).await;
+    assert_eq!(code, 4);
+    assert!(parse(&out)["error"]["message"].as_str().unwrap().contains("KEY=VALUE"));
+    assert!(fake.sent.lock().unwrap().is_empty(), "nothing sent");
+
+    fake.reply(Err(AppError::new(ErrorCode::PackageMissing, "xdebug for PHP 8.3 is not installed: run `lampo package install xdebug --php 8.3` first")));
+    let (code, out, _) = run_cli(&fake, &["project", "set", "--addon", "xdebug", "--json"]).await;
+    assert_eq!(code, 10);
+    assert_eq!(parse(&out)["error"]["code"], "package-missing");
+
+    fake.resolves_to(None);
+    let (code, _, _) = run_cli(&fake, &["project", "set", "--ext", "intl", "--json"]).await;
+    assert_eq!(code, 6);
+}
+
+#[test]
+fn project_set_needs_at_least_one_change() {
+    use clap::Parser;
+    assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set"]).is_err());
+    assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "shop"]).is_err());
+    assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "--no-ini", "memory_limit"]).is_ok());
+    assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "--apache-directives", "-Indexes"]).is_ok());
+}

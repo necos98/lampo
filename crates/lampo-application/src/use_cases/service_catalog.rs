@@ -108,7 +108,7 @@ impl ServiceCatalog {
 
     /// The default instance of `kind` for sites that do not use it: the first always-on
     /// configured instance, else the first configured one.
-    fn default_instance(&self, kind: &ServiceKind, settings: &Settings) -> Option<ServiceId> {
+    pub(crate) fn default_instance(&self, kind: &ServiceKind, settings: &Settings) -> Option<ServiceId> {
         let of_kind = || settings.services.iter().filter(|s| s.service.kind() == kind);
         of_kind()
             .find(|s| s.always_on)

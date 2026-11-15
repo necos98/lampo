@@ -93,7 +93,9 @@ You MAY, without asking:
   `--db` mode);
 - run `php`, `composer`, `php artisan`, `mysql`, `redis-cli` through the shims or `lampo exec`;
 - write the database, Redis and `APP_URL` values Lampo reports into the project's `.env`;
-- install a package the current task needs when a command fails with exit code 10 (say so).
+- install a package the current task needs when a command fails with exit code 10 (say so);
+- enable what the task needs with `lampo project set`: a bundled extension (`--ext`), an add-on
+  (`--addon xdebug`), a php.ini value (`--ini`), Redis (`--service redis`); say what you changed.
 
 You MUST ASK the user first, and wait for a clear yes, before:
 
@@ -101,7 +103,9 @@ You MUST ASK the user first, and wait for a clear yes, before:
   (it writes into an existing database), `php artisan migrate:fresh` / `db:wipe` /
   `migrate:reset` on a database that is not a throwaway one;
 - using `--allow-elevation` (it opens a UAC prompt);
-- changing the PHP version of a main project (`lampo project set-php`);
+- changing the PHP version of a main project (`lampo project set-php`), or with
+  `lampo project set` removing a service, switching its MySQL series, or changing its database
+  name, public folder or Apache directives;
 - removing worktree environments that own a database (`lampo worktree down --drop-database`,
   `lampo worktree prune --drop-databases`, or `lampo worktree down` of an environment whose
   database the user may still want);
@@ -121,10 +125,12 @@ that is not Lampo (Laragon, XAMPP, Docker, IIS) without the user's explicit appr
 - MySQL: user `root`, empty password, host `127.0.0.1`, port of the series (3306 for 8.4 by
   default). The project database is named after the project id (`my-shop` -> `my_shop`).
 - Lampo never edits `.env`; copy the values from `agent context` when the app needs them.
-- Settings that have no CLI command yet (PHP extensions and add-ons, php.ini values, Apache
-  directives, public folder, services of a project, ports) are changed in the Lampo app:
-  "Progetti" > project > tabs "PHP", "Apache", "Database e cache", or "Impostazioni" (the GUI
-  is in Italian).
+- A project's environment is edited with `lampo project set` (extensions, add-ons, php.ini
+  values, services, database name, public folder, Apache directives; see
+  `lampo project set --help`). Only what you name changes; worktree environments follow the
+  parent. Still only in the Lampo app (GUI in Italian): display name and addresses of a
+  project ("Progetti" > project), ports and MySQL instances ("Impostazioni"), deleting
+  projects, uninstalling packages.
 
 ## 6. Load the specialised skill
 

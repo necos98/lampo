@@ -355,6 +355,7 @@ fn dispatcher(w: &World, quit: Arc<std::sync::atomic::AtomicBool>, gate: Arc<Shu
         update_project: Arc::new(UpdateProject::new(writer.clone())),
         set_project_active: Arc::new(SetProjectActive::new(writer.clone())),
         set_project_php: Arc::new(SetProjectPhp::new(writer, w.installed.clone())),
+        patch_project: Arc::new(w.patch_project()),
         delete_project: Arc::new(DeleteProject::new(w.projects.clone(), w.worktrees.clone(), w.env.clone(), w.events.clone())),
         service_control: w.service_control.clone(),
         environment: w.env.clone(),
@@ -420,6 +421,11 @@ async fn control_dispatcher_routes_requests_to_use_cases() {
 
     let missing = call(&d, ControlRequest::ProjectDelete { project_id: "ghost".into() }, cli()).await.0;
     assert_eq!(error_code(missing), ErrorCode::NotFound);
+
+    let patched = call(&d, ControlRequest::ProjectPatch(ProjectPatchRequest { project_id: "shop".into(), extensions_add: vec!["intl".into()], ..Default::default() }), cli()).await.0;
+    assert_eq!(ok_payload(patched)["environment"]["extensions"], serde_json::json!(["intl"]));
+    let no_addon = call(&d, ControlRequest::ProjectPatch(ProjectPatchRequest { project_id: "shop".into(), addons_add: vec!["xdebug".into()], ..Default::default() }), cli()).await.0;
+    assert_eq!(error_code(no_addon), ErrorCode::PackageMissing);
 
     ok_payload(call(&d, ControlRequest::Quit, cli()).await.0);
     assert!(quit.load(Ordering::SeqCst));

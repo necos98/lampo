@@ -181,6 +181,72 @@ pub enum ProjectCommand {
         /// Project id (default: resolved from the current folder).
         id: Option<String>,
     },
+    /// Change the project's PHP extensions, add-ons (Xdebug), php.ini values, services (MySQL/Redis), database name, public folder or Apache directives
+    ///
+    /// Only what is named changes, in one atomic edit of the stored project (no lost update
+    /// with the GUI); then Apache, php.ini and services are regenerated as after a GUI save.
+    /// Every flag is repeatable and list flags also take comma-separated values; removals apply
+    /// before additions; adding something already there (or removing something absent) is a
+    /// no-op. Worktree environments follow their parent project. Prints the updated project
+    /// (`--json`: the ProjectDto). Display name, addresses and ports are edited in the app.
+    ///
+    /// Examples:
+    ///   lampo project set --ext intl,gd --ini memory_limit=512M
+    ///   lampo project set --addon xdebug --ini xdebug.mode=debug,develop
+    ///   lampo project set --no-addon xdebug --no-ini xdebug.mode
+    ///   lampo project set --service redis --service mysql@5.7 --database shop_legacy
+    ///   lampo project set shop --public-dir public --json
+    #[command(verbatim_doc_comment)]
+    Set(Box<ProjectSetArgs>),
+}
+
+#[derive(Debug, Args)]
+#[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args([
+    "ext", "no_ext", "addon", "no_addon", "ini", "no_ini", "service", "no_service", "database", "public_dir", "apache_directives",
+])))]
+pub struct ProjectSetArgs {
+    /// Project id (default: resolved from the current folder or --project).
+    pub id: Option<String>,
+    /// Enable a bundled PHP extension (`intl`, `gd`, `pdo_mysql`, `opcache`...; `php_intl.dll`
+    /// also works). Must ship with the project's PHP (the error lists the available ones).
+    #[arg(long, value_name = "NAME", value_delimiter = ',')]
+    pub ext: Vec<String>,
+    /// Disable a bundled PHP extension.
+    #[arg(long, value_name = "NAME", value_delimiter = ',')]
+    pub no_ext: Vec<String>,
+    /// Enable an add-on extension package: `xdebug`, `php-redis`. It must be installed for the
+    /// project's PHP first (`lampo package install xdebug --php 8.3`; exit 10 otherwise).
+    #[arg(long, value_name = "KIND", value_delimiter = ',')]
+    pub addon: Vec<String>,
+    /// Disable an add-on extension (the package stays installed).
+    #[arg(long, value_name = "KIND", value_delimiter = ',')]
+    pub no_addon: Vec<String>,
+    /// Set a php.ini override, `KEY=VALUE` (`memory_limit=512M`, `xdebug.mode=debug`). The value
+    /// is taken verbatim, commas included; an empty value (`display_errors=`) is kept as such.
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub ini: Vec<String>,
+    /// Remove a php.ini override (back to Lampo's default for that key).
+    #[arg(long, value_name = "KEY", value_delimiter = ',')]
+    pub no_ini: Vec<String>,
+    /// Use a service: `redis`, `mysql` (the default MySQL instance), `mysql@5.7` or `mysql-5.7`
+    /// (a configured series; switches series if MySQL is already used). Adding MySQL also
+    /// assigns the project's database name; create the database with `lampo db create`.
+    #[arg(long, value_name = "KIND[@VERSION]", value_delimiter = ',')]
+    pub service: Vec<String>,
+    /// Stop using a service kind (`redis`, `mysql`). Databases are never dropped.
+    #[arg(long, value_name = "KIND", value_delimiter = ',')]
+    pub no_service: Vec<String>,
+    /// Database name shown in the connection details and the LAMPO_DB_* variables (the project
+    /// must use MySQL). Does not create, rename or copy any database.
+    #[arg(long, value_name = "NAME")]
+    pub database: Option<String>,
+    /// Document root relative to the project folder (`public`, `web`); `""` = the folder itself.
+    #[arg(long, value_name = "DIR")]
+    pub public_dir: Option<String>,
+    /// Extra Apache directives inside the project's <VirtualHost> (replaces the current ones;
+    /// `""` clears them). From a file in PowerShell: --apache-directives (Get-Content x.conf -Raw)
+    #[arg(long, value_name = "TEXT", allow_hyphen_values = true)]
+    pub apache_directives: Option<String>,
 }
 
 #[derive(Debug, Args)]

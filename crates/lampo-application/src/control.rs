@@ -66,6 +66,8 @@ pub enum ControlRequest {
     ProjectSetActive(SetProjectActiveRequest),
     /// → [`ProjectDto`]
     ProjectSetPhp(SetProjectPhpRequest),
+    /// Partial environment change (`lampo project set`). → [`ProjectDto`]
+    ProjectPatch(ProjectPatchRequest),
     /// → `null`
     ProjectDelete { project_id: String },
     /// → [`SyncReportDto`]
@@ -136,6 +138,7 @@ pub struct ControlServices {
     pub update_project: Arc<UpdateProject>,
     pub set_project_active: Arc<SetProjectActive>,
     pub set_project_php: Arc<SetProjectPhp>,
+    pub patch_project: Arc<PatchProjectEnvironment>,
     pub delete_project: Arc<DeleteProject>,
     pub service_control: Arc<ServiceControl>,
     pub environment: Arc<dyn EnvironmentSync>,
@@ -180,6 +183,7 @@ impl ControlDispatcher {
             ControlRequest::ProjectUpdate(r) => to_json(s.update_project.execute(r, ctx).await?),
             ControlRequest::ProjectSetActive(r) => to_json(s.set_project_active.execute(r, ctx).await?),
             ControlRequest::ProjectSetPhp(r) => to_json(s.set_project_php.execute(r, ctx).await?),
+            ControlRequest::ProjectPatch(r) => to_json(s.patch_project.execute(r, ctx).await?),
             ControlRequest::ProjectDelete { project_id } => to_json(s.delete_project.execute(&project_id, ctx).await?),
             ControlRequest::ServicesUp(r) => to_json(s.service_control.up(r, ctx).await?),
             ControlRequest::ServicesDown(r) => to_json(s.service_control.down(r).await?),
@@ -320,6 +324,29 @@ mod tests {
         assert_eq!(back, env);
         let ping: ControlRequest = serde_json::from_str(r#"{"type":"ping"}"#).unwrap();
         assert_eq!(ping, ControlRequest::Ping);
+    }
+
+    #[test]
+    fn project_patch_wire_format() {
+        let request = ControlRequest::ProjectPatch(ProjectPatchRequest {
+            project_id: "shop".into(),
+            extensions_add: vec!["intl".into()],
+            ini_set: [("memory_limit".to_string(), "512M".to_string())].into(),
+            services_add: vec![ServiceUseDto { kind: "mysql".into(), version: Some("5.7".into()) }],
+            ..Default::default()
+        });
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["type"], "project-patch");
+        assert_eq!(json["params"]["extensionsAdd"][0], "intl");
+        assert_eq!(json["params"]["iniSet"]["memory_limit"], "512M");
+        assert_eq!(json["params"]["servicesAdd"][0]["version"], "5.7");
+        assert_eq!(serde_json::from_value::<ControlRequest>(json).unwrap(), request);
+        // Omitted fields default: a client sends only what it changes.
+        let minimal: ControlRequest = serde_json::from_str(r#"{"type":"project-patch","params":{"projectId":"shop","addonsRemove":["xdebug"]}}"#).unwrap();
+        let ControlRequest::ProjectPatch(p) = &minimal else { panic!("wrong variant") };
+        assert_eq!(p.addons_remove, ["xdebug"]);
+        assert!(p.extensions_add.is_empty() && p.database_name.is_none() && !p.is_empty());
+        assert!(minimal.is_mutating());
     }
 
     #[test]

@@ -161,7 +161,7 @@ impl ProjectWriter {
 
     /// Loads `project_id`, applies `change` and, if it reports a change, saves the result, all
     /// under the allocator lock (no lost update, no conflict slipping in).
-    async fn modify(&self, project_id: &str, change: impl FnOnce(&mut Project, &SiteSnapshot) -> AppResult<bool>) -> AppResult<Project> {
+    pub(crate) async fn modify(&self, project_id: &str, change: impl FnOnce(&mut Project, &SiteSnapshot) -> AppResult<bool>) -> AppResult<Project> {
         let project = self
             .allocator
             .reserve(|snap| {
@@ -181,7 +181,7 @@ impl ProjectWriter {
     }
 
     /// Syncs, then returns the full view of `project`.
-    async fn finish(&self, project: &Project, ctx: &CallContext) -> AppResult<ProjectDto> {
+    pub(crate) async fn finish(&self, project: &Project, ctx: &CallContext) -> AppResult<ProjectDto> {
         self.env.sync(ctx).await?;
         self.queries.get(project.id.as_str())
     }

@@ -164,6 +164,69 @@ pub struct UpdateProjectRequest {
     pub tls: TlsModeDto,
 }
 
+/// Partial change of a project's environment (`lampo project set`), applied atomically to the
+/// stored project: unlike [`UpdateProjectRequest`] nothing omitted is overwritten, so a CLI call
+/// never loses a concurrent GUI edit. Removals apply before additions; naming the same item in
+/// both is a `validation` error. An empty patch returns the project unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ProjectPatchRequest {
+    pub project_id: String,
+    /// Bundled extensions to enable (`intl`, `php_intl.dll`).
+    pub extensions_add: Vec<String>,
+    pub extensions_remove: Vec<String>,
+    /// Add-on package kinds to enable (`xdebug`, `php-redis`): each must be installed for the
+    /// project's PHP minor (`package-missing` otherwise).
+    pub addons_add: Vec<String>,
+    pub addons_remove: Vec<String>,
+    /// php.ini overrides to set (key → value).
+    pub ini_set: BTreeMap<String, String>,
+    /// php.ini overrides to remove (back to Lampo's base value).
+    pub ini_unset: Vec<String>,
+    /// Services to use. A versioned kind without `version` gets the default configured instance
+    /// (`mysql` → the always-on series); a versioned kind already used switches series.
+    pub services_add: Vec<ServiceUseDto>,
+    /// Service kinds to stop using (`mysql`, `redis`). Removing MySQL never drops a database.
+    pub services_remove: Vec<String>,
+    /// Database shown in the connection details; requires the project to use MySQL.
+    pub database_name: Option<String>,
+    /// Document root relative to the project folder (`""` = the folder itself).
+    pub public_dir: Option<String>,
+    /// Extra directives inside the project's `<VirtualHost>` (replaces them; `""` clears).
+    pub apache_directives: Option<String>,
+}
+
+impl ProjectPatchRequest {
+    /// Whether the patch changes nothing.
+    pub fn is_empty(&self) -> bool {
+        let Self {
+            project_id: _,
+            extensions_add,
+            extensions_remove,
+            addons_add,
+            addons_remove,
+            ini_set,
+            ini_unset,
+            services_add,
+            services_remove,
+            database_name,
+            public_dir,
+            apache_directives,
+        } = self;
+        extensions_add.is_empty()
+            && extensions_remove.is_empty()
+            && addons_add.is_empty()
+            && addons_remove.is_empty()
+            && ini_set.is_empty()
+            && ini_unset.is_empty()
+            && services_add.is_empty()
+            && services_remove.is_empty()
+            && database_name.is_none()
+            && public_dir.is_none()
+            && apache_directives.is_none()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetProjectActiveRequest {

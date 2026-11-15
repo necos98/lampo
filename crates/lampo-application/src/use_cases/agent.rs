@@ -200,6 +200,13 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         c("lampo project activate", "lampo project activate [<id>]", "Activate a project (serve it).", true, true),
         c("lampo project deactivate", "lampo project deactivate [<id>]", "Deactivate a project.", true, true),
         c("lampo project set-php", "lampo project set-php <minor> [<id>]", "Switch the project's PHP minor.", true, true),
+        c(
+            "lampo project set",
+            "lampo project set [<id>] [--ext <name>] [--no-ext <name>] [--addon xdebug|php-redis] [--no-addon <kind>] [--ini <key>=<value>] [--no-ini <key>] [--service redis|mysql[@<series>]] [--no-service <kind>] [--database <name>] [--public-dir <dir>] [--apache-directives <text>]",
+            "Change the project's extensions, add-ons, php.ini values, services, database name, public folder or Apache directives (repeatable flags, one atomic edit).",
+            true,
+            true,
+        ),
         c("lampo worktree up", "lampo worktree up [<path>] [--db shared|fresh|clone:<db>]", "Create (or return) the worktree's own environment.", true, true),
         c("lampo worktree down", "lampo worktree down [<path|site>] [--drop-database]", "Remove the worktree environment.", true, true),
         c("lampo worktree list", "lampo worktree list [--project <id>] [--json]", "List worktree environments.", false, false),
