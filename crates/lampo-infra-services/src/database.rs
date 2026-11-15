@@ -8,6 +8,7 @@ use lampo_domain::ports::{CommandOutput, CommandRunner, CommandSpec, DatabaseAdm
 use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
 use lampo_domain::{PortError, PortResult};
 
+use crate::compression;
 use crate::mysql::client_args;
 
 const STATEMENT_TIMEOUT: Duration = Duration::from_secs(120);
@@ -17,8 +18,9 @@ const SYSTEM_SCHEMAS: [&str; 4] = ["information_schema", "mysql", "performance_s
 
 /// `DatabaseAdmin` via `mysql.exe` / `mysqldump.exe` of the endpoint's series (no MySQL client
 /// library: works identically for 5.7 and 8.x auth plugins). Import/export/clone stream through
-/// [`PipedCommandRunner::run_piped`]: dump files are read/written by the clients themselves and a
-/// clone pipes `mysqldump` straight into `mysql`, so nothing is held in memory.
+/// [`PipedCommandRunner::run_piped`]: plain dump files are read/written by the clients themselves,
+/// compressed ones (detected by [`crate::compression`]) are (de)compressed chunk by chunk on the
+/// way, and a clone pipes `mysqldump` straight into `mysql`, so nothing is held in memory.
 ///
 /// Safety against odd names: names are already restricted by [`DatabaseName`]; they are also
 /// backtick-quoted (with backticks doubled) in SQL, passed as separate arguments (never through
@@ -129,18 +131,21 @@ impl DatabaseAdmin for MysqlCliAdmin {
 
     async fn import(&self, endpoint: &MysqlEndpoint, name: &DatabaseName, sql_file: &Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
         let total = std::fs::metadata(sql_file).map_err(|_| PortError::not_found("file", sql_file.display().to_string()))?.len();
+        // Checked before touching the server: a bad archive fails without creating the database.
+        let stdin_compression = compression::detect_input(sql_file)?;
         cancel.check()?;
         self.execute_ok(endpoint, &format!("CREATE DATABASE IF NOT EXISTS {} CHARACTER SET utf8mb4", quote_ident(name))).await?;
-        let command = PipedCommand { stages: vec![restore_spec(endpoint, name)?], stdin_file: Some(sql_file.to_path_buf()), stdout_file: None };
+        let command = PipedCommand { stages: vec![restore_spec(endpoint, name)?], stdin_file: Some(sql_file.to_path_buf()), stdin_compression, ..Default::default() };
         let on_bytes = reporter(progress, Some(total), format!("import {name}"));
         let outputs = self.pipes.run_piped(command, &on_bytes, cancel, TRANSFER_TIMEOUT).await?;
         ensure_ok("mysql", &outputs)
     }
 
     async fn export(&self, endpoint: &MysqlEndpoint, name: &DatabaseName, sql_file: &Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
+        let stdout_compression = compression::detect_output(sql_file)?;
         cancel.check()?;
         let partial = partial_path(sql_file);
-        let command = PipedCommand { stages: vec![dump_spec(endpoint, name)?], stdin_file: None, stdout_file: Some(partial.clone()) };
+        let command = PipedCommand { stages: vec![dump_spec(endpoint, name)?], stdout_file: Some(partial.clone()), stdout_compression, ..Default::default() };
         let on_bytes = reporter(progress, None, format!("export {name}"));
         let result = match self.pipes.run_piped(command, &on_bytes, cancel, TRANSFER_TIMEOUT).await {
             Ok(outputs) => ensure_ok("mysqldump", &outputs),
@@ -159,7 +164,7 @@ impl DatabaseAdmin for MysqlCliAdmin {
         cancel.check()?;
         let stages = vec![dump_spec(endpoint, source)?, restore_spec(endpoint, target)?];
         self.create(endpoint, target).await?;
-        let command = PipedCommand { stages, stdin_file: None, stdout_file: None };
+        let command = PipedCommand { stages, ..Default::default() };
         let on_bytes = reporter(progress, None, format!("clone {source} -> {target}"));
         let result = match self.pipes.run_piped(command, &on_bytes, cancel, TRANSFER_TIMEOUT).await {
             Ok(outputs) => ensure_ok("mysqldump | mysql", &outputs),
@@ -176,13 +181,15 @@ impl DatabaseAdmin for MysqlCliAdmin {
 mod tests {
     use super::*;
     use lampo_domain::mysql::MysqlSeries;
-    use lampo_domain::ports::NullProgressSink;
+    use lampo_domain::ports::{NullProgressSink, StreamCompression};
     use std::sync::Mutex;
 
     /// Records invocations and answers with canned outputs.
     #[derive(Default)]
     struct FakeRunner {
         calls: Mutex<Vec<Vec<CommandSpec>>>,
+        /// `(stdin_compression, stdout_compression)` of every piped command.
+        compressions: Mutex<Vec<(StreamCompression, StreamCompression)>>,
         reply: Mutex<Vec<CommandOutput>>,
     }
 
@@ -205,6 +212,10 @@ mod tests {
         async fn run_piped(&self, command: PipedCommand, on_bytes: &(dyn Fn(u64) + Send + Sync), _c: &CancelFlag, _t: Duration) -> PortResult<Vec<CommandOutput>> {
             on_bytes(42);
             let n = command.stages.len();
+            if let Some(out) = &command.stdout_file {
+                std::fs::write(out, b"").unwrap();
+            }
+            self.compressions.lock().unwrap().push((command.stdin_compression, command.stdout_compression));
             self.calls.lock().unwrap().push(command.stages);
             Ok((0..n).map(|_| self.next()).collect())
         }
@@ -281,5 +292,62 @@ mod tests {
         assert!(admin.export(&endpoint(dir.path()), &DatabaseName::new("nope").unwrap(), &out, &NullProgressSink, &CancelFlag::new()).await.is_err());
         assert!(!out.exists());
         assert!(!partial_path(&out).exists());
+    }
+
+    fn gzipped(bytes: &[u8]) -> Vec<u8> {
+        use std::io::Write;
+        let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+        e.write_all(bytes).unwrap();
+        e.finish().unwrap()
+    }
+
+    #[tokio::test]
+    async fn import_streams_compressed_dumps_with_their_detected_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(FakeRunner::default());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let name = DatabaseName::new("shop").unwrap();
+        let plain = dir.path().join("dump.sql");
+        std::fs::write(&plain, b"SELECT 1;").unwrap();
+        let gz = dir.path().join("dump.sql.gz");
+        std::fs::write(&gz, gzipped(b"SELECT 1;")).unwrap();
+        for file in [&plain, &gz] {
+            admin.import(&endpoint(dir.path()), &name, file, &NullProgressSink, &CancelFlag::new()).await.unwrap();
+        }
+        let compressions = fake.compressions.lock().unwrap();
+        assert_eq!(*compressions, [(StreamCompression::None, StreamCompression::None), (StreamCompression::Gzip, StreamCompression::None)]);
+        let calls = fake.calls.lock().unwrap();
+        assert!(calls[1][0].args.contains(&"--database=shop".to_string()), "restores into the target");
+    }
+
+    #[tokio::test]
+    async fn import_rejects_a_bad_archive_before_touching_the_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(FakeRunner::default());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let zip_path = dir.path().join("two.zip");
+        let mut w = zip::ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
+        for entry in ["a.sql", "b.sql"] {
+            w.start_file(entry, zip::write::SimpleFileOptions::default()).unwrap();
+        }
+        w.finish().unwrap();
+        let err = admin.import(&endpoint(dir.path()), &DatabaseName::new("shop").unwrap(), &zip_path, &NullProgressSink, &CancelFlag::new()).await.unwrap_err();
+        assert!(matches!(&err, PortError::InvalidData { message, .. } if message.contains("2 .sql files")), "{err}");
+        assert!(fake.calls.lock().unwrap().is_empty(), "no CREATE DATABASE, no mysql");
+    }
+
+    #[tokio::test]
+    async fn export_gzips_a_gz_destination_and_refuses_zip() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(FakeRunner::default());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let name = DatabaseName::new("shop").unwrap();
+        let out = dir.path().join("shop.sql.gz");
+        admin.export(&endpoint(dir.path()), &name, &out, &NullProgressSink, &CancelFlag::new()).await.unwrap();
+        assert!(out.exists() && !partial_path(&out).exists());
+        assert_eq!(*fake.compressions.lock().unwrap(), [(StreamCompression::None, StreamCompression::Gzip)]);
+        let err = admin.export(&endpoint(dir.path()), &name, &dir.path().join("shop.zip"), &NullProgressSink, &CancelFlag::new()).await.unwrap_err();
+        assert!(err.to_string().contains("use .sql.gz"), "{err}");
+        assert_eq!(fake.calls.lock().unwrap().len(), 1);
     }
 }

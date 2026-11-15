@@ -1,6 +1,6 @@
 ﻿[package]
 name = "lampo-infra-services"
-description = "Lampo service adapters: Job Object process supervisor, MySQL/Redis runners, port probe, log files, database admin, control named pipe, headless app launcher."
+description = "Lampo service adapters: Job Object process supervisor, MySQL/Redis runners, port probe, log files, database admin (compressed dumps), control named pipe, headless app launcher."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,6 +15,8 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["fs", "io-util", "process", "rt", "sync", "time", "net", "macros"] }
 tempfile = { workspace = true }
 tracing = { workspace = true }
+flate2 = { workspace = true }
+zip = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = [

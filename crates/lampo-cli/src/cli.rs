@@ -445,15 +445,21 @@ pub enum DbCommand {
         yes: bool,
     },
     /// Import an SQL dump (default database: the site's).
+    ///
+    /// Plain `.sql`, gzip (`.sql.gz`, `.gz`) or a `.zip` holding exactly one `.sql` file, detected
+    /// from the content and decompressed on the fly (never extracted to disk). Progress counts
+    /// the bytes of the file as given.
     Import {
-        /// `.sql` file.
+        /// `.sql`, `.sql.gz` or `.zip` file.
         file: String,
         /// Target database.
         name: Option<String>,
     },
     /// Export a database to an SQL file (default database: the site's).
+    ///
+    /// A file name ending in `.gz` (`backup.sql.gz`) is written gzip-compressed.
     Export {
-        /// `.sql` file to write.
+        /// `.sql` or `.sql.gz` file to write.
         file: String,
         /// Source database.
         name: Option<String>,

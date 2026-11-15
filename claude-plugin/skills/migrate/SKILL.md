@@ -107,6 +107,8 @@ lampo project set shop --public-dir public --service mysql@5.7
    example `$HOME\lampo-migration\shop`. The reference gives the exact command. Exporting is
    read-only for the source.
 2. Check the dump: size, the first lines, `CREATE DATABASE`/`USE` lines (see `lampo:database`).
+   A `.sql.gz` or a `.zip` with a single `.sql` (common for hosting backups) imports as is: do
+   not extract it.
 3. Ask the user, naming the file and the target database, then import:
 
 ```powershell

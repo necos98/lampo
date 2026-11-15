@@ -48,7 +48,7 @@ pub use events::{EventPublisher, NullEventPublisher, NullProgressSink, ProgressS
 pub use packages::{ArchiveExtractor, ChecksumCalculator, InstalledPackageRegistry, PackageCatalogSource, PackageDownloader, PackageInstallHook, PhpExtensionScanner, VcRuntimeDetector};
 pub use services::{
     ChildId, CommandOutput, CommandRunner, CommandSpec, DatabaseAdmin, LogFileReader, MysqlEndpoint, PipedCommand, PipedCommandRunner, PortAvailability, PortProbe, ProcessObserver,
-    ProcessSupervisor, ServiceRunner, SpawnedChild, StreamingCommandRunner,
+    ProcessSupervisor, ServiceRunner, SpawnedChild, StreamCompression, StreamingCommandRunner,
 };
 pub use store::{
     AppLocationRecorder, CustomPresetRepository, ExecutableLocator, FileSystemInspector, GitInspector, ProjectDetector, ProjectRepository, ProjectResolver, ProjectTransfer, ScaffoldFiles,
