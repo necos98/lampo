@@ -9,6 +9,7 @@ use lampo_domain::package::PackageKind;
 use lampo_domain::ports::{CustomPresetRepository, ProjectRepository, WorktreeRepository};
 use lampo_domain::preset::PresetId;
 use lampo_domain::project::{ProjectId, ProjectRoot};
+use lampo_domain::service::ServiceKind;
 use lampo_domain::worktree::{DatabaseMode, WorktreeEnvironment};
 
 use super::{cli, gui};
@@ -18,7 +19,7 @@ use crate::testing::*;
 use crate::use_cases::*;
 
 fn hint(preset: &str, php_version: Option<&str>) -> DetectionHint {
-    DetectionHint { project_type: preset.into(), preset: PresetId::new(preset).unwrap(), php: php_version.map(php), confidence: 90, evidence: vec!["found artisan".into()] }
+    DetectionHint::new(preset, PresetId::new(preset).unwrap(), php_version.map(php), 90, vec!["found artisan".into()])
 }
 
 fn detect(w: &World, hint: Option<DetectionHint>) -> Arc<DetectProject> {
@@ -47,6 +48,24 @@ async fn detection_suggests_preset_name_and_flags_registered_folders() {
     assert_eq!(d.execute("relative\\path").unwrap_err().code, ErrorCode::Validation);
     w.project("shop", "C:\\sites\\shop", false);
     assert_eq!(d.execute("C:\\sites\\shop").unwrap().already_registered.as_deref(), Some("shop"));
+}
+
+#[tokio::test]
+async fn detected_services_and_warnings_are_reported_and_unversioned_ones_are_added() {
+    let w = World::with_basics();
+    w.fs.add("C:\\sites\\sail");
+    w.hosts_in_sync();
+    let mut found = hint("laravel", Some("8.3"));
+    found.services = vec![ServiceKind::MYSQL, ServiceKind::REDIS, ServiceKind::new("postgres").unwrap()];
+    found.warnings = vec!["PostgreSQL is not supported by Lampo".into()];
+    let dto = detect(&w, Some(found.clone())).execute("C:\\sites\\sail").unwrap();
+    assert_eq!(dto.services, ["mysql", "redis", "postgres"]);
+    assert_eq!(dto.warnings, ["PostgreSQL is not supported by Lampo"]);
+
+    let env = create(&w, Some(found)).execute(req("C:\\sites\\sail"), &gui()).await.unwrap().project.environment;
+    assert!(env.service("redis").is_some(), "redis added from the detection");
+    assert!(env.service_version("mysql").is_some(), "MySQL keeps the preset's series");
+    assert!(env.service("postgres").is_none(), "unknown kinds are never added");
 }
 
 #[tokio::test]

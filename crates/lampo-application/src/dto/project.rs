@@ -213,6 +213,11 @@ pub struct DetectionDto {
     pub suggested_name: String,
     pub suggested_id: String,
     pub evidence: Vec<String>,
+    /// Service kinds the folder's own files show it uses (`mysql`, `redis`; from a Docker
+    /// Compose file). Creation adds the unversioned ones the preset lacks.
+    pub services: Vec<String>,
+    /// What Lampo cannot provide for this folder (PostgreSQL, Mailpit…), developer-facing.
+    pub warnings: Vec<String>,
     /// Id of the project already registered for this folder, if any.
     pub already_registered: Option<String>,
 }

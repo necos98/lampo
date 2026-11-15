@@ -36,7 +36,7 @@ pub mod worktrees;
 pub use agent::{AgentContextDeps, AgentContextQuery, ToolchainQuery};
 pub use allocation::{LoopbackPortAllocator, SiteSnapshot};
 pub use app_info::AppInfoQuery;
-pub use claude_code::{ClaudeCodeSetup, ClaudeCodeSetupDeps, embedded_skills};
+pub use claude_code::{ClaudeCodeSetup, ClaudeCodeSetupDeps, embedded_icon, embedded_skills};
 pub use database::DatabaseService;
 pub use diagnostics::{
     AppCheck, Doctor, DoctorCheck, DoctorDeps, DoctorFacts, FoldersCheck, HostsBlockCheck, PackagesCheck, PathShadowingCheck, PortsCheck, ShimsOnPathCheck, StaleWorktreesCheck,

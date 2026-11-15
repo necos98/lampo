@@ -296,6 +296,13 @@
 						</ul>
 					</FormRow>
 				{/if}
+				{#if d.warnings.length}
+					<FormRow label={m.create.warnings}>
+						<ul class="flex flex-col gap-1 text-sm text-amber-700 dark:text-amber-400">
+							{#each d.warnings as item (item)}<li>{item}</li>{/each}
+						</ul>
+					</FormRow>
+				{/if}
 				<FormRow label={m.create.name} for="name">
 					<Input id="name" class="h-8 max-w-xs" bind:value={flow.name} />
 				</FormRow>

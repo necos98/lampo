@@ -24,7 +24,7 @@ impl ProjectDetector for WordPressDetector {
         let (php, php_evidence) = Manifest::read(folder).php_hint();
         let mut evidence = markers;
         evidence.extend(php_evidence);
-        Ok(Some(DetectionHint { project_type: "wordpress".into(), preset: preset("wordpress"), php, confidence: 90, evidence }))
+        Ok(Some(DetectionHint::new("wordpress", preset("wordpress"), php, 90, evidence)))
     }
 }
 

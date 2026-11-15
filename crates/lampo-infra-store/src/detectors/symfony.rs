@@ -27,7 +27,7 @@ impl ProjectDetector for SymfonyDetector {
         let (php, php_evidence) = manifest.php_hint();
         let mut evidence = vec!["found bin/console".to_string(), "composer.json requires symfony/framework-bundle".to_string()];
         evidence.extend(php_evidence);
-        Ok(Some(DetectionHint { project_type: "symfony".into(), preset: preset("symfony"), php, confidence: 85, evidence }))
+        Ok(Some(DetectionHint::new("symfony", preset("symfony"), php, 85, evidence)))
     }
 }
 

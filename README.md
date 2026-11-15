@@ -13,8 +13,8 @@ Windows. Include la CLI `lampo`, pensata anche per i coding agent.
 - **Un solo Apache** con un virtual host per progetto.
 - **Qualsiasi versione di PHP dalla 5.6 in su**, scelta per progetto e scaricata da windows.php.net.
 - **MySQL condiviso** con un'istanza per versione e **Redis** facoltativo.
-- **Riconoscimento del progetto** (Laravel, WordPress, Symfony, Composer) con preset di
-  configurazione.
+- **Riconoscimento del progetto** (Laravel, WordPress, Symfony, Composer; da Docker Compose e
+  Laravel Sail anche PHP e servizi) con preset di configurazione.
 - **Indirizzi senza permessi di amministratore**: `<progetto>.localhost` e una porta dedicata su
   `127.0.0.1`. In alternativa, un nome nel file hosts (con conferma UAC).
 - **Database creato in automatico** quando aggiungi un progetto che usa MySQL.
@@ -106,6 +106,7 @@ tuo utente, con `claude plugin …`) un plugin generato da Lampo in
   code, risoluzione del sito, build e test end-to-end.
 - [docs/RELEASE.md](docs/RELEASE.md): come si pubblica una release.
 - [docs/UPDATER.md](docs/UPDATER.md): come funziona l'aggiornamento firmato.
+- [docs/CLAUDE-PLUGIN.md](docs/CLAUDE-PLUGIN.md): skill del plugin Claude Code, test ed eval.
 
 ## Sviluppo
 

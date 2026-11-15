@@ -229,6 +229,10 @@ export interface Detection {
 	suggestedName: string;
 	suggestedId: string;
 	evidence: string[];
+	/** Service kinds the folder's own files use (`mysql`, `redis`; from a Docker Compose file). */
+	services: string[];
+	/** What Lampo cannot provide for this folder (PostgreSQL, Mailpit…), in English. */
+	warnings: string[];
 	alreadyRegistered: string | null;
 }
 

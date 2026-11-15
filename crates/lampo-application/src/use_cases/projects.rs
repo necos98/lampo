@@ -8,14 +8,15 @@ use std::path::Path;
 use std::sync::Arc;
 
 use lampo_domain::address::SiteAddress;
-use lampo_domain::detection::best_hint;
+use lampo_domain::detection::combine_hints;
 use lampo_domain::events::DomainEvent;
 use lampo_domain::mysql::DatabaseName;
 use lampo_domain::package::PackageKind;
 use lampo_domain::php::PhpMinor;
 use lampo_domain::ports::{EventPublisher, FileSystemInspector, InstalledPackageRegistry, ProjectDetector, ProjectRepository, ProjectTransfer, SettingsRepository, WorktreeRepository};
 use lampo_domain::preset::Preset;
-use lampo_domain::project::{DisplayName, Project, ProjectId, ProjectRoot, TlsMode, check_conflicts, unique_project_id};
+use lampo_domain::project::{DisplayName, Project, ProjectEnvironment, ProjectId, ProjectRoot, TlsMode, check_conflicts, unique_project_id};
+use lampo_domain::service::ServiceKind;
 
 use super::allocation::{LoopbackPortAllocator, SiteSnapshot};
 use super::database::DatabaseService;
@@ -90,7 +91,7 @@ impl ProjectQueries {
     }
 }
 
-/// Analyses a folder: runs every detector, picks the best hint (`best_hint`).
+/// Analyses a folder: runs every detector, combines their hints (`combine_hints`).
 pub struct DetectProject {
     detectors: Vec<Arc<dyn ProjectDetector>>,
     projects: Arc<dyn ProjectRepository>,
@@ -117,7 +118,7 @@ impl DetectProject {
                 }
             })
             .collect();
-        let best = best_hint(hints);
+        let best = combine_hints(hints);
         let existing = self.projects.list()?;
         let name = folder_name(&root);
         Ok(DetectionDto {
@@ -127,6 +128,8 @@ impl DetectProject {
             php_version: best.as_ref().and_then(|h| h.php).map(|p| p.to_string()),
             suggested_id: unique_project_id(&existing, &ProjectId::from_name(&name)).to_string(),
             suggested_name: name,
+            services: best.as_ref().map(|h| h.services.iter().map(ToString::to_string).collect()).unwrap_or_default(),
+            warnings: best.as_ref().map(|h| h.warnings.clone()).unwrap_or_default(),
             evidence: best.map(|h| h.evidence).unwrap_or_default(),
             already_registered: existing.iter().find(|p| p.root == root).map(|p| p.id.to_string()),
         })
@@ -210,13 +213,25 @@ impl CreateProject {
         self.presets.find(FALLBACK_PRESET)
     }
 
+    /// Adds the detected services (a Docker Compose `redis`…) the environment lacks: only
+    /// registered, unversioned kinds (a versioned one, MySQL, keeps the preset's series).
+    fn add_detected_services(&self, environment: &mut ProjectEnvironment, detected: &[String]) {
+        for kind in detected.iter().filter_map(|k| ServiceKind::new(k.as_str()).ok()) {
+            let known = self.writer.services.descriptor(&kind).is_some_and(|d| !d.versioned());
+            if known && !environment.uses(&kind) {
+                environment.use_service(kind, None);
+            }
+        }
+    }
+
     /// Fills omitted fields (see [`CreateProjectRequest`]), allocates a loopback port for
     /// `AddressingDto::NoElevation` (atomically with the save), checks conflicts, saves,
     /// publishes `ProjectsChanged`, creates the database (when the project uses MySQL and
     /// `create_database`), syncs.
     ///
     /// PHP: the request's `phpVersion`, else the preset's — raised to the detected minimum
-    /// (`composer.json` `require.php`) when the preset's PHP is older than that.
+    /// (`composer.json` `require.php`, a container image) when the preset's PHP is older than that.
+    /// Services: the preset's, plus the detected unversioned ones (`add_detected_services`).
     ///
     /// The database step never fails the creation (the project is already saved): its outcome
     /// is in [`CreateProjectResultDto::database_setup`]. It runs before the sync, so the sync
@@ -240,6 +255,9 @@ impl CreateProject {
                 }
             }
             None => {}
+        }
+        if request.environment.is_none() {
+            self.add_detected_services(&mut environment, &detection.services);
         }
         let explicit = request.addresses.as_ref().map(|list| list.iter().map(address_from_dto).collect::<Result<Vec<_>, _>>()).transpose()?;
 

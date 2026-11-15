@@ -1,0 +1,7 @@
+{
+  "name": "lampo",
+  "version": "0.0.0-dev",
+  "description": "Development manifest for evaluating Lampo's skills from the repository (claude plugin eval claude-plugin). Not shipped: the app generates the real plugin from claude-plugin/skills and claude-plugin/icon.png.",
+  "author": { "name": "necos98" },
+  "license": "MIT"
+}

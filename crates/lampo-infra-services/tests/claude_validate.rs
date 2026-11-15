@@ -42,13 +42,17 @@ async fn claude_validate_accepts_the_generated_plugin() {
     repo_skills(&skills_root, &skills_root, &mut skills);
     assert!(skills.iter().any(|s| s.path == "lampo/SKILL.md"));
 
+    let icon = std::fs::read(skills_root.join("../icon.png")).unwrap();
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("agent plugins").join("claude-code");
-    let bundle = claude_code::bundle(env!("CARGO_PKG_VERSION"), r"C:\Users\me\AppData\Local\Lampo\bin\lampo.exe", &skills);
+    let bundle = claude_code::bundle(env!("CARGO_PKG_VERSION"), r"C:\Users\me\AppData\Local\Lampo\bin\lampo.exe", &skills, Some(icon.as_slice()));
     for file in &bundle.files {
         let path = root.join(file.path.replace('/', "\\"));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, &file.content).unwrap();
+    }
+    for asset in &bundle.assets {
+        std::fs::write(root.join(asset.path.replace('/', "\\")), &asset.bytes).unwrap();
     }
 
     let runner: Arc<dyn CommandRunner> = Arc::new(JobObjectSupervisor::new());
@@ -62,5 +66,6 @@ async fn claude_validate_accepts_the_generated_plugin() {
         let out = claude.run(&step.args, Duration::from_secs(60)).await.unwrap();
         println!("{} {:?}\n{}{}", step.id, out.exit_code, out.stdout, out.stderr);
         assert!(out.success(), "{} failed: {}{}", step.id, out.stdout, out.stderr);
+        assert!(!out.stdout.contains("ICON_MISSING") && !out.stderr.contains("ICON_MISSING"), "{} still misses the icon", step.id);
     }
 }

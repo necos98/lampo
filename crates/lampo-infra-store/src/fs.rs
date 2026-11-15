@@ -110,6 +110,13 @@ impl AgentPluginFiles for LocalFileSystem {
         self.write_file(path, contents)
     }
 
+    fn write_bytes(&self, path: &Path, bytes: &[u8]) -> PortResult<()> {
+        if let Some(parent) = path.parent() {
+            self.create_dir_all(parent)?;
+        }
+        std::fs::write(path, bytes).map_err(|e| PortError::io(format!("writing {}", path.display()), e))
+    }
+
     fn remove(&self, path: &Path) -> PortResult<()> {
         match std::fs::symlink_metadata(path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),

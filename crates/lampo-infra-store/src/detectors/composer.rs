@@ -24,7 +24,7 @@ impl ProjectDetector for ComposerDetector {
         let mut evidence = vec!["found composer.json".to_string()];
         let (php, php_evidence) = manifest.php_hint();
         evidence.extend(php_evidence);
-        Ok(Some(DetectionHint { project_type: "composer".into(), preset: preset("generic-php"), php, confidence: 30, evidence }))
+        Ok(Some(DetectionHint::new("composer", preset("generic-php"), php, 30, evidence)))
     }
 }
 

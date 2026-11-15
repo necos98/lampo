@@ -192,6 +192,7 @@ export const it = {
 		detected: 'Rilevato',
 		notDetected: 'Nessun framework riconosciuto: useremo un sito PHP generico.',
 		evidence: 'Indizi trovati',
+		warnings: 'Da sapere',
 		preset: 'Preset',
 		php: 'Versione di PHP',
 		phpDefault: 'Predefinita',

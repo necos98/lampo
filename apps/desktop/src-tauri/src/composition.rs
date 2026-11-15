@@ -188,6 +188,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         paths: paths.clone(),
         app_version: env!("CARGO_PKG_VERSION").into(),
         skills: embedded_skills(),
+        icon: Some(embedded_icon().to_vec()),
         isolated: isolated_home.is_some(),
     }));
 

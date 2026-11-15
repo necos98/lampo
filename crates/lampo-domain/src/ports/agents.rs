@@ -29,6 +29,8 @@ pub trait AgentPluginFiles: Send + Sync {
     fn list_dir(&self, dir: &Path) -> PortResult<Vec<String>>;
     /// Creates the parent folders, then writes UTF-8 `contents` (no BOM), replacing the file.
     fn write_text(&self, path: &Path, contents: &str) -> PortResult<()>;
+    /// Creates the parent folders, then writes `bytes` as is (the plugin icon), replacing the file.
+    fn write_bytes(&self, path: &Path, bytes: &[u8]) -> PortResult<()>;
     /// Removes a file or a whole folder; Ok if absent.
     fn remove(&self, path: &Path) -> PortResult<()>;
 }

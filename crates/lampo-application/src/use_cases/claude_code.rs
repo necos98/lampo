@@ -32,6 +32,11 @@ pub fn embedded_skills() -> Vec<SkillFile> {
     FILES.iter().map(|(path, content)| SkillFile::new(*path, *content)).collect()
 }
 
+/// The plugin icon shipped with this build (`claude-plugin/icon.png`, the app icon, 512 px).
+pub fn embedded_icon() -> &'static [u8] {
+    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../claude-plugin/icon.png"))
+}
+
 /// The installed plugin differs from the one this app would generate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutdatedPlugin {
@@ -78,6 +83,8 @@ pub struct ClaudeCodeSetupDeps {
     pub app_version: String,
     /// Usually [`embedded_skills`].
     pub skills: Vec<SkillFile>,
+    /// PNG written as the plugin icon, usually [`embedded_icon`].
+    pub icon: Option<Vec<u8>>,
     /// `LAMPO_HOME` is set: report [`ClaudeCodeStateDto::Isolated`] and do nothing.
     pub isolated: bool,
 }
@@ -88,6 +95,7 @@ pub struct ClaudeCodeSetup {
     paths: LampoPaths,
     app_version: String,
     skills: Vec<SkillFile>,
+    icon: Option<Vec<u8>>,
     isolated: bool,
     /// Install, removal and refresh never overlap.
     busy: tokio::sync::Mutex<()>,
@@ -96,8 +104,8 @@ pub struct ClaudeCodeSetup {
 
 impl ClaudeCodeSetup {
     pub fn new(deps: ClaudeCodeSetupDeps) -> Self {
-        let ClaudeCodeSetupDeps { cli, files, paths, app_version, skills, isolated } = deps;
-        Self { cli, files, paths, app_version, skills, isolated, busy: tokio::sync::Mutex::new(()), update_error: Mutex::new(None) }
+        let ClaudeCodeSetupDeps { cli, files, paths, app_version, skills, icon, isolated } = deps;
+        Self { cli, files, paths, app_version, skills, icon, isolated, busy: tokio::sync::Mutex::new(()), update_error: Mutex::new(None) }
     }
 
     fn root(&self) -> PathBuf {
@@ -105,7 +113,7 @@ impl ClaudeCodeSetup {
     }
 
     fn bundle(&self) -> PluginBundle {
-        claude_code::bundle(&self.app_version, &self.paths.shim_cli_exe().display().to_string(), &self.skills)
+        claude_code::bundle(&self.app_version, &self.paths.shim_cli_exe().display().to_string(), &self.skills, self.icon.as_deref())
     }
 
     /// Version recorded by the last successful install; `None` if never installed (or removed).
@@ -246,6 +254,11 @@ impl ClaudeCodeSetup {
             let mut path = root.clone();
             path.extend(file.path.split('/'));
             self.files.write_text(&path, &file.content)?;
+        }
+        for asset in &bundle.assets {
+            let mut path = root.clone();
+            path.extend(asset.path.split('/'));
+            self.files.write_bytes(&path, &asset.bytes)?;
         }
         Ok(())
     }

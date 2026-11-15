@@ -8,6 +8,7 @@
 //! ```text
 //! .claude-plugin/marketplace.json
 //! plugins/lampo/.claude-plugin/plugin.json
+//! plugins/lampo/.claude-plugin/icon.png    the app icon, when given
 //! plugins/lampo/hooks/hooks.json
 //! plugins/lampo/skills/<skill-id>/SKILL.md (+ reference files)
 //! .installed-version                      written after a successful install
@@ -57,6 +58,17 @@ pub struct PluginFile {
     pub content: String,
 }
 
+/// A generated binary file (the plugin icon): `path` as in [`PluginFile`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginAsset {
+    pub path: String,
+    pub bytes: Vec<u8>,
+}
+
+/// Where the icon goes: `claude plugin validate` looks for `.claude-plugin/icon.png` (a square
+/// PNG, 512 to 2048 px).
+pub const ICON_PATH: &str = "plugins/lampo/.claude-plugin/icon.png";
+
 /// Everything Lampo writes for Claude Code.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginBundle {
@@ -64,13 +76,20 @@ pub struct PluginBundle {
     /// version, so the version changes exactly when a file does.
     pub version: String,
     pub files: Vec<PluginFile>,
+    /// Binary files (the icon), written as is.
+    pub assets: Vec<PluginAsset>,
     /// Folder names under `plugins/lampo/skills` (anything else there is obsolete).
     pub skill_ids: BTreeSet<String>,
 }
 
 /// FNV-1a, 32 bit: a stable, dependency-free content hash (not for security).
 pub fn fnv32(text: &str) -> u32 {
-    text.bytes().fold(0x811c_9dc5_u32, |hash, byte| (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193))
+    fnv32_bytes(text.as_bytes())
+}
+
+/// [`fnv32`] of raw bytes.
+pub fn fnv32_bytes(bytes: &[u8]) -> u32 {
+    bytes.iter().fold(0x811c_9dc5_u32, |hash, byte| (hash ^ u32::from(*byte)).wrapping_mul(0x0100_0193))
 }
 
 /// `C:\Users\me\x` -> `C:/Users/me/x` (what the generated JSON and the `claude` arguments use).
@@ -143,9 +162,9 @@ fn hooks_json(exe: &str) -> String {
     }))
 }
 
-/// The plugin for the CLI at `exe` (the `lampo.exe` copy in the shim dir) with `skills`.
-/// Skill files with an unsafe path are skipped.
-pub fn bundle(app_version: &str, exe: &str, skills: &[SkillFile]) -> PluginBundle {
+/// The plugin for the CLI at `exe` (the `lampo.exe` copy in the shim dir) with `skills` and,
+/// if given, the PNG `icon`. Skill files with an unsafe path are skipped.
+pub fn bundle(app_version: &str, exe: &str, skills: &[SkillFile], icon: Option<&[u8]>) -> PluginBundle {
     let exe = forward_slashes(exe);
     let mut skill_files: Vec<PluginFile> = skills
         .iter()
@@ -163,16 +182,18 @@ pub fn bundle(app_version: &str, exe: &str, skills: &[SkillFile]) -> PluginBundl
     ];
     files.extend(skill_files);
     // Everything but the manifest (which carries the version) plus the manifest's other fields.
-    let mut hashed = format!("{}\n", plugin_json(""));
-    for f in &files {
-        hashed.push_str(&f.path);
-        hashed.push('\n');
-        hashed.push_str(&f.content);
-        hashed.push('\n');
+    let assets: Vec<PluginAsset> = icon.map(|bytes| PluginAsset { path: ICON_PATH.into(), bytes: bytes.to_vec() }).into_iter().collect();
+    let mut hashed = format!("{}\n", plugin_json("")).into_bytes();
+    let entries = files.iter().map(|f| (&f.path, f.content.as_bytes())).chain(assets.iter().map(|a| (&a.path, a.bytes.as_slice())));
+    for (path, content) in entries {
+        hashed.extend_from_slice(path.as_bytes());
+        hashed.push(b'\n');
+        hashed.extend_from_slice(content);
+        hashed.push(b'\n');
     }
-    let version = format!("{app_version}-h{:08x}", fnv32(&hashed));
+    let version = format!("{app_version}-h{:08x}", fnv32_bytes(&hashed));
     files.insert(1, PluginFile { path: format!("plugins/{PLUGIN}/.claude-plugin/plugin.json"), content: plugin_json(&version) });
-    PluginBundle { version, files, skill_ids }
+    PluginBundle { version, files, assets, skill_ids }
 }
 
 /// Plugin folder below the marketplace root.
@@ -267,7 +288,7 @@ mod tests {
 
     #[test]
     fn files_are_relative_forward_slash_without_bom_or_cr() {
-        let b = bundle("0.3.0", EXE, &skills());
+        let b = bundle("0.3.0", EXE, &skills(), None);
         let paths: Vec<&str> = b.files.iter().map(|f| f.path.as_str()).collect();
         assert_eq!(
             paths,
@@ -290,7 +311,7 @@ mod tests {
 
     #[test]
     fn manifests_name_the_plugin_and_its_source() {
-        let b = bundle("0.3.0", EXE, &skills());
+        let b = bundle("0.3.0", EXE, &skills(), None);
         let f = json_files(&b);
         let m = &f[".claude-plugin/marketplace.json"];
         assert_eq!(m["name"], "lampo");
@@ -308,7 +329,7 @@ mod tests {
 
     #[test]
     fn session_start_hook_runs_the_cli_in_exec_form() {
-        let f = json_files(&bundle("0.3.0", EXE, &skills()));
+        let f = json_files(&bundle("0.3.0", EXE, &skills(), None));
         let group = &f["plugins/lampo/hooks/hooks.json"]["hooks"]["SessionStart"][0];
         assert_eq!(group["matcher"], "startup|resume|clear|compact");
         let hook = &group["hooks"][0];
@@ -320,28 +341,41 @@ mod tests {
 
     #[test]
     fn version_tracks_app_version_exe_and_content() {
-        let v = bundle("0.3.0", EXE, &skills()).version;
+        let v = bundle("0.3.0", EXE, &skills(), None).version;
         let (release, hash) = v.split_once("-h").unwrap();
         assert_eq!(release, "0.3.0");
         assert!(hash.len() == 8 && hash.chars().all(|c| c.is_ascii_hexdigit()));
-        assert_eq!(v, bundle("0.3.0", EXE, &skills()).version, "deterministic");
+        assert_eq!(v, bundle("0.3.0", EXE, &skills(), None).version, "deterministic");
         // CRLF/BOM of the checkout do not matter.
         let lf: Vec<SkillFile> = skills().into_iter().map(|s| SkillFile::new(s.path.replace('\\', "/"), s.content.replace("\r\n", "\n").replace('\u{feff}', ""))).collect();
-        assert_eq!(v, bundle("0.3.0", EXE, &lf).version);
-        assert_ne!(v, bundle("0.3.1", EXE, &skills()).version);
-        assert_ne!(v, bundle("0.3.0", r"D:\Lampo\bin\lampo.exe", &skills()).version);
+        assert_eq!(v, bundle("0.3.0", EXE, &lf, None).version);
+        assert_ne!(v, bundle("0.3.1", EXE, &skills(), None).version);
+        assert_ne!(v, bundle("0.3.0", r"D:\Lampo\bin\lampo.exe", &skills(), None).version);
         let mut changed = skills();
         changed[0].content.push_str("more\n");
-        assert_ne!(v, bundle("0.3.0", EXE, &changed).version);
+        assert_ne!(v, bundle("0.3.0", EXE, &changed, None).version);
         let mut added = skills();
         added.push(SkillFile::new("lampo-db/SKILL.md", "x"));
-        assert_ne!(v, bundle("0.3.0", EXE, &added).version);
+        assert_ne!(v, bundle("0.3.0", EXE, &added, None).version);
+    }
+
+    #[test]
+    fn icon_is_an_asset_that_changes_the_version() {
+        let plain = bundle("0.3.0", EXE, &skills(), None);
+        assert!(plain.assets.is_empty());
+        let png = b"\x89PNG\r\n\x1a\nfake";
+        let with = bundle("0.3.0", EXE, &skills(), Some(png));
+        assert_eq!(with.assets, [PluginAsset { path: "plugins/lampo/.claude-plugin/icon.png".into(), bytes: png.to_vec() }]);
+        assert!(is_safe_relative(ICON_PATH));
+        assert_ne!(plain.version, with.version);
+        assert_ne!(with.version, bundle("0.3.0", EXE, &skills(), Some(b"\x89PNG other")).version);
+        assert_eq!(plain.files.len(), with.files.len(), "the icon is not a text file");
     }
 
     #[test]
     fn unsafe_skill_paths_are_skipped() {
         let bad = [SkillFile::new("../evil/SKILL.md", "x"), SkillFile::new("C:/x/SKILL.md", "x"), SkillFile::new("/abs/SKILL.md", "x"), SkillFile::new("loose.md", "x")];
-        let b = bundle("0.3.0", EXE, &bad);
+        let b = bundle("0.3.0", EXE, &bad, None);
         assert!(!b.files.iter().any(|f| f.path.contains("/skills/")));
         assert!(b.skill_ids.is_empty());
     }

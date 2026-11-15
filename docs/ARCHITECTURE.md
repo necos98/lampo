@@ -30,7 +30,7 @@ and `redis-cli`.
 | `crates/lampo-infra-web` | Apache config templates + `httpd -t` + runner, php.ini rendering, hosts-file block via the elevated `lampo-hosts-helper` | Apache/PHP/hosts specifics |
 | `crates/lampo-infra-services` | Job Object supervisor, MySQL/Redis runners, port probe, log files, `DatabaseAdmin`, control named pipe, headless app launcher, `claude` CLI runner | Local processes and IPC |
 | `crates/lampo-cli` | `lampo` CLI and `lampo-shim` (copied as `php.exe` etc.): two composition roots (`src/composition.rs`, `src/bin/lampo-shim.rs`, which registers the shim tools) | CLI surface |
-| `claude-plugin/skills` | Skill sources of the Claude Code plugin (`<skill-id>/SKILL.md` + reference files), embedded as is | What agents are taught |
+| `claude-plugin` | Claude Code plugin sources: `skills/<skill-id>/SKILL.md` + reference files and `icon.png` (embedded as is), trigger evals and a dev manifest (repository only) | What agents are taught |
 | `apps/desktop` | SvelteKit GUI (`src/lib/api` typed API, `src/lib/messages` Italian strings) and `src-tauri` (Tauri commands, tray, composition root) | GUI |
 
 Key rules: the domain does no IO and depends on no workspace crate; use cases see only ports;
@@ -91,10 +91,12 @@ claude plugin list --json                          (verify: exact id match)
 ```
 
 * **Generated files** (`lampo_domain::claude_code`, pure): `marketplace.json`, `plugin.json`
-  (name, version, description, author, homepage/repository, MIT), a README, `hooks/hooks.json`
-  and the skills. The skills are every file under `claude-plugin/skills/<skill-id>/` in the
+  (name, version, description, author, homepage/repository, MIT), a README, `hooks/hooks.json`,
+  the icon (`.claude-plugin/icon.png`, from `claude-plugin/icon.png`, written as bytes) and the
+  skills. The skills are every file under `claude-plugin/skills/<skill-id>/` in the
   repository, embedded at compile time by `crates/lampo-application/build.rs` (add files there,
-  no Rust change needed). Files are UTF-8 without BOM, LF, relative forward-slash paths.
+  no Rust change needed). Files are UTF-8 without BOM, LF, relative forward-slash paths. Skill
+  contents, the CLI drift test and the trigger evals: [CLAUDE-PLUGIN.md](CLAUDE-PLUGIN.md).
 * **Version** `<app version>-h<fnv32>` hashed over every generated file (skills, hook, manifests,
   CLI path): Claude Code caches plugins per version, so it refreshes exactly when content
   changes. After a successful install the version is written to `.installed-version`.

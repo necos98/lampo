@@ -1,0 +1,93 @@
+# From Docker / docker-compose / Laravel Sail
+
+Part of `lampo:migrate`. Read-only on the containers: never `docker compose down -v`, never
+`docker volume rm`, never edit the compose file or Dockerfile.
+
+## Inventory
+
+Files in the project (Lampo's detection reads them too when you register the folder):
+
+- `compose.yaml`, `compose.yml`, `docker-compose.yml`, `docker-compose.yaml`, plus overrides
+  (`docker-compose.override.yml`): `services:` with their `image:`, `build:`, `ports:`,
+  `environment:`, `volumes:`.
+- `Dockerfile`, `docker/**/Dockerfile`, `.docker/**`: the `FROM` line gives the PHP
+  (`php:8.2-apache`, `php:8.3-fpm-alpine` -> PHP 8.2 / 8.3); `docker-php-ext-install`,
+  `docker-php-ext-enable` and `pecl install` lines list the extensions (`pdo_mysql`, `gd`,
+  `intl`, `zip`, `redis`, `xdebug`...); `COPY ... php.ini` / `conf.d/*.ini` give ini values.
+- nginx or Apache config copied into an image (`docker/nginx/default.conf`, `*.conf`): rules to
+  translate (see `lampo:services-logs`, rewrites).
+- `.env`: `DB_HOST` is the compose service name (`mysql`, `db`, `mariadb`), `REDIS_HOST=redis`,
+  `MAIL_HOST=mailpit`.
+
+Running state (if Docker is running):
+
+```powershell
+docker compose ps
+docker compose config --services
+docker compose exec app php -v
+docker compose exec app php -m
+```
+
+Image to Lampo mapping: `php:<x.y>-*` -> PHP x.y; `mysql:5.7` -> MySQL 5.7 (`--preset legacy`
+or the 5.7 service); `mysql:8.x` -> MySQL 8.4; `mariadb:*` -> MySQL 8.4 (caveats in
+SKILL.md); `postgres:*` -> **not supported** (stop, SKILL.md); `redis:*` / `valkey/*` -> Redis;
+`mailpit`, `mailhog`, `meilisearch`, `elasticsearch`, `minio`... -> not provided, keep them in
+Docker and point `.env` at their published port (`127.0.0.1:<host port>`).
+
+## Laravel Sail
+
+- Sail's compose file is `compose.yaml` or `docker-compose.yml`; the app service is
+  `laravel.test`, built from `vendor/laravel/sail/runtimes/<x.y>` (the PHP version; older Sail
+  uses images such as `laravelsail/php82-composer`).
+- Sail defaults in `.env`: `DB_HOST=mysql`, `DB_USERNAME=sail`, `DB_PASSWORD=password`,
+  `REDIS_HOST=redis`, `MAIL_HOST=mailpit`, `APP_PORT`/`FORWARD_DB_PORT` for published ports.
+- On Windows a Sail project normally lives in WSL (`\\wsl$\Ubuntu\home\<user>\shop`, or
+  `\\wsl.localhost\...`). Lampo serves Windows folders: clone the repository into a Windows
+  folder (`lampo project new --git <url> --in C:\sites`) or copy it (with the user's agreement,
+  for uncommitted work), then run `composer install` and `npm ci` again on Windows (`vendor`
+  and `node_modules` built in Linux contain Linux binaries).
+- `./vendor/bin/sail` commands are not needed afterwards: `php artisan ...` with Lampo's shims.
+
+## Export the database
+
+From the running database container, with the credentials of the compose file / `.env`.
+Write the dump inside the container and copy it out: a PowerShell `>` redirection would
+re-encode it as UTF-16.
+
+```powershell
+New-Item -ItemType Directory -Force $HOME\lampo-migration\shop
+docker compose exec -T mysql mysqldump -usail -ppassword --single-transaction --routines --triggers --no-tablespaces --result-file=/tmp/shop.sql laravel
+docker compose cp mysql:/tmp/shop.sql $HOME\lampo-migration\shop\shop.sql
+```
+
+Replace `mysql` (service), `sail`/`password` (user, password) and `laravel` (database) with
+the project's values. MariaDB images ship `mariadb-dump` (older ones also `mysqldump`). If the
+database container is not running, `docker compose up -d mysql` starts only that service
+(ask: it changes the user's running containers). Do not pass `--databases`, so the dump can go
+into any target database.
+
+Then follow SKILL.md step 4 (confirm, `lampo db import`).
+
+## Ports and stopping
+
+Containers often publish `80`, `3306`, `6379`. With the user's yes:
+
+```powershell
+docker compose stop
+```
+
+`stop` keeps containers and volumes (`docker compose start` brings them back). Never use
+`down -v`. Keep the services Lampo does not provide (Mailpit, Meilisearch) running if the app
+needs them: `docker compose stop laravel.test mysql redis` stops only the replaced ones.
+
+## `.env` changes (after a backup)
+
+`DB_HOST=127.0.0.1`, `DB_PORT` from Lampo, `DB_USERNAME=root`, `DB_PASSWORD=` (empty),
+`DB_DATABASE` = the Lampo database, `REDIS_HOST=127.0.0.1`, `APP_URL` = the Lampo URL,
+`MAIL_HOST=127.0.0.1` + the published Mailpit port if it keeps running in Docker (else
+`MAIL_MAILER=log`). Remove nothing else; `php artisan config:clear`.
+
+## Rollback
+
+Restore `.env` from `$HOME\lampo-migration\shop`, `docker compose start`, deactivate the Lampo
+project. The containers and volumes were never touched.

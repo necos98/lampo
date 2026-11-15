@@ -27,7 +27,7 @@ impl ProjectDetector for LaravelDetector {
         let (php, php_evidence) = manifest.php_hint();
         let mut evidence = vec!["found artisan".to_string(), "composer.json requires laravel/framework".to_string()];
         evidence.extend(php_evidence);
-        Ok(Some(DetectionHint { project_type: "laravel".into(), preset: preset("laravel"), php, confidence: 90, evidence }))
+        Ok(Some(DetectionHint::new("laravel", preset("laravel"), php, 90, evidence)))
     }
 }
 

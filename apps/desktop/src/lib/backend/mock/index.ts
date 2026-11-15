@@ -251,6 +251,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 				suggestedName: name,
 				suggestedId: slug,
 				evidence: laravel ? ['artisan', 'composer.json: laravel/framework ^11.0', 'composer.json: php ^8.2'] : wp ? ['wp-config.php', 'wp-content/'] : sf ? ['symfony.lock', 'composer.json: symfony/framework-bundle'] : legacy ? ['index.php'] : [],
+				services: laravel ? ['mysql'] : [],
+				warnings: [],
 				alreadyRegistered: projects.find((p) => p.root.toLowerCase() === lower)?.id ?? null
 			} satisfies T.Detection;
 		},

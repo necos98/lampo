@@ -13,7 +13,7 @@ use lampo_domain::{PortError, PortResult};
 
 use crate::dto::{ClaudeCodeStateDto, StepOutcomeDto};
 use crate::error::ErrorCode;
-use crate::use_cases::{ClaudeCodeSetup, ClaudeCodeSetupDeps, embedded_skills};
+use crate::use_cases::{ClaudeCodeSetup, ClaudeCodeSetupDeps, embedded_icon, embedded_skills};
 
 const ROOT: &str = r"C:\data\agent-plugins\claude-code";
 const MARKER: &str = r"C:\data\agent-plugins\claude-code\.installed-version";
@@ -108,6 +108,10 @@ impl AgentPluginFiles for MemFiles {
         self.files.lock().unwrap().insert(key(path), contents.into());
         Ok(())
     }
+    fn write_bytes(&self, path: &Path, bytes: &[u8]) -> PortResult<()> {
+        self.files.lock().unwrap().insert(key(path), format!("<{} bytes>", bytes.len()));
+        Ok(())
+    }
     fn remove(&self, path: &Path) -> PortResult<()> {
         let k = key(path);
         self.files.lock().unwrap().retain(|f, _| *f != k && !f.starts_with(&format!("{k}\\")));
@@ -120,7 +124,15 @@ fn skills() -> Vec<SkillFile> {
 }
 
 fn setup_with(claude: Arc<FakeClaude>, files: Arc<MemFiles>, app_version: &str, isolated: bool) -> ClaudeCodeSetup {
-    ClaudeCodeSetup::new(ClaudeCodeSetupDeps { cli: claude, files, paths: LampoPaths::new(r"C:\cfg", r"C:\data"), app_version: app_version.into(), skills: skills(), isolated })
+    ClaudeCodeSetup::new(ClaudeCodeSetupDeps {
+        cli: claude,
+        files,
+        paths: LampoPaths::new(r"C:\cfg", r"C:\data"),
+        app_version: app_version.into(),
+        skills: skills(),
+        icon: Some(b"PNG!".to_vec()),
+        isolated,
+    })
 }
 
 fn world(version: Option<&str>, list: &str) -> (Arc<FakeClaude>, Arc<MemFiles>, ClaudeCodeSetup) {
@@ -150,6 +162,7 @@ async fn install_writes_the_plugin_registers_it_in_user_scope_and_marks_the_vers
     assert!(hooks.contains("C:/data/bin/lampo.exe"), "{hooks}");
     assert!(files.get(&format!(r"{ROOT}\plugins\lampo\skills\lampo-db\SKILL.md")).is_some());
     assert!(files.under(&format!(r"{ROOT}\plugins\lampo\skills\obsolete")).is_empty(), "obsolete skill removed");
+    assert_eq!(files.get(&format!(r"{ROOT}\plugins\lampo\.claude-plugin\icon.png")).as_deref(), Some("<4 bytes>"), "icon written as bytes");
 
     let calls = claude.calls();
     let market = "C:/data/agent-plugins/claude-code";
@@ -355,4 +368,15 @@ async fn startup_updates_an_outdated_plugin_alongside_the_sync() {
     Startup::new(w.env.clone(), w.settings.clone(), w.shim_setup(), Arc::new(FakeAppLocation::default())).with_claude_code(new.clone()).run().await.unwrap();
     assert!(files.get(MARKER).unwrap().starts_with("0.3.0-h"));
     assert_eq!(w.mysql.calls(), ["prepare:mysql-8.4", "start:mysql-8.4"], "the environment sync ran too");
+}
+
+#[test]
+fn embedded_icon_is_a_square_png_the_validator_accepts() {
+    let png = embedded_icon();
+    assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"), "PNG signature");
+    let side = |at: usize| u32::from_be_bytes(png[at..at + 4].try_into().unwrap());
+    let (width, height) = (side(16), side(20));
+    assert_eq!(width, height, "square");
+    assert!((512..=2048).contains(&width), "{width} px");
+    assert!(png.len() < 2 * 1024 * 1024);
 }

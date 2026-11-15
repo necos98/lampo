@@ -37,3 +37,6 @@ Thumbs.db
 /tmp/
 lampo-e2e*/
 e2e-results/
+
+# Claude Code plugin eval runs (claude plugin eval claude-plugin ...)
+claude-plugin/evals/results/
