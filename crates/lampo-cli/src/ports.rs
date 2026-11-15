@@ -73,6 +73,11 @@ pub trait ShimAdmin: Send + Sync {
     fn install(&self) -> AppResult<ShimStatusDto>;
 }
 
+/// The stored global settings (`settings get`, file-based).
+pub trait SettingsReader: Send + Sync {
+    fn get(&self) -> AppResult<SettingsDto>;
+}
+
 /// `lampo status` when the app is not running.
 #[async_trait]
 pub trait OfflineStatus: Send + Sync {

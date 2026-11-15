@@ -96,6 +96,12 @@ impl ShimAdmin for ShimSetup {
     }
 }
 
+impl SettingsReader for SettingsQuery {
+    fn get(&self) -> AppResult<SettingsDto> {
+        SettingsQuery::get(self)
+    }
+}
+
 #[async_trait]
 impl OfflineStatus for StatusQuery {
     async fn status(&self) -> AppResult<StatusDto> {

@@ -60,6 +60,9 @@ fn every_subcommand_renders_help() {
         &["shims"],
         &["shims", "status"],
         &["shims", "install"],
+        &["settings"],
+        &["settings", "get"],
+        &["settings", "set"],
     ];
     for command in commands {
         let mut args = command.to_vec();

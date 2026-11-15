@@ -124,5 +124,6 @@ user's yes.
   (`lampo:new-project`) or pass `--parent <id>`.
 - The URL answers with the parent's code: the request went to the parent's address; use the
   worktree `url` from `agent context`.
-- Port range exhausted (exit 5): prune stale environments (with approval) or widen the range in
-  the app ("Impostazioni" > "Intervallo porte worktree").
+- Port range exhausted (exit 5): prune stale environments (with approval) or, with the user's
+  yes, widen the range: `lampo settings` shows it, `lampo settings set --loopback-range 8100-8299`
+  changes it (existing environments keep their ports).

@@ -44,3 +44,19 @@ impl SettingsService {
         Ok(settings_to_dto(&next, &self.services))
     }
 }
+
+/// Read-only view of the settings (`lampo settings get`, file-based: runs without the app).
+pub struct SettingsQuery {
+    repo: Arc<dyn SettingsRepository>,
+    services: Arc<ServiceCatalog>,
+}
+
+impl SettingsQuery {
+    pub fn new(repo: Arc<dyn SettingsRepository>, services: Arc<ServiceCatalog>) -> Self {
+        Self { repo, services }
+    }
+
+    pub fn get(&self) -> AppResult<SettingsDto> {
+        Ok(settings_to_dto(&self.repo.load()?, &self.services))
+    }
+}

@@ -240,6 +240,14 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         c("lampo doctor", "lampo doctor [--json]", "Diagnose the installation (VC++ runtimes, ports, PATH shadowing…).", false, false),
         c("lampo shims status", "lampo shims status [--json]", "Whether the php/composer/mysql shims are installed, on PATH and not shadowed.", false, false),
         c("lampo shims install", "lampo shims install", "Install the shims and add their folder to the user PATH (no elevation).", true, false),
+        c("lampo settings get", "lampo settings [get] [--json]", "Show the global settings: Apache, MySQL and Redis ports, default PHP, loopback port range.", false, false),
+        c(
+            "lampo settings set",
+            "lampo settings set [--apache-port <port>] [--mysql-port <series>=<port>] [--redis-port <port>] [--port <service>=<port>] [--default-php <minor>] [--loopback-range <start>-<end>]",
+            "Change ports (checked for conflicts and use; running services restart on the new port), the default PHP or the loopback range. Ask the user before changing ports.",
+            true,
+            true,
+        ),
     ]
 }
 

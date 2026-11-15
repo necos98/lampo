@@ -100,6 +100,8 @@ pub enum ControlRequest {
     WorktreePrune(PruneWorktreesRequest),
     /// Stops services and exits the app. → `null`
     Quit,
+    /// Partial settings change (`lampo settings set`). → [`SettingsPatchResultDto`]
+    SettingsPatch(SettingsPatchRequest),
 }
 
 impl ControlRequest {
@@ -150,6 +152,7 @@ pub struct ControlServices {
     pub worktree_up: Arc<WorktreeUp>,
     pub worktree_down: Arc<WorktreeDown>,
     pub prune_worktrees: Arc<PruneWorktrees>,
+    pub patch_settings: Arc<PatchSettings>,
     /// Called for [`ControlRequest::Quit`] after the reply is produced.
     pub quit: Arc<dyn Fn() + Send + Sync>,
     /// Closed while the app shuts down or prepares an update: mutating requests are refused.
@@ -206,6 +209,7 @@ impl ControlDispatcher {
                 (s.quit)();
                 Ok(serde_json::Value::Null)
             }
+            ControlRequest::SettingsPatch(r) => to_json(s.patch_settings.execute(r, ctx).await?),
         }
     }
 }
@@ -362,6 +366,21 @@ mod tests {
         assert_eq!(serde_json::from_value::<ControlRequest>(json).unwrap(), request);
         let minimal: ControlRequest = serde_json::from_str(r#"{"type":"package-uninstall","params":{"kind":"redis"}}"#).unwrap();
         assert!(matches!(&minimal, ControlRequest::PackageUninstall(r) if r.kind == "redis" && r.version.is_none()));
+        assert!(minimal.is_mutating());
+    }
+
+    #[test]
+    fn settings_patch_wire_format() {
+        let request = ControlRequest::SettingsPatch(SettingsPatchRequest { apache_port: Some(8080), service_ports: [("mysql-8.4".to_string(), 3310)].into(), ..Default::default() });
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["type"], "settings-patch");
+        assert_eq!(json["params"]["apachePort"], 8080);
+        assert_eq!(json["params"]["servicePorts"]["mysql-8.4"], 3310);
+        assert_eq!(serde_json::from_value::<ControlRequest>(json).unwrap(), request);
+        // Omitted fields default: a client sends only what it changes.
+        let minimal: ControlRequest = serde_json::from_str(r#"{"type":"settings-patch","params":{"servicePorts":{"redis":6380}}}"#).unwrap();
+        let ControlRequest::SettingsPatch(p) = &minimal else { panic!("wrong variant") };
+        assert_eq!((p.apache_port, p.service_ports["redis"], p.is_empty()), (None, 6380, false));
         assert!(minimal.is_mutating());
     }
 

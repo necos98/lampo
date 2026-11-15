@@ -172,6 +172,7 @@ impl Fake {
             app: self.clone(),
             runner: self.clone(),
             interrupt: self.clone(),
+            settings: self.clone(),
         }
     }
 }
@@ -332,6 +333,25 @@ impl Interrupt for Fake {
             }
             tokio::time::sleep(Duration::from_millis(1)).await;
         }
+    }
+}
+
+/// The default settings with PHP 8.4 as the default.
+pub fn settings_json() -> Value {
+    json!({
+        "defaultPhpVersion": "8.4", "tld": "test", "apachePort": 80,
+        "services": [
+            {"service": "mysql-8.4", "label": "MySQL 8.4", "port": 3306, "alwaysOn": true},
+            {"service": "mysql-5.7", "label": "MySQL 5.7", "port": 3307, "alwaysOn": false},
+            {"service": "redis", "label": "Redis", "port": 6379, "alwaysOn": false}
+        ],
+        "loopbackPortRange": {"start": 8100, "end": 8199}, "closeToTray": true, "firstRunCompleted": true
+    })
+}
+
+impl SettingsReader for Fake {
+    fn get(&self) -> AppResult<SettingsDto> {
+        Ok(dto(settings_json()))
     }
 }
 

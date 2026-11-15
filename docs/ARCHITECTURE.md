@@ -55,6 +55,16 @@ stored project under that same lock, so a CLI edit never reverts a concurrent GU
 also checks what the GUI only offers as choices: add-ons installed for the project's PHP,
 bundled extensions present in its `ext` dir, MySQL series configured in the settings.
 
+Likewise the GUI saves the whole settings (`SettingsService::update`) while `lampo settings set`
+sends a patch (`PatchSettings`, control request `settings-patch`): Apache's port, service
+instance ports, the default PHP and the loopback range, applied to the stored settings under
+the allocator lock (so its check against the sites' loopback ports cannot interleave with a
+project save). New ports must be free (`PortInUse`) unless a Lampo service holds them (a swap);
+then the sync restarts running services on their new port. The reply lists the changes, the
+sync report and notes (stopped services, sites whose `.env` mentions the old port). TLD and
+close-to-tray stay GUI-only; service instances cannot be added or removed by either front-end.
+`lampo settings get` reads the file in-process.
+
 Creating a project that uses MySQL also creates its database (name derived from the project id) on
 its instance, starting it on demand; an existing database is kept, and a failure never fails
 the creation: the result reports it in `databaseSetup` (`lampo project create --no-database`
@@ -135,7 +145,7 @@ claude plugin list --json                          (verify: exact id match)
 
 The desktop app is the single owner of service processes (all in one Windows Job Object). The
 CLI runs read-only, file-based commands itself (status offline, project/worktree list,
-`project detect`, `package extensions`, logs,
+`project detect`, `package extensions`, `settings get`, logs,
 `env`, `exec`, `agent context`, `doctor`) and sends mutating ones to the app over a per-user
 named pipe (`lampo_application::control`), starting the app headless (`--headless`, tray only)
 when needed. Shims never talk to the app.

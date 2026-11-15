@@ -365,6 +365,7 @@ fn dispatcher(w: &World, quit: Arc<std::sync::atomic::AtomicBool>, gate: Arc<Shu
         worktree_up: Arc::new(w.worktree_up()),
         worktree_down: Arc::new(w.worktree_down()),
         prune_worktrees: Arc::new(w.prune_worktrees()),
+        patch_settings: Arc::new(w.patch_settings()),
         quit: Arc::new(move || quit.store(true, Ordering::SeqCst)),
         gate,
     })
@@ -431,6 +432,11 @@ async fn control_dispatcher_routes_requests_to_use_cases() {
     assert_eq!(ok_payload(patched)["environment"]["extensions"], serde_json::json!(["intl"]));
     let no_addon = call(&d, ControlRequest::ProjectPatch(ProjectPatchRequest { project_id: "shop".into(), addons_add: vec!["xdebug".into()], ..Default::default() }), cli()).await.0;
     assert_eq!(error_code(no_addon), ErrorCode::PackageMissing);
+
+    let ports = SettingsPatchRequest { service_ports: [("redis".to_string(), 6380)].into(), ..Default::default() };
+    let patched = ok_payload(call(&d, ControlRequest::SettingsPatch(ports), cli()).await.0);
+    assert_eq!(patched["changes"][0]["setting"], "redis.port");
+    assert_eq!(w.settings.load().unwrap().service_port(&redis_id()), Some(6380));
 
     ok_payload(call(&d, ControlRequest::Quit, cli()).await.0);
     assert!(quit.load(Ordering::SeqCst));

@@ -179,6 +179,16 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let php_extensions = Arc::new(PhpExtensionsQuery::new(installed.clone(), Arc::new(packages::FsPhpExtensionScanner)));
     // CLI-only (`lampo project set`, via the control pipe): the GUI edits the full project.
     let patch_project = Arc::new(PatchProjectEnvironment::new(project_writer.clone(), installed.clone(), php_extensions.clone()));
+    // CLI-only (`lampo settings set`, via the control pipe): the GUI saves the full settings.
+    let patch_settings = Arc::new(PatchSettings::new(PatchSettingsDeps {
+        settings: settings.clone(),
+        allocator: allocator.clone(),
+        port_probe: port_probe.clone(),
+        installed: installed.clone(),
+        env: env.clone(),
+        events: events.clone(),
+        services: service_catalog.clone(),
+    }));
     let worktree_up = Arc::new(WorktreeUp::new(WorktreeUpDeps {
         projects: projects.clone(),
         worktrees: worktrees.clone(),
@@ -225,6 +235,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         worktree_up: worktree_up.clone(),
         worktree_down: worktree_down.clone(),
         prune_worktrees: prune_worktrees.clone(),
+        patch_settings,
         quit: Arc::new(move || crate::tray::quit(&quit_handle)),
         gate: shutdown.gate(),
     }));

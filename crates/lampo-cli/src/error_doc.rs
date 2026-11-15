@@ -31,7 +31,9 @@ pub fn hint_for(code: ErrorCode) -> &'static str {
         ErrorCode::Network => "Check the internet connection and retry.",
         ErrorCode::ChecksumMismatch => "The download is corrupt or was tampered with: retry, and report it if it persists.",
         ErrorCode::ConfigRejected => "Apache rejected the generated configuration: see `details.output` and `lampo logs apache-error`.",
-        ErrorCode::PortInUse => "Another program uses the port: stop it or change the port in the Lampo settings; `lampo doctor` lists conflicts.",
+        ErrorCode::PortInUse => {
+            "Another program uses the port: stop it, or (with the user's consent) move Lampo's service with `lampo settings set --apache-port|--mysql-port|--redis-port`; `lampo doctor` lists conflicts."
+        }
         ErrorCode::ProcessFailed => "An external program failed: see the message and `lampo logs`; `lampo doctor` may explain why.",
         ErrorCode::Io => "A file operation failed: check the path and permissions.",
         ErrorCode::Cancelled => "The operation was cancelled; run it again to retry.",

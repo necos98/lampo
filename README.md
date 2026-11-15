@@ -79,6 +79,8 @@ lampo project new --laravel shop --in D:\sites --php 8.4
 lampo project set --ext intl --addon xdebug --ini memory_limit=512M   # modifica l'ambiente
 lampo package extensions              # estensioni incluse nel PHP del progetto (per --ext)
 lampo package uninstall php 8.2 --yes # rimuove un pacchetto non più usato
+lampo settings                        # impostazioni globali: porte, PHP predefinito
+lampo settings set --apache-port 8080 --mysql-port 8.4=3310   # cambia le porte (riavvia i servizi)
 lampo worktree up --db clone:shop     # ambiente per il git worktree corrente
 lampo exec -- composer install        # comando con il PHP e il Composer del progetto
 lampo logs error -f                   # log degli errori del sito, in tempo reale

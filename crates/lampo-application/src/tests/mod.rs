@@ -7,6 +7,7 @@ mod misc;
 mod packages;
 mod projects;
 mod scaffold;
+mod settings;
 mod worktrees;
 
 use crate::context::CallContext;
