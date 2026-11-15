@@ -358,7 +358,8 @@ export type TaskOperation =
 	| { kind: 'install-package'; request: InstallPackageRequest }
 	| { kind: 'first-run' }
 	| { kind: 'worktree-up'; request: WorktreeUpRequest }
-	| { kind: 'scaffold-project'; request: ScaffoldProjectRequest };
+	| { kind: 'scaffold-project'; request: ScaffoldProjectRequest }
+	| { kind: 'uninstall-package'; id: PackageId };
 
 /** A background task that has not finished yet. */
 export interface RunningTask {

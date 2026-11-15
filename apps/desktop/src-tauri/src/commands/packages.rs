@@ -34,9 +34,13 @@ pub fn list_php_extensions(state: State<'_, AppState>, php_version: String) -> A
     state.php_extensions.list(&php_version)
 }
 
+/// Background task (services restart, then thousands of files are deleted); listen to
+/// `lampo://task-finished`.
 #[tauri::command]
-pub fn uninstall_package(state: State<'_, AppState>, id: PackageIdDto) -> AppResult<()> {
-    state.uninstall_package.execute(id)
+pub fn uninstall_package(state: State<'_, AppState>, id: PackageIdDto) -> TaskStartedDto {
+    let uninstall = state.uninstall_package.clone();
+    let operation = TaskOperationDto::UninstallPackage { id: id.clone() };
+    spawn_task(&state, operation, move |_progress, _cancel| async move { uninstall.execute(id, &CallContext::GUI).await })
 }
 
 #[tauri::command]

@@ -141,7 +141,7 @@ mod tests {
     use lampo_domain::ports::NullEventPublisher;
     use lampo_domain::progress::ProgressStage;
 
-    use crate::dto::InstallPackageRequest;
+    use crate::dto::{InstallPackageRequest, PackageIdDto};
 
     #[test]
     fn begin_cancel_finish() {
@@ -172,6 +172,10 @@ mod tests {
         let json = serde_json::to_value(&tasks[0]).unwrap();
         assert_eq!(json["operation"]["kind"], "install-package");
         assert_eq!(json["operation"]["request"]["series"], "8.4");
+        let uninstall = TaskOperationDto::UninstallPackage { id: PackageIdDto { kind: "php".into(), version: "8.3.15".into(), php_version: None } };
+        let json = serde_json::to_value(&uninstall).unwrap();
+        assert_eq!((&json["kind"], &json["id"]["version"], &json["id"]["phpVersion"]), (&"uninstall-package".into(), &"8.3.15".into(), &serde_json::Value::Null));
+        assert_eq!(serde_json::from_value::<TaskOperationDto>(json).unwrap(), uninstall);
 
         reg.finish(&second, &AppResult::<()>::Ok(()), &NullEventPublisher);
         assert_eq!(reg.running_tasks().len(), 1);

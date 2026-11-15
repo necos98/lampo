@@ -1,6 +1,6 @@
 import type { AppError, RunningTask, ScaffoldProjectRequest, TaskOperation, TaskOutcome, TaskProgressPayload } from '../api/index.js';
 import type { Backend } from '../backend/ports.js';
-import { installTaskKey } from '../packages/grouping.js';
+import { installTaskKey, uninstallTaskKey } from '../packages/grouping.js';
 import { FIRST_RUN_TASK } from './firstRun.svelte.js';
 import { worktreeTaskKey } from './worktrees.svelte.js';
 
@@ -25,11 +25,13 @@ export function metaOf(operation: TaskOperation): TaskMeta {
 			return { kind: 'worktree', key: worktreeTaskKey(operation.request.path) };
 		case 'scaffold-project':
 			return { kind: 'scaffold', key: scaffoldTaskKey(operation.request) };
+		case 'uninstall-package':
+			return { kind: 'uninstall', key: uninstallTaskKey(operation.id) };
 	}
 }
 
 export interface TaskMeta {
-	kind: 'install' | 'first-run' | 'worktree' | 'scaffold';
+	kind: 'install' | 'uninstall' | 'first-run' | 'worktree' | 'scaffold';
 	/** What the task is about; lookups use it (`php:8.4`, `first-run`, `worktree:shop@x`). */
 	key: string;
 }

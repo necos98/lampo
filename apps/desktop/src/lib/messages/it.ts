@@ -343,6 +343,7 @@ export const it = {
 		install: 'Installa',
 		installing: 'Installazione…',
 		uninstall: 'Disinstalla',
+		uninstalling: 'Disinstallazione…',
 		uninstalled: 'Pacchetto disinstallato.',
 		update: 'Aggiorna',
 		updateTo: (v: string) => `Aggiorna a ${v}`,

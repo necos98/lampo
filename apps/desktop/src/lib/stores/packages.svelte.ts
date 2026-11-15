@@ -1,7 +1,9 @@
-import type { CatalogEntry, InstalledPackage, PackageId, UpdateAvailable } from '../api/index.js';
+import type { CatalogEntry, InstalledPackage, PackageId, TaskOutcome, UpdateAvailable } from '../api/index.js';
 import type { Backend } from '../backend/ports.js';
 import { messages as m } from '../messages/index.js';
-import { buildRows, installTaskKey, type PackageRow } from '../packages/grouping.js';
+import { buildRows, installTaskKey, uninstallTaskKey, type PackageRow } from '../packages/grouping.js';
+import { describeError } from '../services/errors.js';
+import type { Notifier } from '../services/notifier.js';
 import { Resource } from './resource.svelte.js';
 import type { CommandRunner } from './runner.js';
 import type { TasksStore } from './tasks.svelte.js';
@@ -17,17 +19,17 @@ export class PackagesStore {
 	readonly catalog: Resource<CatalogEntry[]>;
 	readonly installed: Resource<InstalledPackage[]>;
 	readonly updates: Resource<UpdateAvailable[]>;
-	/** Package ids with an uninstall in flight. */
-	uninstalling = $state<Record<string, boolean>>({});
 
 	readonly #backend: Backend;
 	readonly #runner: CommandRunner;
 	readonly #tasks: TasksStore;
+	readonly #notifier: Notifier;
 
-	constructor(backend: Backend, runner: CommandRunner, tasks: TasksStore) {
+	constructor(backend: Backend, runner: CommandRunner, tasks: TasksStore, notifier: Notifier) {
 		this.#backend = backend;
 		this.#runner = runner;
 		this.#tasks = tasks;
+		this.#notifier = notifier;
 		this.catalog = new Resource(() => backend.commands.listCatalog(null));
 		this.installed = new Resource(() => backend.commands.listInstalledPackages());
 		this.updates = new Resource(() => backend.commands.checkPackageUpdates());
@@ -84,13 +86,20 @@ export class PackagesStore {
 		return result;
 	}
 
+	isUninstalling(id: PackageId): boolean {
+		return this.#tasks.isRunning(uninstallTaskKey(id));
+	}
+
+	/** Starts the uninstall task; its outcome is announced when it finishes (see `start`). */
 	async uninstall(id: PackageId) {
-		const key = `${id.kind}-${id.version}-${id.phpVersion ?? ''}`;
-		this.uninstalling[key] = true;
-		const result = await this.#runner.run(() => this.#backend.commands.uninstallPackage(id), { success: m.packages.uninstalled });
-		delete this.uninstalling[key];
-		if (result.ok) await this.loadLocal();
+		const result = await this.#runner.run(() => this.#backend.commands.uninstallPackage(id));
+		if (result.ok) this.#tasks.track(result.value.taskId, { kind: 'uninstall', key: uninstallTaskKey(id) });
 		return result;
+	}
+
+	#announceUninstall(outcome: TaskOutcome | null): void {
+		if (outcome?.status === 'succeeded') this.#notifier.success(m.packages.uninstalled);
+		else if (outcome?.status === 'failed') this.#notifier.error(describeError(outcome.error));
 	}
 
 	async start(): Promise<() => void> {
@@ -98,9 +107,10 @@ export class PackagesStore {
 			this.phpExtensions = {};
 			void Promise.all([this.loadLocal(), this.updates.data ? this.updates.load() : undefined]);
 		});
-		// A finished install is the moment the registry changes even if the event is dropped.
+		// A finished install or uninstall is the moment the registry changes even if the event is dropped.
 		const stopTask = this.#tasks.onFinished((t) => {
-			if (t.meta?.kind === 'install') void this.loadLocal();
+			if (t.meta?.kind === 'uninstall') this.#announceUninstall(t.outcome);
+			if (t.meta?.kind === 'install' || t.meta?.kind === 'uninstall') void this.loadLocal();
 		});
 		return () => {
 			stopEvent();

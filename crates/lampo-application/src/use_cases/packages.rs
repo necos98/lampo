@@ -13,7 +13,7 @@ use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
 use lampo_domain::vc_runtime::InstalledVcRuntime;
 use lampo_domain::version::{PackageVersion, VersionSeries};
 
-use super::environment::{EnvironmentSync, GeneratedFilesWriter};
+use super::environment::EnvironmentSync;
 use super::requirements::{requirements, used_by};
 use super::resolution::SiteResolver;
 use super::service_catalog::ServiceCatalog;
@@ -21,7 +21,7 @@ use super::settings_writer::SettingsWriter;
 use crate::context::CallContext;
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::mapping::{package_id_from_dto, package_id_to_dto};
+use crate::mapping::package_id_to_dto;
 
 /// Fetches `kind` (every kind each source serves when `None`) from all sources. A failing
 /// source is logged and skipped; the call fails (`Network`) only if every relevant source failed.
@@ -58,7 +58,7 @@ pub(crate) async fn fetch_catalog(sources: &[Arc<dyn PackageCatalogSource>], kin
 }
 
 /// `"8.3"` (or `"8.3.14"`) → the 8.3 series.
-fn parse_series(raw: &str) -> AppResult<VersionSeries> {
+pub(super) fn parse_series(raw: &str) -> AppResult<VersionSeries> {
     Ok(PackageVersion::parse(raw)?.series())
 }
 
@@ -457,101 +457,5 @@ impl InstallPackage {
             tracing::warn!("environment sync after installing {} failed: {}", entry.id, e.message);
         }
         Ok(InstalledPackageDto { id: package_id_to_dto(&package.id), path: package.install_dir.display().to_string(), used_by: Vec::new(), series: package.id.series().to_string() })
-    }
-}
-
-pub struct UninstallPackage {
-    installed: Arc<dyn InstalledPackageRegistry>,
-    projects: Arc<dyn ProjectRepository>,
-    worktrees: Arc<dyn WorktreeRepository>,
-    settings: Arc<dyn SettingsRepository>,
-    events: Arc<dyn EventPublisher>,
-    /// Regenerates the shim index / php.ini files after a removal, so they never point at
-    /// deleted binaries (the app's `ApplyEnvironment`).
-    files: Arc<dyn GeneratedFilesWriter>,
-    services: Arc<ServiceCatalog>,
-}
-
-pub struct UninstallPackageDeps {
-    pub installed: Arc<dyn InstalledPackageRegistry>,
-    pub projects: Arc<dyn ProjectRepository>,
-    pub worktrees: Arc<dyn WorktreeRepository>,
-    pub settings: Arc<dyn SettingsRepository>,
-    pub events: Arc<dyn EventPublisher>,
-    pub files: Arc<dyn GeneratedFilesWriter>,
-    pub services: Arc<ServiceCatalog>,
-}
-
-impl UninstallPackage {
-    pub fn new(deps: UninstallPackageDeps) -> Self {
-        let UninstallPackageDeps { installed, projects, worktrees, settings, events, files, services } = deps;
-        Self { installed, projects, worktrees, settings, events, files, services }
-    }
-
-    /// `Conflict` if it is the last installed build satisfying something in use (a site's PHP
-    /// minor, MySQL series, add-on…, the always-on MySQL or the default PHP). `NotFound` if not
-    /// installed.
-    pub fn execute(&self, id: PackageIdDto) -> AppResult<()> {
-        let id = package_id_from_dto(&id)?;
-        let installed = self.installed.list()?;
-        if !installed.iter().any(|p| p.id == id) {
-            return Err(AppError::not_found("package", &id));
-        }
-        let others: Vec<InstalledPackage> = installed.into_iter().filter(|p| p.id != id).collect();
-        let reqs = requirements(&self.projects.list()?, &self.worktrees.list_all()?, &self.settings.load()?, &self.services);
-        let mut blocking: Vec<String> = reqs.iter().filter(|r| r.matches(&id) && !r.satisfied_by(&others)).map(|r| r.required_by.clone()).collect();
-        blocking.sort();
-        blocking.dedup();
-        if !blocking.is_empty() {
-            return Err(AppError::new(ErrorCode::Conflict, format!("{id} is in use by {}", blocking.join(", "))).with_details(serde_json::json!({ "usedBy": blocking })));
-        }
-        self.installed.remove(&id)?;
-        self.events.publish(DomainEvent::PackagesChanged);
-        self.files.write_generated_files()
-    }
-
-    /// `lampo package uninstall`: the one installed build matching `request` (exact version,
-    /// else series, else any; `phpVersion` narrows add-ons), removed with [`Self::execute`]'s
-    /// rules. Returns its id. `NotFound` if nothing installed matches; `Validation` if several
-    /// builds do (`details.candidates`, newest last). The in-use `Conflict` names what to change.
-    pub fn execute_matching(&self, request: UninstallPackageRequest) -> AppResult<PackageIdDto> {
-        let kind = PackageKind::new(request.kind.trim())?;
-        let php = request.php_version.as_deref().map(|p| PhpMinor::parse(p.trim())).transpose()?;
-        let version = request.version.as_deref().map(|v| PackageVersion::parse(v.trim())).transpose()?;
-        let series = request.series.as_deref().map(|s| parse_series(s.trim())).transpose()?;
-        let mut matching: Vec<PackageId> = self
-            .installed
-            .list()?
-            .into_iter()
-            .map(|p| p.id)
-            .filter(|id| id.kind == kind && php.is_none_or(|php| id.php == Some(php)) && version.as_ref().is_none_or(|v| &id.version == v) && series.is_none_or(|s| id.series() == s))
-            .collect();
-        matching.sort();
-        let wanted = [Some(kind.to_string()), request.version.clone().or(request.series.clone()), php.map(|p| format!("for PHP {p}"))].into_iter().flatten().collect::<Vec<_>>().join(" ");
-        match matching.as_slice() {
-            [] => Err(AppError::new(ErrorCode::NotFound, format!("no installed package matches `{wanted}` (see `lampo package list --installed`)"))),
-            [id] => {
-                let dto = package_id_to_dto(id);
-                self.execute(dto.clone()).map_err(|e| match e.code {
-                    ErrorCode::Conflict => AppError {
-                        message: format!(
-                            "{}: move those sites to another build first (`lampo project set-php`, `lampo project set --no-addon/--no-service`) or keep it; `system` is the default PHP or an always-on MySQL, changed in the Lampo settings",
-                            e.message
-                        ),
-                        ..e
-                    },
-                    _ => e,
-                })?;
-                Ok(dto)
-            }
-            many => {
-                let names: Vec<String> = many.iter().map(ToString::to_string).collect();
-                Err(AppError::new(
-                    ErrorCode::Validation,
-                    format!("{} installed packages match `{wanted}` ({}): name the exact version (and --php for add-ons)", many.len(), names.join(", ")),
-                )
-                .with_details(serde_json::json!({ "candidates": many.iter().map(package_id_to_dto).collect::<Vec<_>>() })))
-            }
-        }
     }
 }

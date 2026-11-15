@@ -201,7 +201,7 @@ impl ControlDispatcher {
             ControlRequest::ServicesRestart(r) => to_json(s.service_control.restart(r).await?),
             ControlRequest::ApplyEnvironment => to_json(s.environment.sync(ctx).await?),
             ControlRequest::PackageInstall(r) => to_json(s.install_package.execute(r, ctx, progress, cancel).await?),
-            ControlRequest::PackageUninstall(r) => to_json(s.uninstall_package.execute_matching(r)?),
+            ControlRequest::PackageUninstall(r) => to_json(s.uninstall_package.execute_matching(r, ctx).await?),
             ControlRequest::DbList(r) => to_json(s.database.list(&r).await?),
             ControlRequest::DbCreate(r) => to_json(s.database.create(&r).await?),
             ControlRequest::DbDrop(r) => to_json(s.database.drop_database(&r).await?),

@@ -9,6 +9,7 @@ mod project_saves;
 mod projects;
 mod scaffold;
 mod settings;
+mod uninstall;
 mod untrusted_config;
 mod worktrees;
 

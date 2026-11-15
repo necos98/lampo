@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use lampo_domain::hosts::HostsBlock;
+use lampo_domain::package::PackageId;
 use lampo_domain::paths::LampoPaths;
 use lampo_domain::ports::{
     EventPublisher, HostsFileReader, HostsFileWriter, InstalledPackageRegistry, PhpIniWriter, PortAvailability, PortProbe, ProjectRepository, ServiceRunner, SettingsRepository,
@@ -27,13 +28,11 @@ use crate::error::{AppError, AppResult, ErrorCode};
 #[async_trait]
 pub trait EnvironmentSync: Send + Sync {
     async fn sync(&self, ctx: &CallContext) -> AppResult<SyncReportDto>;
-}
 
-/// Regenerates the file-only artefacts (php.ini files, shim index) without touching processes
-/// or the hosts file. Synchronous, so non-async use cases (package uninstall) can refresh the
-/// shim index too. Implemented by [`ApplyEnvironment`].
-pub trait GeneratedFilesWriter: Send + Sync {
-    fn write_generated_files(&self) -> AppResult<()>;
+    /// [`Self::sync`] as if `retiring` were no longer installed: vhosts, php.ini files, CLI
+    /// shims and services using it move to the build that remains (restarted) or stop, so its
+    /// files are no longer in use when the uninstall deletes them.
+    async fn sync_without(&self, retiring: &PackageId, ctx: &CallContext) -> AppResult<SyncReportDto>;
 }
 
 pub struct ApplyEnvironmentDeps {
@@ -122,8 +121,13 @@ impl ApplyEnvironment {
         Self { deps, lock: tokio::sync::Mutex::new(SyncState::default()) }
     }
 
-    fn snapshot(&self) -> AppResult<ConfigSnapshot> {
-        Ok(ConfigSnapshot { projects: self.deps.projects.list()?, worktrees: self.deps.worktrees.list_all()?, settings: self.deps.settings.load()?, installed: self.deps.installed.list()? })
+    /// The configuration and the installed packages, leaving out `retiring` (being uninstalled).
+    fn snapshot(&self, retiring: Option<&PackageId>) -> AppResult<ConfigSnapshot> {
+        let mut installed = self.deps.installed.list()?;
+        if let Some(retiring) = retiring {
+            installed.retain(|p| &p.id != retiring);
+        }
+        Ok(ConfigSnapshot { projects: self.deps.projects.list()?, worktrees: self.deps.worktrees.list_all()?, settings: self.deps.settings.load()?, installed })
     }
 
     /// Writes the php.ini files and the shim index; returns the specs written.
@@ -141,7 +145,7 @@ impl ApplyEnvironment {
     /// Only steps 1–2 (no processes, no elevation): used by the CLI fallback and at startup
     /// before services come up.
     pub fn write_generated_files(&self) -> AppResult<()> {
-        let snap = self.snapshot()?;
+        let snap = self.snapshot(None)?;
         let mut warnings = Vec::new();
         self.write_files(&snap, &mut warnings)?;
         for w in warnings {
@@ -332,18 +336,23 @@ fn exclusion_error(excluded: &[(String, String)]) -> Option<AppError> {
     })))
 }
 
-impl GeneratedFilesWriter for ApplyEnvironment {
-    fn write_generated_files(&self) -> AppResult<()> {
-        ApplyEnvironment::write_generated_files(self)
-    }
-}
-
 #[async_trait]
 impl EnvironmentSync for ApplyEnvironment {
     async fn sync(&self, ctx: &CallContext) -> AppResult<SyncReportDto> {
+        self.reconcile(None, ctx).await
+    }
+
+    async fn sync_without(&self, retiring: &PackageId, ctx: &CallContext) -> AppResult<SyncReportDto> {
+        self.reconcile(Some(retiring), ctx).await
+    }
+}
+
+impl ApplyEnvironment {
+    /// The steps of the type docs, against the installed packages minus `retiring`.
+    async fn reconcile(&self, retiring: Option<&PackageId>, ctx: &CallContext) -> AppResult<SyncReportDto> {
         let mut state = self.lock.lock().await;
         let mut out = Outcome::default();
-        let snap = self.snapshot()?;
+        let snap = self.snapshot(retiring)?;
 
         let ini = match self.write_files(&snap, &mut out.report.warnings) {
             Ok(specs) => specs,

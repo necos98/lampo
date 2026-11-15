@@ -174,7 +174,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         worktrees: worktrees.clone(),
         settings: settings.clone(),
         events: events.clone(),
-        files: environment.clone(),
+        env: env.clone(),
         services: service_catalog.clone(),
     }));
     let worktree_queries = Arc::new(WorktreeQueries::new(worktrees.clone(), projects.clone(), settings.clone(), fs.clone()));

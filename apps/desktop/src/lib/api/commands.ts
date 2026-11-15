@@ -114,7 +114,8 @@ export const checkPackageUpdates = () => call<T.UpdateAvailable[]>(COMMANDS.chec
 export const installPackage = (request: T.InstallPackageRequest) => call<T.TaskStarted>(COMMANDS.installPackage, { request });
 /** Extensions the installed PHP minor (`"8.3"`) can load; `package-missing` if not installed. */
 export const listPhpExtensions = (phpVersion: string) => call<T.PhpExtension[]>(COMMANDS.listPhpExtensions, { phpVersion });
-export const uninstallPackage = (id: T.PackageId) => call<void>(COMMANDS.uninstallPackage, { id });
+/** Starts a background task (services move off the package, then its files are deleted); follow it with `onTaskFinished`. */
+export const uninstallPackage = (id: T.PackageId) => call<T.TaskStarted>(COMMANDS.uninstallPackage, { id });
 export const firstRunStatus = () => call<T.FirstRunStatus>(COMMANDS.firstRunStatus);
 /** Starts a background task. */
 export const runFirstRun = () => call<T.TaskStarted>(COMMANDS.runFirstRun);

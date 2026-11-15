@@ -127,7 +127,8 @@ pub struct TaskStartedDto {
 /// What a background task does, as requested by the front-end that started it. Lets a window
 /// created later (the GUI destroys its window on close) find and follow tasks still running.
 /// Wire form: `{ "kind": "install-package", "request": {...} }`, `{ "kind": "first-run" }`,
-/// `{ "kind": "worktree-up", "request": {...} }`, `{ "kind": "scaffold-project", "request": {...} }`.
+/// `{ "kind": "worktree-up", "request": {...} }`, `{ "kind": "scaffold-project", "request": {...} }`,
+/// `{ "kind": "uninstall-package", "id": {...} }`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum TaskOperationDto {
@@ -135,6 +136,7 @@ pub enum TaskOperationDto {
     FirstRun,
     WorktreeUp { request: super::worktree::WorktreeUpRequest },
     ScaffoldProject { request: super::scaffold::ScaffoldProjectRequest },
+    UninstallPackage { id: PackageIdDto },
 }
 
 /// A background task that has not finished yet.

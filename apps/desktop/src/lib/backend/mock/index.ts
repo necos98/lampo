@@ -449,9 +449,15 @@ export function createMockBackend({ fresh }: Options): Backend {
 			});
 		},
 		uninstallPackage: async (id) => {
-			await sleep(300);
-			installed = installed.filter((i) => packageKey(i) !== packageKey(id));
-			syncPackages();
+			await sleep(80);
+			const subject = packageKey(id);
+			const steps = [{ subject, lines: ['Riallineamento di Apache e dei servizi', `Rimozione dei file di ${subject}`] }];
+			return startLogTask({ kind: 'uninstall-package', id }, steps, {
+				onSuccess: () => {
+					installed = installed.filter((i) => packageKey(i) !== subject);
+					syncPackages();
+				}
+			});
 		},
 		firstRunStatus: async () => {
 			await sleep(150);

@@ -107,14 +107,16 @@ pub trait PackageLeftoverSweeper: Send + Sync {
 }
 
 /// The set of installed packages on disk.
+#[async_trait]
 pub trait InstalledPackageRegistry: Send + Sync {
     fn list(&self) -> PortResult<Vec<InstalledPackage>>;
     /// Where `id` is (or would be) installed.
     fn install_dir(&self, id: &PackageId) -> PathBuf;
     /// Records a package whose files are already in place.
     fn record(&self, package: &InstalledPackage) -> PortResult<()>;
-    /// Deletes the package files and its record.
-    fn remove(&self, id: &PackageId) -> PortResult<()>;
+    /// Deletes the package files and its record. Async: a package can be thousands of files,
+    /// deleted off the async workers.
+    async fn remove(&self, id: &PackageId) -> PortResult<()>;
 }
 
 /// Kind-specific work after files are in place (e.g. PHP: seed `php.ini-development`;

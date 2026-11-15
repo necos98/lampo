@@ -19,6 +19,7 @@ pub mod environment;
 pub(crate) mod generation;
 pub mod lifecycle;
 pub mod logs;
+pub mod package_uninstall;
 pub mod packages;
 pub mod presets;
 pub mod project_patch;
@@ -49,10 +50,11 @@ pub use diagnostics::{
     AppCheck, Doctor, DoctorCheck, DoctorDeps, DoctorFacts, FoldersCheck, HostsBlockCheck, PackagesCheck, PathShadowingCheck, PortsCheck, ShimsOnPathCheck, StaleWorktreesCheck,
     VcRuntimeCheck,
 };
-pub use environment::{ApplyEnvironment, ApplyEnvironmentDeps, EnvironmentSync, GeneratedFilesWriter};
+pub use environment::{ApplyEnvironment, ApplyEnvironmentDeps, EnvironmentSync};
 pub use lifecycle::{FirstRunDeps, FirstRunSetup, Shutdown, ShutdownGate, Startup};
 pub use logs::LogQueries;
-pub use packages::{InstallPackage, InstallPackageDeps, PackageCatalog, PackageCatalogDeps, PhpExtensionListing, PhpExtensionsQuery, UninstallPackage, UninstallPackageDeps};
+pub use package_uninstall::{UninstallPackage, UninstallPackageDeps};
+pub use packages::{InstallPackage, InstallPackageDeps, PackageCatalog, PackageCatalogDeps, PhpExtensionListing, PhpExtensionsQuery};
 pub use presets::{DeletePreset, PresetQueries, SavePreset};
 pub use project_patch::PatchProjectEnvironment;
 pub use project_policy::ProjectEnvironmentPolicy;

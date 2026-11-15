@@ -35,6 +35,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use async_trait::async_trait;
 use lampo_domain::package::{InstalledPackage, PackageId, PackageKind};
 use lampo_domain::paths::LampoPaths;
 use lampo_domain::php::PhpMinor;
@@ -135,6 +136,7 @@ impl FsInstalledPackageRegistry {
     }
 }
 
+#[async_trait]
 impl InstalledPackageRegistry for FsInstalledPackageRegistry {
     /// Recorded packages whose directory still exists. Invalid records are skipped (logged).
     fn list(&self) -> PortResult<Vec<InstalledPackage>> {
@@ -180,8 +182,28 @@ impl InstalledPackageRegistry for FsInstalledPackageRegistry {
     }
 
     /// Deletes the files and the record of exactly `id`. If the slot now holds another version,
-    /// `NotFound` is returned and nothing is touched.
-    fn remove(&self, id: &PackageId) -> PortResult<()> {
+    /// `NotFound` is returned and nothing is touched. Once the record is gone the files are
+    /// deleted on a blocking thread.
+    async fn remove(&self, id: &PackageId) -> PortResult<()> {
+        let (dir, trash) = self.unrecord(id)?;
+        let deleted = tokio::task::spawn_blocking(move || {
+            if let Err(e) = remove_tree(&trash) {
+                tracing::warn!(dir = %trash.display(), error = %e, "could not delete removed package files; they will be cleaned up later");
+            }
+            leftovers::discard(&dir);
+        })
+        .await;
+        if let Err(e) = deleted {
+            tracing::warn!(error = %e, "deleting removed package files did not finish; they will be cleaned up later");
+        }
+        Ok(())
+    }
+}
+
+impl FsInstalledPackageRegistry {
+    /// Moves the slot of exactly `id` aside and drops its record. Returns the slot and where its
+    /// files now are (deleted by the caller).
+    fn unrecord(&self, id: &PackageId) -> PortResult<(PathBuf, PathBuf)> {
         let _guard = self.lock.lock().unwrap_or_else(|p| p.into_inner());
         let records = self.load()?;
         let mut target = None;
@@ -201,11 +223,7 @@ impl InstalledPackageRegistry for FsInstalledPackageRegistry {
             std::fs::rename(&dir, &trash).map_err(|e| PortError::io(format!("removing {} (is a service using it? stop it and retry)", dir.display()), e))?;
         }
         self.save(keep)?;
-        if let Err(e) = remove_tree(&trash) {
-            tracing::warn!(dir = %trash.display(), error = %e, "could not delete removed package files; they will be cleaned up later");
-        }
-        leftovers::discard(&dir);
-        Ok(())
+        Ok((dir, trash))
     }
 }
 
@@ -294,8 +312,8 @@ mod tests {
         assert!(reg.list().unwrap().is_empty());
     }
 
-    #[test]
-    fn patch_update_replaces_the_record_of_the_same_slot() {
+    #[tokio::test]
+    async fn patch_update_replaces_the_record_of_the_same_slot() {
         let (_d, reg) = registry();
         let old = install(&reg, &id(PackageKind::PHP, "8.3.14", None));
         install(&reg, &id(PackageKind::PHP, "5.6.40", None));
@@ -305,7 +323,7 @@ mod tests {
         let versions: Vec<_> = list.iter().map(|p| p.id.version.to_string()).collect();
         assert_eq!(versions, ["5.6.40", "8.3.15"]);
         // Removing the superseded id is refused and leaves the new files alone.
-        assert!(matches!(reg.remove(&old.id), Err(PortError::NotFound { .. })));
+        assert!(matches!(reg.remove(&old.id).await, Err(PortError::NotFound { .. })));
         assert!(new.install_dir.join("version.txt").exists());
     }
 
@@ -317,11 +335,11 @@ mod tests {
         assert_eq!(reg.list().unwrap().len(), 2);
     }
 
-    #[test]
-    fn remove_deletes_files_and_record() {
+    #[tokio::test]
+    async fn remove_deletes_files_and_record() {
         let (_d, reg) = registry();
         let p = install(&reg, &id(PackageKind::MYSQL, "8.4.13", None));
-        reg.remove(&p.id).unwrap();
+        reg.remove(&p.id).await.unwrap();
         assert!(!p.install_dir.exists());
         assert!(reg.list().unwrap().is_empty());
         assert_eq!(std::fs::read_dir(p.install_dir.parent().unwrap()).unwrap().count(), 1, "only installed.toml remains");
@@ -330,13 +348,13 @@ mod tests {
     /// An uninstall empties the slot on purpose: a previous copy a crashed update left must not
     /// come back in its place.
     #[cfg(windows)]
-    #[test]
-    fn remove_never_resurrects_a_previous_copy() {
+    #[tokio::test]
+    async fn remove_never_resurrects_a_previous_copy() {
         let (_d, reg) = registry();
         let p = install(&reg, &id(PackageKind::MYSQL, "8.4.13", None));
         let stale = p.install_dir.with_file_name(format!("mysql-8.4.old-{}-1", crate::pid::exited_process_id()));
         std::fs::create_dir_all(&stale).unwrap();
-        reg.remove(&p.id).unwrap();
+        reg.remove(&p.id).await.unwrap();
         assert!(!p.install_dir.exists() && !stale.exists());
     }
 

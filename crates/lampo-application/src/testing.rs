@@ -180,6 +180,7 @@ impl MemInstalled {
         lock(&self.packages).iter().any(|p| &p.id.kind == kind && p.id.version.as_str() == version)
     }
 }
+#[async_trait]
 impl InstalledPackageRegistry for MemInstalled {
     fn list(&self) -> PortResult<Vec<InstalledPackage>> {
         Ok(lock(&self.packages).clone())
@@ -193,7 +194,7 @@ impl InstalledPackageRegistry for MemInstalled {
         all.push(fake_layout(package.clone()));
         Ok(())
     }
-    fn remove(&self, id: &PackageId) -> PortResult<()> {
+    async fn remove(&self, id: &PackageId) -> PortResult<()> {
         lock(&self.packages).retain(|p| &p.id != id);
         lock(&self.removed).push(id.clone());
         Ok(())
@@ -834,6 +835,10 @@ impl EnvironmentSync for CountingSync {
             None => Ok(SyncReportDto::default()),
         }
     }
+
+    async fn sync_without(&self, _retiring: &PackageId, ctx: &CallContext) -> AppResult<SyncReportDto> {
+        self.sync(ctx).await
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1154,15 +1159,20 @@ impl World {
 }
 
 impl World {
-    /// `UninstallPackage` regenerating files through this world's `ApplyEnvironment`.
+    /// `UninstallPackage` syncing through this world's `ApplyEnvironment`.
     pub fn uninstall_package(&self) -> UninstallPackage {
+        self.uninstall_package_with(self.installed.clone())
+    }
+
+    /// [`Self::uninstall_package`] removing through `installed` (a wrapper of this world's registry).
+    pub fn uninstall_package_with(&self, installed: Arc<dyn InstalledPackageRegistry>) -> UninstallPackage {
         UninstallPackage::new(UninstallPackageDeps {
-            installed: self.installed.clone(),
+            installed,
             projects: self.projects.clone(),
             worktrees: self.worktrees.clone(),
             settings: self.settings.clone(),
             events: self.events.clone(),
-            files: self.env.clone(),
+            env: self.env.clone(),
             services: self.services.clone(),
         })
     }

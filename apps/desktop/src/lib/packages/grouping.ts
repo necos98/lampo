@@ -1,4 +1,4 @@
-import type { CatalogEntry, InstalledPackage, UpdateAvailable } from '../api/index.js';
+import type { CatalogEntry, InstalledPackage, PackageId, UpdateAvailable } from '../api/index.js';
 
 /** One installable line: a series of a package kind (PHP 8.3, MySQL 8.4, Xdebug for PHP 8.3). */
 export interface PackageRow {
@@ -18,6 +18,8 @@ export interface PackageRow {
 
 export const rowKey = (kind: string, series: string, phpVersion: string | null) => `${kind}|${series}|${phpVersion ?? ''}`;
 export const installTaskKey = (kind: string, series: string, phpVersion: string | null) => `install:${rowKey(kind, series, phpVersion)}`;
+/** Key of the uninstall task of exactly one installed build. */
+export const uninstallTaskKey = (id: PackageId) => `uninstall:${id.kind}|${id.version}|${id.phpVersion ?? ''}`;
 
 /**
  * One row per kind + series (+ PHP minor). Series, groups and ordering all come from the backend:

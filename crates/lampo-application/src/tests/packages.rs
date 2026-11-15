@@ -435,8 +435,8 @@ fn uninstall_request(kind: &str, version: Option<&str>, series: Option<&str>, ph
     UninstallPackageRequest { kind: kind.into(), version: version.map(Into::into), series: series.map(Into::into), php_version: php.map(Into::into) }
 }
 
-#[test]
-fn uninstall_by_kind_version_and_php_picks_exactly_one_build() {
+#[tokio::test]
+async fn uninstall_by_kind_version_and_php_picks_exactly_one_build() {
     let w = World::with_basics();
     w.project("shop", "C:\\sites\\shop", false);
     w.installed.add(PackageKind::XDEBUG, "3.3.2", Some("8.3"));
@@ -444,30 +444,30 @@ fn uninstall_by_kind_version_and_php_picks_exactly_one_build() {
     let uninstall = w.uninstall_package();
 
     // Two builds match: nothing is removed, the candidates are listed.
-    let err = uninstall.execute_matching(uninstall_request("xdebug", None, None, None)).unwrap_err();
+    let err = uninstall.execute_matching(uninstall_request("xdebug", None, None, None), &gui()).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::Validation);
     assert!(err.message.contains("--php"), "{}", err.message);
     assert_eq!(err.details.unwrap()["candidates"].as_array().unwrap().len(), 2);
-    let removed = uninstall.execute_matching(uninstall_request("xdebug", None, Some("3.3"), Some("8.4"))).unwrap();
+    let removed = uninstall.execute_matching(uninstall_request("xdebug", None, Some("3.3"), Some("8.4")), &gui()).await.unwrap();
     assert_eq!(removed, PackageIdDto { kind: "xdebug".into(), version: "3.3.2".into(), php_version: Some("8.4".into()) });
     assert_eq!(w.installed.list().unwrap().iter().filter(|p| p.id.kind == PackageKind::XDEBUG).count(), 1);
 
     // Series and exact version; nothing matching is NotFound (exit 3), never a guess.
-    let mysql = uninstall.execute_matching(uninstall_request("mysql", None, Some("5.7"), None)).unwrap();
+    let mysql = uninstall.execute_matching(uninstall_request("mysql", None, Some("5.7"), None), &gui()).await.unwrap();
     assert_eq!(mysql.version, "5.7.44");
-    let none = uninstall.execute_matching(uninstall_request("mysql", None, Some("5.7"), None)).unwrap_err();
+    let none = uninstall.execute_matching(uninstall_request("mysql", None, Some("5.7"), None), &gui()).await.unwrap_err();
     assert_eq!(none.code, ErrorCode::NotFound);
     assert!(none.message.contains("lampo package list --installed"), "{}", none.message);
-    assert_eq!(uninstall.execute_matching(uninstall_request("php", Some("8.3.99"), None, None)).unwrap_err().code, ErrorCode::NotFound);
+    assert_eq!(uninstall.execute_matching(uninstall_request("php", Some("8.3.99"), None, None), &gui()).await.unwrap_err().code, ErrorCode::NotFound);
 
     // In use: Conflict with who uses it and what to change; the build stays.
-    let err = uninstall.execute_matching(uninstall_request("php", Some("8.3.14"), None, None)).unwrap_err();
+    let err = uninstall.execute_matching(uninstall_request("php", Some("8.3.14"), None, None), &gui()).await.unwrap_err();
     assert_eq!((err.code, err.details.clone().unwrap()["usedBy"].clone()), (ErrorCode::Conflict, serde_json::json!(["shop"])));
     assert!(err.message.contains("in use by shop") && err.message.contains("lampo project set-php"), "{}", err.message);
     assert!(w.installed.has(&PackageKind::PHP, "8.3.14"));
-    assert_eq!(uninstall.execute_matching(uninstall_request("php", None, Some("8.4"), None)).unwrap_err().code, ErrorCode::Conflict, "the default PHP");
+    assert_eq!(uninstall.execute_matching(uninstall_request("php", None, Some("8.4"), None), &gui()).await.unwrap_err().code, ErrorCode::Conflict, "the default PHP");
 
-    assert_eq!(uninstall.execute_matching(uninstall_request("not a kind!", None, None, None)).unwrap_err().code, ErrorCode::Validation);
+    assert_eq!(uninstall.execute_matching(uninstall_request("not a kind!", None, None, None), &gui()).await.unwrap_err().code, ErrorCode::Validation);
 }
 
 #[tokio::test]
@@ -509,21 +509,21 @@ async fn uninstall_refuses_the_last_build_in_use() {
     w.project("shop", "C:\\sites\\shop", false);
     let uninstall = w.uninstall_package();
     let php83 = PackageIdDto { kind: "php".into(), version: "8.3.14".into(), php_version: None };
-    let err = uninstall.execute(php83.clone()).unwrap_err();
+    let err = uninstall.execute(php83.clone(), &gui()).await.unwrap_err();
     assert_eq!((err.code, err.details.unwrap()["usedBy"].clone()), (ErrorCode::Conflict, serde_json::json!(["shop"])));
 
     // Another 8.3 build satisfies the project: the old one can go.
     let newer = w.installed.add(PackageKind::PHP, "8.3.15", None);
-    uninstall.execute(php83).unwrap();
+    uninstall.execute(php83, &gui()).await.unwrap();
     assert!(!w.installed.has(&PackageKind::PHP, "8.3.14"));
     assert!(w.events.all().contains(&DomainEvent::PackagesChanged));
-    assert_eq!(uninstall.execute(package_id_to_dto(&newer.id)).unwrap_err().code, ErrorCode::Conflict);
+    assert_eq!(uninstall.execute(package_id_to_dto(&newer.id), &gui()).await.unwrap_err().code, ErrorCode::Conflict);
 
     // The always-on MySQL and the default PHP are protected too; unused packages are not.
-    assert_eq!(uninstall.execute(PackageIdDto { kind: "mysql".into(), version: "8.4.3".into(), php_version: None }).unwrap_err().code, ErrorCode::Conflict);
-    assert_eq!(uninstall.execute(PackageIdDto { kind: "php".into(), version: "8.4.1".into(), php_version: None }).unwrap_err().code, ErrorCode::Conflict);
-    uninstall.execute(PackageIdDto { kind: "mysql".into(), version: "5.7.44".into(), php_version: None }).unwrap();
-    assert_eq!(uninstall.execute(PackageIdDto { kind: "redis".into(), version: "1.0.0".into(), php_version: None }).unwrap_err().code, ErrorCode::NotFound);
+    assert_eq!(uninstall.execute(PackageIdDto { kind: "mysql".into(), version: "8.4.3".into(), php_version: None }, &gui()).await.unwrap_err().code, ErrorCode::Conflict);
+    assert_eq!(uninstall.execute(PackageIdDto { kind: "php".into(), version: "8.4.1".into(), php_version: None }, &gui()).await.unwrap_err().code, ErrorCode::Conflict);
+    uninstall.execute(PackageIdDto { kind: "mysql".into(), version: "5.7.44".into(), php_version: None }, &gui()).await.unwrap();
+    assert_eq!(uninstall.execute(PackageIdDto { kind: "redis".into(), version: "1.0.0".into(), php_version: None }, &gui()).await.unwrap_err().code, ErrorCode::NotFound);
 }
 
 #[tokio::test]

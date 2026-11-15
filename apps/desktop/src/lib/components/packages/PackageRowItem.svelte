@@ -25,6 +25,7 @@
 	const failed = $derived(task?.outcome?.status === 'failed' ? task.outcome.error : null);
 	const vcMissing = $derived(row.latest.vcRuntime !== null && row.latest.vcRuntimeInstalled === false);
 	const usedBy = $derived(row.installed?.usedBy ?? []);
+	const uninstalling = $derived(row.installed !== null && packages.isUninstalling(row.installed.id));
 	let confirming = $state(false);
 </script>
 
@@ -52,11 +53,14 @@
 			{#if running}
 				<span class="text-xs text-muted-foreground">{t.installing}</span>
 			{:else}
+				{#if uninstalling}
+					<span class="text-xs text-muted-foreground" role="status">{t.uninstalling}</span>
+				{/if}
 				{#if row.update}
-					<Button size="xs" variant="secondary" onclick={() => packages.install(row)}><ArrowUpCircle />{t.updateTo(row.update.latest)}</Button>
+					<Button size="xs" variant="secondary" disabled={uninstalling} onclick={() => packages.install(row)}><ArrowUpCircle />{t.updateTo(row.update.latest)}</Button>
 				{/if}
 				{#if row.installed}
-					<Button size="icon-xs" variant="ghost" disabled={usedBy.length > 0} title={usedBy.length ? t.inUse(usedBy) : t.uninstall} aria-label="{t.uninstall} {title}" onclick={() => (confirming = true)}><Trash2 /></Button>
+					<Button size="icon-xs" variant="ghost" disabled={uninstalling || usedBy.length > 0} title={usedBy.length ? t.inUse(usedBy) : t.uninstall} aria-label="{t.uninstall} {title}" onclick={() => (confirming = true)}><Trash2 /></Button>
 				{:else}
 					<Button size="xs" onclick={() => packages.install(row)}><Download />{t.install}</Button>
 				{/if}

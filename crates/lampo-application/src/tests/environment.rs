@@ -327,7 +327,7 @@ async fn uninstalling_a_php_regenerates_the_shim_index() {
     let writes = w.shim_index.writes.load(Ordering::SeqCst);
     let uninstall = w.uninstall_package();
     let id = w.installed.list().unwrap().into_iter().find(|p| p.id.version.as_str() == "7.4.33").unwrap().id;
-    uninstall.execute(package_id_to_dto(&id)).unwrap();
+    uninstall.execute(package_id_to_dto(&id), &gui()).await.unwrap();
     assert_eq!(w.shim_index.writes.load(Ordering::SeqCst), writes + 1);
 }
 
@@ -393,7 +393,7 @@ async fn a_new_service_kind_is_added_by_registering_a_descriptor_and_a_runner() 
     assert!(listed.iter().any(|s| s.service == mysql_id("8.4").to_string()));
 
     // Without the package the doctor reports it like any other.
-    w.installed.remove(&w.installed.list().unwrap().into_iter().find(|p| p.id.kind.as_str() == "memcached").unwrap().id).unwrap();
+    w.installed.remove(&w.installed.list().unwrap().into_iter().find(|p| p.id.kind.as_str() == "memcached").unwrap().id).await.unwrap();
     let report = Doctor::new(w.doctor_deps(Arc::new(FakeLocator::default()))).run().await.unwrap();
     assert!(report.missing_packages.contains(&"memcached".to_string()), "{:?}", report.missing_packages);
 }
