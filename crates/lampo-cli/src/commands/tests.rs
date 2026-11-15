@@ -474,6 +474,7 @@ async fn every_json_command_prints_exactly_one_document() {
         &["logs", "apache"],
         &["package", "list"],
         &["package", "list", "--installed"],
+        &["package", "extensions"],
         &["env"],
         &["doctor"],
         &["agent", "context"],
@@ -727,4 +728,101 @@ fn project_set_needs_at_least_one_change() {
     assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "shop"]).is_err());
     assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "--no-ini", "memory_limit"]).is_ok());
     assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "--apache-directives", "-Indexes"]).is_ok());
+}
+
+// --- `package uninstall` / `package extensions` -------------------------------------------------
+
+#[tokio::test]
+async fn package_uninstall_requires_yes_and_sends_nothing_without_it() {
+    let fake = Fake::new();
+    let (code, out, err) = run_cli(&fake, &["package", "uninstall", "xdebug", "--php", "8.3", "--json"]).await;
+    assert_eq!(code, 4);
+    let doc = parse(&out);
+    assert_eq!(doc["error"]["code"], "validation");
+    assert!(doc["error"]["message"].as_str().unwrap().contains("`xdebug --php 8.3` without --yes"), "{doc}");
+    assert!(err.contains("never prompts"), "{err}");
+    assert!(fake.sent.lock().unwrap().is_empty(), "nothing sent");
+    assert_eq!(fake.ensure_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn package_uninstall_mirrors_install_syntax() {
+    let fake = Fake::new();
+    fake.reply(Ok(json!({"kind": "php", "version": "8.2.27", "phpVersion": null})));
+    let (code, out, _) = run_cli(&fake, &["package", "uninstall", "php", "8.2", "--yes"]).await;
+    assert_eq!((code, out.trim()), (0, "Uninstalled php 8.2.27"));
+    assert_eq!(fake.last_request().0, ControlRequest::PackageUninstall(UninstallPackageRequest { kind: "php".into(), series: Some("8.2".into()), ..Default::default() }));
+
+    fake.reply(Ok(json!({"kind": "xdebug", "version": "3.3.2", "phpVersion": "8.3"})));
+    let (code, out, _) = run_cli(&fake, &["package", "uninstall", "xdebug", "3.3.2", "--php", "8.3", "--yes", "--json"]).await;
+    assert_eq!(code, 0);
+    assert_eq!(parse(&out), json!({"kind": "xdebug", "version": "3.3.2", "phpVersion": "8.3"}));
+    assert_eq!(
+        fake.last_request().0,
+        ControlRequest::PackageUninstall(UninstallPackageRequest { kind: "xdebug".into(), version: Some("3.3.2".into()), series: None, php_version: Some("8.3".into()) })
+    );
+}
+
+#[tokio::test]
+async fn package_uninstall_errors_keep_their_exit_codes() {
+    let fake = Fake::new();
+    let in_use = AppError::new(ErrorCode::Conflict, "php-8.3.14 is in use by shop: move those sites to another build first").with_details(json!({"usedBy": ["shop"]}));
+    fake.reply(Err(in_use));
+    let (code, out, _) = run_cli(&fake, &["package", "uninstall", "php", "8.3.14", "--yes", "--json"]).await;
+    assert_eq!(code, 5);
+    assert_eq!(parse(&out)["error"]["details"]["usedBy"], json!(["shop"]));
+
+    fake.reply(Err(AppError::new(ErrorCode::NotFound, "no installed package matches `redis`")));
+    assert_eq!(run_cli(&fake, &["package", "uninstall", "redis", "--yes"]).await.0, 3);
+    fake.reply(Err(AppError::new(ErrorCode::Validation, "2 installed packages match `xdebug`")));
+    assert_eq!(run_cli(&fake, &["package", "uninstall", "xdebug", "--yes"]).await.0, 4);
+
+    fake.app_running.store(false, Ordering::SeqCst);
+    assert_eq!(run_cli(&fake, &["package", "uninstall", "redis", "--yes", "--no-start"]).await.0, 9);
+}
+
+#[tokio::test]
+async fn package_extensions_runs_in_process_and_marks_the_project_state() {
+    let fake = Fake::new();
+    fake.app_running.store(false, Ordering::SeqCst);
+    let (code, out, err) = run_cli(&fake, &["package", "extensions", "--json", "--no-start"]).await;
+    assert_eq!((code, err.as_str()), (0, ""));
+    assert_eq!(parse(&out), extensions_json("8.3"));
+    assert_eq!(fake.ensure_calls.load(Ordering::SeqCst), 0);
+    assert!(fake.sent.lock().unwrap().is_empty(), "read-only: never reaches the app");
+
+    let (code, out, _) = run_cli(&fake, &["package", "extensions", "--php", "8.4"]).await;
+    assert_eq!(code, 0);
+    for needle in ["PHP 8.4 bundled extensions ([x] = enabled in `shop`)", "  [x] intl\n", "  [ ] opcache  (zend_extension)\n", "lampo project set --ext <name>"] {
+        assert!(out.contains(needle), "missing {needle:?} in:\n{out}");
+    }
+    assert_eq!(*fake.extensions_php.lock().unwrap(), vec![None, Some("8.4".to_string())]);
+
+    let mut no_project = extensions_json("8.4");
+    no_project["projectId"] = Value::Null;
+    for e in no_project["extensions"].as_array_mut().unwrap() {
+        e["enabled"] = Value::Null;
+    }
+    *fake.extensions_result.lock().unwrap() = Some(Ok(no_project));
+    let (_, out, _) = run_cli(&fake, &["package", "extensions", "--php", "8.4"]).await;
+    assert!(out.starts_with("PHP 8.4 bundled extensions:\n  intl\n"), "{out}");
+}
+
+#[tokio::test]
+async fn package_extensions_of_a_missing_php_is_exit_10() {
+    let fake = Fake::new();
+    *fake.extensions_result.lock().unwrap() = Some(Err(AppError::new(ErrorCode::PackageMissing, "PHP 5.6 is not installed")));
+    let (code, out, _) = run_cli(&fake, &["package", "extensions", "--php", "5.6", "--json"]).await;
+    assert_eq!(code, 10);
+    assert_eq!(parse(&out)["error"]["code"], "package-missing");
+}
+
+#[test]
+fn package_uninstall_and_extensions_are_advertised_with_the_right_flags() {
+    let catalog = lampo_application::use_cases::agent::cli_command_catalog();
+    let find = |name: &str| catalog.iter().find(|c| c.name == name).unwrap_or_else(|| panic!("{name} advertised")).clone();
+    let uninstall = find("lampo package uninstall");
+    assert!(uninstall.mutating && uninstall.requires_app && uninstall.usage.contains("--yes"), "{uninstall:?}");
+    let extensions = find("lampo package extensions");
+    assert!(!extensions.mutating && !extensions.requires_app, "{extensions:?}");
 }

@@ -44,6 +44,8 @@ fn every_subcommand_renders_help() {
         &["package"],
         &["package", "list"],
         &["package", "install"],
+        &["package", "uninstall"],
+        &["package", "extensions"],
         &["db"],
         &["db", "list"],
         &["db", "create"],
@@ -164,4 +166,29 @@ fn project_detect_reads_a_real_folder_without_the_app() {
     assert_eq!((code, doc["error"]["code"].as_str()), (4, Some("validation")));
 
     assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0, "detection must not write to the data root");
+}
+
+/// `package extensions` runs in-process (no app, `--no-start`): on an empty data root the PHP is
+/// not installed (exit 10), nothing resolves without `--php` (exit 6), and nothing is written.
+/// `package uninstall` without `--yes` is refused before any app contact (exit 4).
+#[test]
+fn package_extensions_and_uninstall_guard_without_the_app() {
+    let home = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let run = |args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_lampo"))
+            .args(args)
+            .args(["--json", "--no-start"])
+            .env("LAMPO_HOME", home.path())
+            .env_remove("LAMPO_PROJECT")
+            .current_dir(cwd.path())
+            .output()
+            .unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stdout)));
+        (out.status.code().unwrap(), doc["error"]["code"].as_str().map(str::to_string))
+    };
+    assert_eq!(run(&["package", "extensions", "--php", "8.3"]), (10, Some("package-missing".into())));
+    assert_eq!(run(&["package", "extensions"]), (6, Some("project-not-resolved".into())));
+    assert_eq!(run(&["package", "uninstall", "php", "8.3"]), (4, Some("validation".into())));
+    assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0, "read-only commands must not write to the data root");
 }

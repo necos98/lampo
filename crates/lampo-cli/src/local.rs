@@ -59,6 +59,12 @@ impl PackageReader for PackageCatalog {
     }
 }
 
+impl PhpExtensionReader for PhpExtensionListing {
+    fn list(&self, request: &ResolveRequestDto, php: Option<&str>) -> AppResult<PhpExtensionListDto> {
+        self.execute(request, php)
+    }
+}
+
 impl ToolchainReader for ToolchainQuery {
     fn env(&self, request: &ResolveRequestDto) -> AppResult<ToolchainEnvDto> {
         ToolchainQuery::env(self, request)

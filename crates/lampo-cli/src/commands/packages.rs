@@ -4,7 +4,7 @@ use lampo_application::control::ControlRequest;
 use lampo_application::dto::*;
 use lampo_application::AppResult;
 
-use super::Cmd;
+use super::{Cmd, validation};
 use crate::cli::PackageCommand;
 use crate::render;
 
@@ -26,6 +26,20 @@ pub async fn run(c: &Cmd<'_>, command: PackageCommand) -> AppResult<i32> {
             let request = InstallPackageRequest { kind, version, series, php_version: php };
             let installed: InstalledPackageDto = c.app(ControlRequest::PackageInstall(request)).await?;
             c.io.emit(&installed, render::installed_one);
+        }
+        PackageCommand::Uninstall { kind, package_version, yes: false, php } => {
+            let what = [Some(kind), package_version, php.map(|p| format!("--php {p}"))].into_iter().flatten().collect::<Vec<_>>().join(" ");
+            return Err(validation(format!("refusing to uninstall `{what}` without --yes (lampo never prompts)")));
+        }
+        PackageCommand::Uninstall { kind, package_version, php, yes: true } => {
+            let (version, series) = split_version(package_version.as_deref());
+            let request = UninstallPackageRequest { kind, version, series, php_version: php };
+            let removed: PackageIdDto = c.app(ControlRequest::PackageUninstall(request)).await?;
+            c.io.emit(&removed, render::uninstalled);
+        }
+        PackageCommand::Extensions { php } => {
+            let list = c.ctx.php_extensions.list(&c.resolve_request(), php.as_deref())?;
+            c.io.emit(&list, render::php_extensions);
         }
     }
     Ok(0)

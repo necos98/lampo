@@ -61,12 +61,23 @@ admin rights):
 
 ```powershell
 lampo package list --kind php
+lampo package list --installed
 lampo package install php 8.3
 ```
 
-A two-part value (`8.3`) installs the latest patch of that series; three parts (`8.3.14`) an
-exact build. Installing is allowed when the task needs it; uninstalling is not (ask the user,
-it happens in the app's "Pacchetti" page).
+`package list` shows the catalog; `--installed` shows only what is on this machine, with the
+sites using each build (`--kind php --installed` for PHP alone). A two-part value (`8.3`)
+installs the latest patch of that series; three parts (`8.3.14`) an exact build. Installing is
+allowed when the task needs it. Uninstalling needs the user's yes first:
+
+```powershell
+lampo package uninstall php 8.2 --yes
+lampo package uninstall xdebug --php 8.3 --yes
+```
+
+It takes the same arguments as `install`, but exactly one installed build must match (several:
+exit 4 listing them, pass the exact version). It is refused with exit 5 while the build is the
+last one a project, the default PHP or an always-on MySQL needs (`details.usedBy`).
 
 ### Switching a project's PHP
 
@@ -82,11 +93,14 @@ PHP. The version must be installed; exit code 10 means `lampo package install ph
 ## Extensions and add-ons
 
 - **Bundled extensions** (`intl`, `gd`, `zip`, `pdo_mysql`, `mbstring`, `sodium`, `exif`...):
-  the presets enable the usual ones. Enable or disable others with `lampo project set`
-  (comma-separated or repeated; a name the project's PHP does not ship fails with exit 4 and
-  lists the available ones). Verify with `php -m`.
+  the presets enable the usual ones. `lampo package extensions` lists what the project's PHP
+  build ships, marking those the project enables (`--php 8.4` for another installed minor,
+  `--json` for `extensions[].name` / `enabled`); read-only, no app needed. Enable or disable
+  others with `lampo project set` (comma-separated or repeated; a name the build does not ship
+  fails with exit 4 and lists the available ones). Verify with `php -m`.
 
 ```powershell
+lampo package extensions
 lampo project set --ext intl,gd
 lampo project set --no-ext opcache
 ```

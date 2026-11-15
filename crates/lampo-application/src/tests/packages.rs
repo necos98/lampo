@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use lampo_domain::events::DomainEvent;
 use lampo_domain::package::{PackageKind, PackagePayload};
-use lampo_domain::ports::{InstalledPackageRegistry, PackageCatalogSource, SettingsRepository};
+use lampo_domain::ports::{InstalledPackageRegistry, PackageCatalogSource, ProjectRepository, SettingsRepository};
 use lampo_domain::progress::{CancelFlag, ProgressStage};
 use lampo_domain::vc_runtime::VcRuntime;
 
@@ -212,6 +212,100 @@ fn php_extensions_come_from_the_installed_build_of_that_minor() {
     assert_eq!(scanner.0.lock().unwrap()[0], php83.install_dir);
     assert_eq!(query.list("5.6").unwrap_err().code, ErrorCode::PackageMissing);
     assert_eq!(query.list("nope").unwrap_err().code, ErrorCode::Validation);
+}
+
+/// `intl` and `opcache` in every PHP build.
+struct TwoExtensions;
+impl lampo_domain::ports::PhpExtensionScanner for TwoExtensions {
+    fn bundled_extensions(&self, _: &std::path::Path) -> lampo_domain::PortResult<Vec<lampo_domain::php::ExtensionName>> {
+        Ok(["intl", "opcache"].iter().map(|n| lampo_domain::php::ExtensionName::new(n).unwrap()).collect())
+    }
+}
+
+fn listing(w: &World) -> PhpExtensionListing {
+    PhpExtensionListing::new(w.resolver(), w.projects.clone(), Arc::new(PhpExtensionsQuery::new(w.installed.clone(), Arc::new(TwoExtensions))))
+}
+
+fn at(cwd: &str) -> ResolveRequestDto {
+    ResolveRequestDto { cwd: cwd.into(), explicit_site: None }
+}
+
+#[test]
+fn extension_listing_uses_the_resolved_project_php_and_flags_what_it_enables() {
+    let w = World::with_basics();
+    let mut shop = w.project("shop", "C:\\sites\\shop", false);
+    shop.environment.extensions.insert(lampo_domain::php::ExtensionName::new("intl").unwrap());
+    w.projects.save(&shop).unwrap();
+    w.env.write_generated_files().unwrap();
+    let enabled = |l: &PhpExtensionListDto| l.extensions.iter().map(|e| (e.name.clone(), e.enabled)).collect::<Vec<_>>();
+
+    let list = listing(&w).execute(&at("C:\\sites\\shop\\app"), None).unwrap();
+    assert_eq!((list.php_version.as_str(), list.project_id.as_deref()), ("8.3", Some("shop")));
+    assert_eq!(enabled(&list), [("intl".to_string(), Some(true)), ("opcache".to_string(), Some(false))]);
+    assert!(list.extensions[1].zend);
+
+    // Another minor: listed, but the project's flags do not apply to it.
+    let other = listing(&w).execute(&at("C:\\sites\\shop"), Some("8.4")).unwrap();
+    assert_eq!((other.php_version.as_str(), other.project_id), ("8.4", None));
+    assert!(other.extensions.iter().all(|e| e.enabled.is_none()));
+    // Explicit and matching: flags again.
+    assert_eq!(listing(&w).execute(&at("C:\\sites\\shop"), Some("8.3")).unwrap().project_id.as_deref(), Some("shop"));
+
+    // Outside any project: the global default PHP (8.4), no flags.
+    let outside = listing(&w).execute(&at("D:\\elsewhere"), None).unwrap();
+    assert_eq!((outside.php_version.as_str(), outside.project_id), ("8.4", None));
+
+    assert_eq!(listing(&w).execute(&at("D:\\elsewhere"), Some("5.6")).unwrap_err().code, ErrorCode::PackageMissing);
+    assert_eq!(listing(&w).execute(&at("D:\\elsewhere"), Some("x")).unwrap_err().code, ErrorCode::Validation);
+}
+
+#[test]
+fn extension_listing_without_a_site_or_default_php_needs_an_explicit_minor() {
+    // No shim index written yet: no site and no default target.
+    let w = World::with_basics();
+    let err = listing(&w).execute(&at("D:\\elsewhere"), None).unwrap_err();
+    assert_eq!(err.code, ErrorCode::ProjectNotResolved);
+    assert!(err.message.contains("--php"), "{}", err.message);
+    assert_eq!(listing(&w).execute(&at("D:\\elsewhere"), Some("8.3")).unwrap().extensions.len(), 2);
+}
+
+fn uninstall_request(kind: &str, version: Option<&str>, series: Option<&str>, php: Option<&str>) -> UninstallPackageRequest {
+    UninstallPackageRequest { kind: kind.into(), version: version.map(Into::into), series: series.map(Into::into), php_version: php.map(Into::into) }
+}
+
+#[test]
+fn uninstall_by_kind_version_and_php_picks_exactly_one_build() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", false);
+    w.installed.add(PackageKind::XDEBUG, "3.3.2", Some("8.3"));
+    w.installed.add(PackageKind::XDEBUG, "3.3.2", Some("8.4"));
+    let uninstall = w.uninstall_package();
+
+    // Two builds match: nothing is removed, the candidates are listed.
+    let err = uninstall.execute_matching(uninstall_request("xdebug", None, None, None)).unwrap_err();
+    assert_eq!(err.code, ErrorCode::Validation);
+    assert!(err.message.contains("--php"), "{}", err.message);
+    assert_eq!(err.details.unwrap()["candidates"].as_array().unwrap().len(), 2);
+    let removed = uninstall.execute_matching(uninstall_request("xdebug", None, Some("3.3"), Some("8.4"))).unwrap();
+    assert_eq!(removed, PackageIdDto { kind: "xdebug".into(), version: "3.3.2".into(), php_version: Some("8.4".into()) });
+    assert_eq!(w.installed.list().unwrap().iter().filter(|p| p.id.kind == PackageKind::XDEBUG).count(), 1);
+
+    // Series and exact version; nothing matching is NotFound (exit 3), never a guess.
+    let mysql = uninstall.execute_matching(uninstall_request("mysql", None, Some("5.7"), None)).unwrap();
+    assert_eq!(mysql.version, "5.7.44");
+    let none = uninstall.execute_matching(uninstall_request("mysql", None, Some("5.7"), None)).unwrap_err();
+    assert_eq!(none.code, ErrorCode::NotFound);
+    assert!(none.message.contains("lampo package list --installed"), "{}", none.message);
+    assert_eq!(uninstall.execute_matching(uninstall_request("php", Some("8.3.99"), None, None)).unwrap_err().code, ErrorCode::NotFound);
+
+    // In use: Conflict with who uses it and what to change; the build stays.
+    let err = uninstall.execute_matching(uninstall_request("php", Some("8.3.14"), None, None)).unwrap_err();
+    assert_eq!((err.code, err.details.clone().unwrap()["usedBy"].clone()), (ErrorCode::Conflict, serde_json::json!(["shop"])));
+    assert!(err.message.contains("in use by shop") && err.message.contains("lampo project set-php"), "{}", err.message);
+    assert!(w.installed.has(&PackageKind::PHP, "8.3.14"));
+    assert_eq!(uninstall.execute_matching(uninstall_request("php", None, Some("8.4"), None)).unwrap_err().code, ErrorCode::Conflict, "the default PHP");
+
+    assert_eq!(uninstall.execute_matching(uninstall_request("not a kind!", None, None, None)).unwrap_err().code, ErrorCode::Validation);
 }
 
 #[tokio::test]

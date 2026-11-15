@@ -360,6 +360,7 @@ fn dispatcher(w: &World, quit: Arc<std::sync::atomic::AtomicBool>, gate: Arc<Shu
         service_control: w.service_control.clone(),
         environment: w.env.clone(),
         install_package: install,
+        uninstall_package: Arc::new(w.uninstall_package()),
         database: Arc::new(DatabaseService::new(w.db.clone(), w.projects.clone(), w.worktrees.clone(), w.settings.clone(), w.installed.clone(), w.service_control.clone())),
         worktree_up: Arc::new(w.worktree_up()),
         worktree_down: Arc::new(w.worktree_down()),
@@ -415,6 +416,10 @@ async fn control_dispatcher_routes_requests_to_use_cases() {
     assert_eq!(ok_payload(frame)["id"]["kind"], "redis");
     assert!(!progress.is_empty());
     assert!(progress.iter().all(|f| f.contains(r#""frame":"progress""#)));
+    let removed = ok_payload(call(&d, ControlRequest::PackageUninstall(UninstallPackageRequest { kind: "redis".into(), ..Default::default() }), cli()).await.0);
+    assert_eq!((removed["kind"].as_str(), removed["version"].as_str()), (Some("redis"), Some("5.0.14.1")));
+    let in_use = call(&d, ControlRequest::PackageUninstall(UninstallPackageRequest { kind: "php".into(), version: Some("8.3.14".into()), ..Default::default() }), cli()).await.0;
+    assert_eq!(error_code(in_use), ErrorCode::Conflict);
 
     let status = ok_payload(call(&d, ControlRequest::Status, cli()).await.0);
     assert_eq!(status["worktreeCount"], 1);

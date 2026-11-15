@@ -42,6 +42,12 @@ pub trait PackageReader: Send + Sync {
     fn installed(&self) -> AppResult<Vec<InstalledPackageDto>>;
 }
 
+/// Bundled extensions of an installed PHP build (`package extensions`), file-based.
+pub trait PhpExtensionReader: Send + Sync {
+    /// `php`: explicit minor, else the resolved site's PHP.
+    fn list(&self, request: &ResolveRequestDto, php: Option<&str>) -> AppResult<PhpExtensionListDto>;
+}
+
 pub trait ToolchainReader: Send + Sync {
     fn env(&self, request: &ResolveRequestDto) -> AppResult<ToolchainEnvDto>;
     fn exec_plan(&self, request: &ResolveRequestDto, command: &[String]) -> AppResult<ExecPlanDto>;

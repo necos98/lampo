@@ -71,6 +71,14 @@ pub fn detection_json(folder: &str) -> Value {
     })
 }
 
+/// Bundled extensions of `php`, flagged for `shop` (which enables `intl`).
+pub fn extensions_json(php: &str) -> Value {
+    json!({
+        "phpVersion": php, "projectId": "shop",
+        "extensions": [{"name": "intl", "zend": false, "enabled": true}, {"name": "opcache", "zend": true, "enabled": false}, {"name": "pdo_mysql", "zend": false, "enabled": false}]
+    })
+}
+
 /// Every port in one struct. Public fields are the knobs; `Mutex`es hold recorded calls.
 pub struct Fake {
     pub site: Mutex<AppResult<ResolvedSiteDto>>,
@@ -96,6 +104,10 @@ pub struct Fake {
     /// Replaces the canned detection (`None`: [`detection_json`] for the requested folder).
     pub detect_result: Mutex<Option<AppResult<Value>>>,
     pub detect_folders: Mutex<Vec<String>>,
+    /// Replaces the canned extension list (`None`: [`extensions_json`] for the requested PHP).
+    pub extensions_result: Mutex<Option<AppResult<Value>>>,
+    /// The `php` argument of every extension listing.
+    pub extensions_php: Mutex<Vec<Option<String>>>,
 }
 
 impl Fake {
@@ -123,6 +135,8 @@ impl Fake {
             agent_requests: Mutex::new(Vec::new()),
             detect_result: Mutex::new(None),
             detect_folders: Mutex::new(Vec::new()),
+            extensions_result: Mutex::new(None),
+            extensions_php: Mutex::new(Vec::new()),
         })
     }
 
@@ -148,6 +162,7 @@ impl Fake {
             worktrees: self.clone(),
             logs: self.clone(),
             packages: self.clone(),
+            php_extensions: self.clone(),
             toolchain: self.clone(),
             doctor: self.clone(),
             agent: self.clone(),
@@ -215,6 +230,16 @@ impl PackageReader for Fake {
     }
     fn installed(&self) -> AppResult<Vec<InstalledPackageDto>> {
         Ok(vec![dto(json!({"id": {"kind": "php", "version": "8.3.12", "phpVersion": null}, "path": "C:\\p", "usedBy": ["shop"]}))])
+    }
+}
+
+impl PhpExtensionReader for Fake {
+    fn list(&self, _: &ResolveRequestDto, php: Option<&str>) -> AppResult<PhpExtensionListDto> {
+        self.extensions_php.lock().unwrap().push(php.map(str::to_string));
+        match self.extensions_result.lock().unwrap().clone() {
+            Some(result) => result.map(dto),
+            None => Ok(dto(extensions_json(php.unwrap_or("8.3")))),
+        }
     }
 }
 

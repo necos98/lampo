@@ -80,6 +80,8 @@ pub enum ControlRequest {
     ApplyEnvironment,
     /// → [`InstalledPackageDto`] (progress frames while downloading)
     PackageInstall(InstallPackageRequest),
+    /// The one installed build matching the request (`lampo package uninstall`). → [`PackageIdDto`]
+    PackageUninstall(UninstallPackageRequest),
     /// → [`DatabaseListDto`]
     DbList(DatabaseListRequest),
     /// → `string` (database name)
@@ -143,6 +145,7 @@ pub struct ControlServices {
     pub service_control: Arc<ServiceControl>,
     pub environment: Arc<dyn EnvironmentSync>,
     pub install_package: Arc<InstallPackage>,
+    pub uninstall_package: Arc<UninstallPackage>,
     pub database: Arc<DatabaseService>,
     pub worktree_up: Arc<WorktreeUp>,
     pub worktree_down: Arc<WorktreeDown>,
@@ -190,6 +193,7 @@ impl ControlDispatcher {
             ControlRequest::ServicesRestart(r) => to_json(s.service_control.restart(r).await?),
             ControlRequest::ApplyEnvironment => to_json(s.environment.sync(ctx).await?),
             ControlRequest::PackageInstall(r) => to_json(s.install_package.execute(r, ctx, progress, cancel).await?),
+            ControlRequest::PackageUninstall(r) => to_json(s.uninstall_package.execute_matching(r)?),
             ControlRequest::DbList(r) => to_json(s.database.list(&r).await?),
             ControlRequest::DbCreate(r) => to_json(s.database.create(&r).await?),
             ControlRequest::DbDrop(r) => to_json(s.database.drop_database(&r).await?),
@@ -346,6 +350,18 @@ mod tests {
         let ControlRequest::ProjectPatch(p) = &minimal else { panic!("wrong variant") };
         assert_eq!(p.addons_remove, ["xdebug"]);
         assert!(p.extensions_add.is_empty() && p.database_name.is_none() && !p.is_empty());
+        assert!(minimal.is_mutating());
+    }
+
+    #[test]
+    fn package_uninstall_wire_format() {
+        let request = ControlRequest::PackageUninstall(UninstallPackageRequest { kind: "xdebug".into(), series: Some("3.3".into()), php_version: Some("8.3".into()), ..Default::default() });
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["type"], "package-uninstall");
+        assert_eq!((json["params"]["series"].as_str(), json["params"]["phpVersion"].as_str()), (Some("3.3"), Some("8.3")));
+        assert_eq!(serde_json::from_value::<ControlRequest>(json).unwrap(), request);
+        let minimal: ControlRequest = serde_json::from_str(r#"{"type":"package-uninstall","params":{"kind":"redis"}}"#).unwrap();
+        assert!(matches!(&minimal, ControlRequest::PackageUninstall(r) if r.kind == "redis" && r.version.is_none()));
         assert!(minimal.is_mutating());
     }
 

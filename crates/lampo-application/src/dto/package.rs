@@ -61,6 +61,18 @@ pub struct InstallPackageRequest {
     pub php_version: Option<String>,
 }
 
+/// Uninstall the one installed package matching these (`lampo package uninstall`). Same fields
+/// as [`InstallPackageRequest`]: an exact `version`, else a `series` (`"8.3"`), else any build
+/// of `kind`; `phpVersion` narrows add-ons to the builds for that PHP minor.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct UninstallPackageRequest {
+    pub kind: String,
+    pub version: Option<String>,
+    pub series: Option<String>,
+    pub php_version: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAvailableDto {
@@ -79,6 +91,30 @@ pub struct PhpExtensionDto {
     pub name: String,
     /// Loaded with `zend_extension` (`opcache`).
     pub zend: bool,
+}
+
+/// `lampo package extensions`: the bundled extensions of one installed PHP minor, i.e. what
+/// `lampo project set --ext` accepts for a project on that minor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhpExtensionListDto {
+    /// PHP minor listed (`"8.3"`).
+    pub php_version: String,
+    /// The project whose `enabled` flags are shown: the resolved site's project when it uses
+    /// this PHP minor, else `null` (and every `enabled` is `null`).
+    pub project_id: Option<String>,
+    pub extensions: Vec<PhpExtensionStateDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PhpExtensionStateDto {
+    /// As written in a project's extension list and accepted by `project set --ext`.
+    pub name: String,
+    /// Loaded with `zend_extension` (`opcache`).
+    pub zend: bool,
+    /// Enabled in the environment of [`PhpExtensionListDto::project_id`]; `null` without one.
+    pub enabled: Option<bool>,
 }
 
 /// Returned by commands that start a background task; progress arrives as events.

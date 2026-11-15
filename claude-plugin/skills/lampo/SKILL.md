@@ -87,7 +87,7 @@ Shims return the tool's own exit code, or 127 when they cannot resolve a PHP or 
 You MAY, without asking:
 
 - run any read-only `lampo` command (`agent context`, `status`, `project list`, `project info`,
-  `project detect`, `worktree list`, `logs`, `doctor`, `env`, `package list`, `db list`, `db export`, `shims status`);
+  `project detect`, `worktree list`, `logs`, `doctor`, `env`, `package list`, `package extensions`, `db list`, `db export`, `shims status`);
 - start or restart services: `lampo up`, `lampo restart`;
 - create databases (`lampo db create`) and worktree environments (`lampo worktree up` with any
   `--db` mode);
@@ -109,7 +109,8 @@ You MUST ASK the user first, and wait for a clear yes, before:
 - removing worktree environments that own a database (`lampo worktree down --drop-database`,
   `lampo worktree prune --drop-databases`, or `lampo worktree down` of an environment whose
   database the user may still want);
-- uninstalling packages (in the Lampo app, page "Pacchetti", there is no CLI command).
+- uninstalling packages (`lampo package uninstall <kind> <version> --yes`; it refuses a build
+  still in use, exit 5, and never touches projects or databases).
 
 Also: `lampo down` and `lampo quit` stop services for every project, not just this one: only
 when the user asks or the task really needs it, and say so. Never stop or uninstall software
@@ -130,7 +131,7 @@ that is not Lampo (Laragon, XAMPP, Docker, IIS) without the user's explicit appr
   `lampo project set --help`). Only what you name changes; worktree environments follow the
   parent. Still only in the Lampo app (GUI in Italian): display name and addresses of a
   project ("Progetti" > project), ports and MySQL instances ("Impostazioni"), deleting
-  projects, uninstalling packages.
+  projects.
 
 ## 6. Load the specialised skill
 

@@ -280,6 +280,33 @@ pub fn installed_one(entry: &InstalledPackageDto) -> String {
     format!("Installed {} {}{php} at {}", entry.id.kind, entry.id.version, entry.path)
 }
 
+pub fn uninstalled(id: &PackageIdDto) -> String {
+    let php = id.php_version.as_ref().map(|p| format!(" for PHP {p}")).unwrap_or_default();
+    format!("Uninstalled {} {}{php}", id.kind, id.version)
+}
+
+/// `package extensions`: one line per extension, with the project's state when known.
+pub fn php_extensions(list: &PhpExtensionListDto) -> String {
+    let mut out = match &list.project_id {
+        Some(id) => format!("PHP {} bundled extensions ([x] = enabled in `{id}`):\n", list.php_version),
+        None => format!("PHP {} bundled extensions:\n", list.php_version),
+    };
+    for e in &list.extensions {
+        let mark = match e.enabled {
+            Some(true) => "[x] ",
+            Some(false) => "[ ] ",
+            None => "",
+        };
+        let zend = if e.zend { "  (zend_extension)" } else { "" };
+        out.push_str(&format!("  {mark}{}{zend}\n", e.name));
+    }
+    if list.extensions.is_empty() {
+        out.push_str("  (none found in the build's ext folder)\n");
+    }
+    out.push_str("Enable with `lampo project set --ext <name>`; add-ons (xdebug, php-redis): `lampo package list --installed`.");
+    out
+}
+
 pub fn databases(list: &DatabaseListDto) -> String {
     let mut out = format!("mysql {} at {}:{} (user {})\n", list.mysql_version, list.host, list.port, list.user);
     for name in &list.databases {

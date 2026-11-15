@@ -46,7 +46,7 @@ pub use diagnostics::{
 pub use environment::{ApplyEnvironment, ApplyEnvironmentDeps, EnvironmentSync, GeneratedFilesWriter};
 pub use lifecycle::{FirstRunDeps, FirstRunSetup, Shutdown, ShutdownGate, Startup};
 pub use logs::LogQueries;
-pub use packages::{InstallPackage, InstallPackageDeps, PackageCatalog, PackageCatalogDeps, PhpExtensionsQuery, UninstallPackage, UninstallPackageDeps};
+pub use packages::{InstallPackage, InstallPackageDeps, PackageCatalog, PackageCatalogDeps, PhpExtensionListing, PhpExtensionsQuery, UninstallPackage, UninstallPackageDeps};
 pub use presets::{DeletePreset, PresetQueries, SavePreset};
 pub use project_patch::PatchProjectEnvironment;
 pub use projects::{

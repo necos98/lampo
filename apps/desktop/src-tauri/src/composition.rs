@@ -148,6 +148,16 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         env: env.clone(),
         events: events.clone(),
     }));
+    // The GUI "Pacchetti" page and `lampo package uninstall` (via the control pipe).
+    let uninstall_package = Arc::new(UninstallPackage::new(UninstallPackageDeps {
+        installed: installed.clone(),
+        projects: projects.clone(),
+        worktrees: worktrees.clone(),
+        settings: settings.clone(),
+        events: events.clone(),
+        files: environment.clone(),
+        services: service_catalog.clone(),
+    }));
     let worktree_queries = Arc::new(WorktreeQueries::new(worktrees.clone(), projects.clone(), settings.clone(), fs.clone()));
     let worktree_databases = Arc::new(WorktreeDatabases::new(projects.clone(), settings.clone(), installed.clone(), db_admin.clone(), service_control.clone()));
     let status = Arc::new(StatusQuery::new(project_queries.clone(), service_queries.clone(), Arc::new(|| true)));
@@ -209,6 +219,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         service_control: service_control.clone(),
         environment: env.clone(),
         install_package: install_package.clone(),
+        uninstall_package: uninstall_package.clone(),
         // Database administration is CLI-only (via the control pipe) for now.
         database,
         worktree_up: worktree_up.clone(),
@@ -249,15 +260,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         })),
         php_extensions,
         install_package: install_package.clone(),
-        uninstall_package: Arc::new(UninstallPackage::new(UninstallPackageDeps {
-            installed: installed.clone(),
-            projects: projects.clone(),
-            worktrees: worktrees.clone(),
-            settings: settings.clone(),
-            events: events.clone(),
-            files: environment.clone(),
-            services: service_catalog.clone(),
-        })),
+        uninstall_package,
         first_run: Arc::new(FirstRunSetup::new(FirstRunDeps {
             settings: settings.clone(),
             sources,

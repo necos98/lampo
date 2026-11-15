@@ -54,6 +54,12 @@ pub fn build() -> AppResult<CliContext> {
 
     let resolver = Arc::new(SiteResolver::new(index, ResolverChain::standard(git.clone())));
     let projects = Arc::new(ProjectQueries::new(projects_repo.clone(), worktrees_repo.clone(), settings_repo.clone(), fs.clone()));
+    // `package extensions`: the same `ext` folder scan as the app's project editor.
+    let php_extensions = Arc::new(PhpExtensionListing::new(
+        resolver.clone(),
+        projects_repo.clone(),
+        Arc::new(PhpExtensionsQuery::new(installed.clone(), Arc::new(lampo_infra_packages::FsPhpExtensionScanner))),
+    ));
     let app = Arc::new(ControlClient::new(channel.clone(), launcher, Arc::new(store::SystemClock), Arc::new(TokioTimer)));
     let running_channel = channel.clone();
     let shim_dir = paths.shim_dir();
@@ -109,6 +115,7 @@ pub fn build() -> AppResult<CliContext> {
             settings: settings_repo.clone(),
             services: services.clone(),
         })),
+        php_extensions,
         offline_status: Arc::new(StatusQuery::new(projects, Arc::new(OfflineServiceStatus::new(services, settings_repo)), Arc::new(move || running_channel.is_server_running()))),
         app,
         runner: Arc::new(SystemRunner),

@@ -425,6 +425,50 @@ pub enum PackageCommand {
         #[arg(long)]
         php: Option<String>,
     },
+    /// Uninstall `<kind> [<version|series>]`, e.g. `php 8.2`, `mysql 5.7`, `xdebug --php 8.3`. Requires `--yes`
+    ///
+    /// Same syntax as `install`: `8.2` is a series, `8.2.27` an exact version, `--php` picks the
+    /// add-on build for that PHP minor. Exactly one installed build must match (several: exit 4
+    /// with `details.candidates`; none: exit 3). Refused while it is the last build something
+    /// uses: a project or worktree environment (PHP minor, add-on, MySQL series), the default
+    /// PHP or an always-on MySQL (exit 5, `details.usedBy`); a running service whose files are
+    /// locked fails without changing anything. Projects and databases are never touched.
+    /// Prints the removed package (`--json`: its id).
+    ///
+    /// Examples:
+    ///   lampo package uninstall php 8.2 --yes
+    ///   lampo package uninstall xdebug --php 8.3 --yes
+    ///   lampo package uninstall mysql 5.7.44 --yes --json
+    #[command(verbatim_doc_comment)]
+    Uninstall {
+        /// Package kind.
+        kind: String,
+        /// Series (`8.3`) or exact version (`8.3.12`); default: the only installed build.
+        #[arg(value_name = "VERSION")]
+        package_version: Option<String>,
+        /// For add-on extensions: the PHP minor they are built for.
+        #[arg(long)]
+        php: Option<String>,
+        /// Confirm the removal (lampo never prompts).
+        #[arg(long)]
+        yes: bool,
+    },
+    /// List the bundled extensions of a PHP build: what `lampo project set --ext` accepts
+    ///
+    /// Default PHP: the resolved project's minor (worktree environments follow their project),
+    /// else the global default PHP. Read-only, no app needed. With a resolved project on the
+    /// same minor, each extension shows whether the project enables it. Add-ons (`xdebug`,
+    /// `php-redis`) are packages, not listed here: see `lampo package list --installed`.
+    ///
+    /// Examples:
+    ///   lampo package extensions
+    ///   lampo package extensions --php 8.4 --json
+    #[command(verbatim_doc_comment)]
+    Extensions {
+        /// PHP minor to list (`8.3`); must be installed (exit 10 otherwise).
+        #[arg(long)]
+        php: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]

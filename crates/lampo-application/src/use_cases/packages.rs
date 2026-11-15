@@ -15,6 +15,7 @@ use lampo_domain::version::{PackageVersion, VersionSeries};
 
 use super::environment::{EnvironmentSync, GeneratedFilesWriter};
 use super::requirements::{requirements, used_by};
+use super::resolution::SiteResolver;
 use super::service_catalog::ServiceCatalog;
 use crate::context::CallContext;
 use crate::dto::*;
@@ -189,6 +190,56 @@ impl PhpExtensionsQuery {
         let php = PhpMinor::parse(php_version.trim())?;
         let dir = super::support::php_dir(&self.installed.list()?, php).ok_or_else(|| super::support::package_missing(format!("PHP {php}")))?;
         Ok(self.scanner.bundled_extensions(&dir)?.into_iter().map(|name| PhpExtensionDto { zend: lampo_domain::web::is_zend_extension(&name), name: name.to_string() }).collect())
+    }
+}
+
+/// `lampo package extensions`: [`PhpExtensionsQuery`] for the resolved site's PHP minor (or an
+/// explicit one), each extension flagged as enabled or not in the resolved project.
+/// Read-only and file-based (the CLI runs it without the app).
+pub struct PhpExtensionListing {
+    resolver: Arc<SiteResolver>,
+    projects: Arc<dyn ProjectRepository>,
+    extensions: Arc<PhpExtensionsQuery>,
+}
+
+impl PhpExtensionListing {
+    pub fn new(resolver: Arc<SiteResolver>, projects: Arc<dyn ProjectRepository>, extensions: Arc<PhpExtensionsQuery>) -> Self {
+        Self { resolver, projects, extensions }
+    }
+
+    /// Without `php_version`: the PHP minor of the resolved site's project (worktree
+    /// environments follow their project), else the global default PHP; `ProjectNotResolved`
+    /// when neither exists. With it, resolution only decides the `enabled` flags and never fails
+    /// the call. `PackageMissing` if the minor is not installed, `Validation` if malformed.
+    pub fn execute(&self, request: &ResolveRequestDto, php_version: Option<&str>) -> AppResult<PhpExtensionListDto> {
+        let explicit = php_version.map(|raw| PhpMinor::parse(raw.trim())).transpose()?;
+        let resolution = match explicit {
+            Some(_) => self.resolver.resolve(request).unwrap_or_else(|e| {
+                tracing::debug!("site resolution for `package extensions` failed: {}", e.message);
+                None
+            }),
+            None => Some(self.resolver.resolve(request)?.ok_or_else(|| {
+                AppError::new(
+                    ErrorCode::ProjectNotResolved,
+                    format!("no project for `{}` and no default PHP: pass --php <minor> (installed minors: `lampo package list --kind php --installed`)", request.cwd),
+                )
+            })?),
+        };
+        let project = match resolution.as_ref().and_then(|r| r.site.as_ref()) {
+            Some(site) => self.projects.get(site.project())?,
+            None => None,
+        };
+        // Without an explicit minor, `resolution` is always `Some`.
+        let php = explicit.or(project.as_ref().map(|p| p.environment.php)).or(resolution.as_ref().map(|r| r.target.php)).ok_or_else(|| AppError::internal("no PHP minor to list"))?;
+        // Flags only make sense for the project's own PHP build.
+        let project = project.filter(|p| p.environment.php == php);
+        let extensions = self
+            .extensions
+            .list(&php.to_string())?
+            .into_iter()
+            .map(|e| PhpExtensionStateDto { enabled: project.as_ref().map(|p| p.environment.extensions.iter().any(|enabled| enabled.to_string() == e.name)), name: e.name, zend: e.zend })
+            .collect();
+        Ok(PhpExtensionListDto { php_version: php.to_string(), project_id: project.map(|p| p.id.to_string()), extensions })
     }
 }
 
@@ -404,5 +455,50 @@ impl UninstallPackage {
         self.installed.remove(&id)?;
         self.events.publish(DomainEvent::PackagesChanged);
         self.files.write_generated_files()
+    }
+
+    /// `lampo package uninstall`: the one installed build matching `request` (exact version,
+    /// else series, else any; `phpVersion` narrows add-ons), removed with [`Self::execute`]'s
+    /// rules. Returns its id. `NotFound` if nothing installed matches; `Validation` if several
+    /// builds do (`details.candidates`, newest last). The in-use `Conflict` names what to change.
+    pub fn execute_matching(&self, request: UninstallPackageRequest) -> AppResult<PackageIdDto> {
+        let kind = PackageKind::new(request.kind.trim())?;
+        let php = request.php_version.as_deref().map(|p| PhpMinor::parse(p.trim())).transpose()?;
+        let version = request.version.as_deref().map(|v| PackageVersion::parse(v.trim())).transpose()?;
+        let series = request.series.as_deref().map(|s| parse_series(s.trim())).transpose()?;
+        let mut matching: Vec<PackageId> = self
+            .installed
+            .list()?
+            .into_iter()
+            .map(|p| p.id)
+            .filter(|id| id.kind == kind && php.is_none_or(|php| id.php == Some(php)) && version.as_ref().is_none_or(|v| &id.version == v) && series.is_none_or(|s| id.series() == s))
+            .collect();
+        matching.sort();
+        let wanted = [Some(kind.to_string()), request.version.clone().or(request.series.clone()), php.map(|p| format!("for PHP {p}"))].into_iter().flatten().collect::<Vec<_>>().join(" ");
+        match matching.as_slice() {
+            [] => Err(AppError::new(ErrorCode::NotFound, format!("no installed package matches `{wanted}` (see `lampo package list --installed`)"))),
+            [id] => {
+                let dto = package_id_to_dto(id);
+                self.execute(dto.clone()).map_err(|e| match e.code {
+                    ErrorCode::Conflict => AppError {
+                        message: format!(
+                            "{}: move those sites to another build first (`lampo project set-php`, `lampo project set --no-addon/--no-service`) or keep it; `system` is the default PHP or an always-on MySQL, changed in the Lampo settings",
+                            e.message
+                        ),
+                        ..e
+                    },
+                    _ => e,
+                })?;
+                Ok(dto)
+            }
+            many => {
+                let names: Vec<String> = many.iter().map(ToString::to_string).collect();
+                Err(AppError::new(
+                    ErrorCode::Validation,
+                    format!("{} installed packages match `{wanted}` ({}): name the exact version (and --php for add-ons)", many.len(), names.join(", ")),
+                )
+                .with_details(serde_json::json!({ "candidates": many.iter().map(package_id_to_dto).collect::<Vec<_>>() })))
+            }
+        }
     }
 }
