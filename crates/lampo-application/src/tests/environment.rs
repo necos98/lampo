@@ -158,6 +158,38 @@ async fn a_globally_rejected_config_keeps_apache_untouched_but_applies_the_rest(
 }
 
 #[tokio::test]
+async fn a_rejected_config_is_not_revalidated_while_unchanged() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", true);
+    w.hosts_in_sync();
+    w.web.reject_all.store(true, Ordering::SeqCst);
+    assert_eq!(w.env.sync(&gui()).await.unwrap_err().code, ErrorCode::ConfigRejected);
+
+    let attempts = w.web.attempts.load(Ordering::SeqCst);
+    assert_eq!(w.env.sync(&gui()).await.unwrap_err().code, ErrorCode::ConfigRejected, "still reported");
+    assert_eq!(w.web.attempts.load(Ordering::SeqCst), attempts, "`httpd -t` is not run again");
+    assert_eq!(w.apache.calls(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn a_transient_apply_failure_is_retried_on_the_next_sync() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", true);
+    w.hosts_in_sync();
+    w.web.fail_io.store(true, Ordering::SeqCst);
+    let err = w.env.sync(&gui()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Io);
+    assert_eq!(w.apache.calls(), Vec::<String>::new(), "Apache does not start on an unapplied config");
+
+    // Same configuration, the file is no longer locked: applied and Apache starts.
+    w.web.fail_io.store(false, Ordering::SeqCst);
+    let report = w.env.sync(&gui()).await.unwrap();
+    assert_eq!(report.started, ["apache"]);
+    assert_eq!(w.web.last().unwrap().vhosts.len(), 1);
+    assert_eq!(w.apache.state(&ServiceId::apache()), ServiceState::Running);
+}
+
+#[tokio::test]
 async fn hosts_changes_need_elevation_and_are_never_triggered_implicitly() {
     let w = World::with_basics();
     w.project("shop", "C:\\sites\\shop", true);

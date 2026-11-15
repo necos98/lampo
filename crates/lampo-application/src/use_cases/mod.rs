@@ -34,6 +34,7 @@ pub mod settings_patch;
 pub mod shims;
 pub mod status;
 pub(crate) mod support;
+pub(crate) mod web_state;
 pub mod worktrees;
 
 pub use agent::{AgentContextDeps, AgentContextQuery, ToolchainQuery};

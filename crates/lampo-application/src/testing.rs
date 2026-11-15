@@ -314,12 +314,15 @@ impl Clock for FixedClock {
 // ---------------------------------------------------------------------------------------------
 
 /// Rejects any configuration containing a vhost whose directives mention `Broken`, or every
-/// configuration when `reject_all` is set. Records what was applied (validated + swapped).
+/// configuration when `reject_all` is set; fails without validating anything (a file locked by
+/// an antivirus, `httpd -t` not starting) when `fail_io` is set. Records what was applied
+/// (validated + swapped).
 #[derive(Default)]
 pub struct FakeWeb {
     pub applied: Mutex<Vec<WebServerConfig>>,
     pub attempts: AtomicUsize,
     pub reject_all: AtomicBool,
+    pub fail_io: AtomicBool,
 }
 impl FakeWeb {
     pub fn last(&self) -> Option<WebServerConfig> {
@@ -330,6 +333,9 @@ impl FakeWeb {
 impl WebServerConfigurator for FakeWeb {
     async fn apply(&self, config: &WebServerConfig) -> PortResult<()> {
         self.attempts.fetch_add(1, Ordering::SeqCst);
+        if self.fail_io.load(Ordering::SeqCst) {
+            return Err(PortError::io("swapping httpd.conf", "the file is locked by another process"));
+        }
         if self.reject_all.load(Ordering::SeqCst) {
             return Err(PortError::ConfigRejected { output: "Syntax error in httpd.conf".into() });
         }

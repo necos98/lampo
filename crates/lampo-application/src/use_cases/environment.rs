@@ -16,6 +16,7 @@ use lampo_domain::PortError;
 
 use super::generation::{ConfigSnapshot, php_ini_specs, runner_for, shim_index, web_config};
 use super::service_catalog::ServiceCatalog;
+use super::web_state::{WebOutcome, WebState};
 use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::SyncReportDto;
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -52,17 +53,6 @@ pub struct ApplyEnvironmentDeps {
     pub port_probe: Arc<dyn PortProbe>,
     pub paths: LampoPaths,
     pub events: Arc<dyn EventPublisher>,
-}
-
-/// What the last Apache apply produced, so an unchanged configuration is not re-validated and a
-/// still-broken site keeps being reported.
-#[derive(Clone)]
-struct WebState {
-    desired: WebServerConfig,
-    ini: Vec<PhpIniSpec>,
-    /// Apache must not be (re)started: the configuration on disk is not trustworthy.
-    blocked: bool,
-    rejection: Option<AppError>,
 }
 
 #[derive(Default)]
@@ -111,7 +101,9 @@ impl Outcome {
 /// 3. build `WebServerConfig` (vhosts for active projects + all worktree environments) and
 ///    `apply` it (staged + `httpd -t`). If Apache rejects it, every vhost is validated on its
 ///    own, the broken ones are left out and the rest is applied, so one broken project never
-///    takes the others down; the rejection is still returned at the end;
+///    takes the others down; the rejection is still returned at the end. An unchanged rejected
+///    configuration is not validated again, an apply that failed for another reason (I/O, the
+///    validator not starting) is retried on every sync;
 /// 4. hosts block: compute `HostsBlock::for_projects`; if different from `read_block`, write it —
 ///    only when `ctx.elevation == Allow`, otherwise remember the failure and continue;
 /// 5. `plan_services`: stop unneeded services, start missing ones (port check first), restart
@@ -162,12 +154,15 @@ impl ApplyEnvironment {
     /// existed) are left out up front; on an Apache rejection the broken vhosts are isolated.
     /// The rest is applied.
     async fn apply_web(&self, desired: &WebServerConfig, ini: &[PhpIniSpec]) -> WebState {
-        let state = |blocked, rejection| WebState { desired: desired.clone(), ini: ini.to_vec(), blocked, rejection };
+        WebState { desired: desired.clone(), ini: ini.to_vec(), outcome: self.web_outcome(desired).await }
+    }
+
+    async fn web_outcome(&self, desired: &WebServerConfig) -> WebOutcome {
         let (allowed, mut excluded) = leave_out_refused_directives(desired);
         let output = match self.deps.web_config.apply(&allowed).await {
-            Ok(()) => return state(false, exclusion_error(&excluded)),
+            Ok(()) => return WebOutcome::Applied { exclusion: exclusion_error(&excluded) },
             Err(PortError::ConfigRejected { output }) => output,
-            Err(e) => return state(true, Some(e.into())),
+            Err(e) => return WebOutcome::Failed(e.into()),
         };
         let refused = excluded.len();
         let mut good = allowed.clone();
@@ -178,17 +173,17 @@ impl ApplyEnvironment {
             match self.deps.web_config.apply(&probe).await {
                 Ok(()) => good.vhosts.push(vhost.clone()),
                 Err(PortError::ConfigRejected { output }) => excluded.push((vhost.site.to_string(), output)),
-                Err(e) => return state(true, Some(e.into())),
+                Err(e) => return WebOutcome::Failed(e.into()),
             }
         }
         if excluded.len() == refused {
             // Every vhost is fine alone: the problem is global or a combination.
-            return state(true, Some(AppError::from(PortError::ConfigRejected { output })));
+            return WebOutcome::Rejected(PortError::ConfigRejected { output }.into());
         }
-        if let Err(e) = self.deps.web_config.apply(&good).await {
-            return state(true, Some(e.into()));
+        match self.deps.web_config.apply(&good).await {
+            Ok(()) => WebOutcome::Applied { exclusion: exclusion_error(&excluded) },
+            Err(e) => WebOutcome::from_port_error(e),
         }
-        state(false, exclusion_error(&excluded))
     }
 
     async fn sync_hosts(&self, snap: &ConfigSnapshot, ctx: &CallContext, out: &mut Outcome) {
@@ -265,7 +260,7 @@ impl ApplyEnvironment {
                 continue;
             };
             let web = id.is_apache().then_some(state.web.as_ref()).flatten();
-            if id.is_apache() && web.is_none_or(|w| w.blocked) {
+            if id.is_apache() && web.is_none_or(|w| w.outcome.blocks_apache()) {
                 continue;
             }
             let running = matches!(runner.status(&id).state, ServiceState::Running | ServiceState::Starting);
@@ -361,13 +356,13 @@ impl EnvironmentSync for ApplyEnvironment {
         let mut web_changed = false;
         match web_config(&snap, &self.deps.paths, &mut out.report.warnings) {
             Some(desired) => {
-                let unchanged = state.web.as_ref().is_some_and(|w| w.desired == desired && w.ini == ini);
-                if !unchanged {
+                let current = state.web.as_ref().is_some_and(|w| w.is_current(&desired, &ini));
+                if !current {
                     state.web = Some(self.apply_web(&desired, &ini).await);
                     web_changed = true;
                 }
-                if let Some(rejection) = state.web.as_ref().and_then(|w| w.rejection.clone()) {
-                    out.fail(rejection);
+                if let Some(error) = state.web.as_ref().and_then(|w| w.outcome.error()) {
+                    out.fail(error.clone());
                 }
             }
             None => state.web = None,
