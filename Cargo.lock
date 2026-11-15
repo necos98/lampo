@@ -2114,7 +2114,7 @@ dependencies = [
 
 [[package]]
 name = "lampo-application"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "lampo-domain",
@@ -2128,7 +2128,7 @@ dependencies = [
 
 [[package]]
 name = "lampo-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "clap",
@@ -2146,7 +2146,7 @@ dependencies = [
 
 [[package]]
 name = "lampo-desktop"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "lampo-application",
  "lampo-domain",
@@ -2171,7 +2171,7 @@ dependencies = [
 
 [[package]]
 name = "lampo-domain"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "serde",
@@ -2181,7 +2181,7 @@ dependencies = [
 
 [[package]]
 name = "lampo-infra-packages"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -2201,7 +2201,7 @@ dependencies = [
 
 [[package]]
 name = "lampo-infra-services"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "flate2",
@@ -2217,7 +2217,7 @@ dependencies = [
 
 [[package]]
 name = "lampo-infra-store"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "dirs",
  "lampo-domain",
@@ -2232,7 +2232,7 @@ dependencies = [
 
 [[package]]
 name = "lampo-infra-web"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "lampo-domain",
