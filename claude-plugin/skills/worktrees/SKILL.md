@@ -19,6 +19,11 @@ with the **parent's URL and database** (`resolution.kind` is `worktree-without-e
 `hints` says so). Two agents migrating the same database will collide: give each worktree its
 own environment before running migrations or tests.
 
+The same goes for the `mysql`/`mysqldump` shims: they use the database of the resolved site.
+Inside a worktree environment with a `fresh` or `clone:` database, `mysql -e "SHOW TABLES"`
+runs on that database; with `shared` (or without an environment), on the parent's. Check with
+`mysql -N -e "SELECT DATABASE()"` before writing data.
+
 ## Create one (allowed without asking)
 
 1. Create the git worktree, if it does not exist yet (Lampo does not create it):

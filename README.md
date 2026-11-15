@@ -27,7 +27,8 @@ Windows. Include la CLI `lampo`, pensata anche per i coding agent.
 - **Integrazione con Claude Code**, facoltativa: a ogni sessione dentro un progetto Lampo Claude
   riceve URL, PHP, database e servizi del progetto, più le skill `lampo:…` per usare la CLI.
 - **Shim `.exe`** per `php`, `composer`, `mysql`, `mysqldump` e `redis-cli`, che scelgono da soli
-  la versione giusta per la cartella corrente, installati nel PATH insieme alla CLI `lampo`.
+  la versione giusta per la cartella corrente, installati nel PATH insieme alla CLI `lampo`;
+  `mysql` e `mysqldump` usano già istanza e database del progetto (`mysql -e "SHOW TABLES"`).
 - **Apri il progetto** in Esplora risorse, in VS Code o in un terminale con il PHP del progetto nel
   PATH.
 - **Log** di servizi e siti nell'app e **diagnostica** (`doctor`: runtime Visual C++, porte, PATH,

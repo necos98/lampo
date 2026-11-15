@@ -181,3 +181,41 @@ fn startup_overhead_is_small() {
     // Generous bound: debug build on a busy machine. The measured figure is printed above.
     assert!(shimmed.saturating_sub(plain) < std::time::Duration::from_millis(250));
 }
+
+#[test]
+fn mysql_gets_the_sites_instance_and_database_and_forwards_stdin_and_exit_code() {
+    use lampo_domain::service::ServiceKind;
+    use lampo_domain::shim::ShimService;
+    let sb = Sandbox::new(false);
+    std::fs::copy(argecho(), sb.php_dir.join("mysql.exe")).unwrap();
+    let mysql = ShimService {
+        service: "mysql-8.4".parse().unwrap(),
+        client_dir: sb.php_dir.clone(),
+        host: "127.0.0.1".into(),
+        port: 3307,
+        user: Some("root".into()),
+        database: Some("shop_feature".into()),
+        env_prefix: "DB".into(),
+    };
+    let mut target = target(&sb.php_dir);
+    target.services = [(ServiceKind::MYSQL, mysql)].into();
+    let entry = ShimEntry { site: "shop".parse().unwrap(), root: ProjectRoot::new(sb.project.to_str().unwrap()).unwrap(), target };
+    let index = ShimIndex { version: 2, default: None, projects: vec![entry] };
+    std::fs::write(sb.home.join("data").join("bin").join("shim-index.json"), serde_json::to_string(&index).unwrap()).unwrap();
+    let shim = sb.install_shim("mysql.exe");
+
+    let mut command = sb.command(&shim, &sb.project);
+    command.args(["-N", "-B", "-e", "SHOW TABLES"]).env("ARGECHO_EXIT", "1");
+    let (code, out, err) = run(command, b"SELECT 1;");
+    assert_eq!(code, 1, "the client's exit code is forwarded; stderr: {err}");
+    let echoed: Vec<String> = serde_json::from_str(out.trim()).unwrap();
+    let expected = ["--host=127.0.0.1", "--port=3307", "--user=root", "--default-character-set=utf8mb4", "--database=shop_feature", "-N", "-B", "-e", "SHOW TABLES"];
+    assert_eq!(echoed, expected);
+    assert!(err.contains("stdin=9"), "stdin reaches the client: {err}");
+
+    let mut command = sb.command(&shim, &sb.project);
+    command.args(["--database=", "-e", "SHOW DATABASES"]);
+    let (_, out, _) = run(command, b"");
+    let echoed: Vec<String> = serde_json::from_str(out.trim()).unwrap();
+    assert!(!echoed.iter().any(|a| a == "--database=shop_feature"), "an explicit (empty) database wins: {echoed:?}");
+}

@@ -13,7 +13,8 @@ Read the core rules in `lampo:lampo` first (autonomy, exit codes). Check the cur
 `php`, `composer`, `mysql`, `mysqldump` and `redis-cli` on PATH are small Lampo executables in
 `%LOCALAPPDATA%\Lampo\bin`. On every call they resolve the site from `LAMPO_PROJECT` or the
 current folder (see the core skill) and run that site's PHP with its own php.ini (`PHPRC`), its
-Composer, and its MySQL/Redis clients already pointed at the right port.
+Composer, and its MySQL/Redis clients already pointed at the right port (`mysql` also selects
+the site's database; agent usage in `lampo:database`).
 
 ```powershell
 php -v

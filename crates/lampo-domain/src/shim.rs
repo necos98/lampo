@@ -34,7 +34,8 @@ pub struct ShimService {
     pub port: u16,
     #[serde(default)]
     pub user: Option<String>,
-    /// The site's database/schema, informational (exported as `LAMPO_<prefix>_DATABASE`).
+    /// The site's database/schema: the `mysql`/`mysqldump` shims default to it, `lampo env` exports
+    /// it as `LAMPO_<prefix>_DATABASE`. `None` for the default target and sites without one.
     #[serde(default)]
     pub database: Option<String>,
     /// `DB` → `LAMPO_DB_HOST`, `LAMPO_DB_PORT`, … (from the kind's descriptor).
@@ -123,6 +124,8 @@ fn unavailable(tool: &str, reason: &str) -> DomainError {
     DomainError::ToolNotAvailable { tool: tool.to_string(), reason: reason.to_string() }
 }
 
+mod mysql_args;
+
 /// Built-in shim tools.
 pub mod tools {
     use super::*;
@@ -155,21 +158,60 @@ pub mod tools {
         target.services.get(kind).ok_or_else(|| unavailable(tool, &format!("no {kind} instance is configured and installed for this project")))
     }
 
-    /// `mysql` / `mysqldump`: the client of the target's MySQL instance, defaulting host/port/user
-    /// to that instance. User arguments come last, so explicit options win.
-    pub struct MysqlClient {
-        pub binary: &'static str,
+    /// Character set both MySQL clients default to. Without it the client autodetects it from the
+    /// Windows console code page (`cp850`…) even with piped output, so non-Latin-1 text comes back
+    /// as `?`; MySQL 5.7's `mysqldump` would default to 3-byte `utf8`.
+    pub const MYSQL_CLIENT_CHARSET: &str = "utf8mb4";
+
+    /// The real client of the target's MySQL instance with the instance's defaults:
+    /// `[option-file options the user put first] --host --port --user --default-character-set
+    /// [extra] <user args>`. Option-file options (`--no-defaults`, `--defaults-file=`, …) must stay
+    /// first for the client; everything else the user passes comes after the defaults, so explicit
+    /// options win.
+    fn mysql_client(m: &ShimService, binary: &str, args: &[String], extra: Option<String>) -> ShimInvocation {
+        let (leading, rest) = args.split_at(mysql_args::leading_only_count(args));
+        let mut a = leading.to_vec();
+        a.extend([format!("--host={}", m.host), format!("--port={}", m.port)]);
+        a.extend(m.user.iter().map(|u| format!("--user={u}")));
+        a.push(format!("--default-character-set={MYSQL_CLIENT_CHARSET}"));
+        a.extend(extra);
+        a.extend_from_slice(rest);
+        ShimInvocation { program: m.client_dir.join(format!("{binary}.exe")), args: a, env: Vec::new() }
     }
-    impl ShimTool for MysqlClient {
+
+    /// `mysql`: also selects the site's database unless the user chose one (a positional
+    /// database, `-D`, `--database`; `--database=` with no name means none). The default target
+    /// and sites without a database get none. The database goes with the defaults, before the
+    /// user's arguments: a positional database the parser missed still overrides it.
+    pub struct Mysql;
+    impl ShimTool for Mysql {
         fn name(&self) -> &'static str {
-            self.binary
+            "mysql"
         }
         fn invocation(&self, target: &ShimTarget, args: &[String]) -> Result<ShimInvocation, DomainError> {
-            let m = service(target, self.binary, &ServiceKind::MYSQL)?;
-            let mut a = vec![format!("--host={}", m.host), format!("--port={}", m.port)];
-            a.extend(m.user.iter().map(|u| format!("--user={u}")));
-            a.extend_from_slice(args);
-            Ok(ShimInvocation { program: m.client_dir.join(format!("{}.exe", self.binary)), args: a, env: Vec::new() })
+            let m = service(target, "mysql", &ServiceKind::MYSQL)?;
+            let parsed = mysql_args::parse(args, mysql_args::MYSQL_SHORT_WITH_VALUE);
+            let chosen = !parsed.positional.is_empty() || parsed.has_short('D') || parsed.has_long("database");
+            let database = m.database.as_ref().filter(|_| !chosen).map(|d| format!("--database={d}"));
+            Ok(mysql_client(m, "mysql", args, database))
+        }
+    }
+
+    /// `mysqldump`: dumps the site's database when the command names nothing to dump (no
+    /// positional argument, no `--all-databases`/`-A`, no `--databases`/`-B`), by appending it as
+    /// the positional argument; existing positional arguments are never reinterpreted.
+    pub struct Mysqldump;
+    impl ShimTool for Mysqldump {
+        fn name(&self) -> &'static str {
+            "mysqldump"
+        }
+        fn invocation(&self, target: &ShimTarget, args: &[String]) -> Result<ShimInvocation, DomainError> {
+            let m = service(target, "mysqldump", &ServiceKind::MYSQL)?;
+            let parsed = mysql_args::parse(args, mysql_args::MYSQLDUMP_SHORT_WITH_VALUE);
+            let names_something = !parsed.positional.is_empty() || parsed.has_short('A') || parsed.has_short('B') || parsed.has_long("all-databases") || parsed.has_long("databases");
+            let mut inv = mysql_client(m, "mysqldump", args, None);
+            inv.args.extend(m.database.iter().filter(|_| !names_something).cloned());
+            Ok(inv)
         }
     }
 
@@ -187,7 +229,7 @@ pub mod tools {
     }
 
     pub fn all() -> Vec<Arc<dyn ShimTool>> {
-        vec![Arc::new(Php), Arc::new(Composer), Arc::new(MysqlClient { binary: "mysql" }), Arc::new(MysqlClient { binary: "mysqldump" }), Arc::new(RedisCli)]
+        vec![Arc::new(Php), Arc::new(Composer), Arc::new(Mysql), Arc::new(Mysqldump), Arc::new(RedisCli)]
     }
 
     /// Picks the tool from the shim's own executable name (`C:\...\bin\PHP.EXE` → `php`).
@@ -298,13 +340,107 @@ pub(crate) mod tests {
         assert!(tools::Composer.invocation(&no_composer, &[]).is_err());
     }
 
+    const DEFAULTS: [&str; 4] = ["--host=127.0.0.1", "--port=3306", "--user=root", "--default-character-set=utf8mb4"];
+
+    fn mysql(t: &ShimTarget, user: &[&str]) -> Vec<String> {
+        tools::Mysql.invocation(t, &args(user)).unwrap().args
+    }
+
+    fn mysqldump(t: &ShimTarget, user: &[&str]) -> Vec<String> {
+        tools::Mysqldump.invocation(t, &args(user)).unwrap().args
+    }
+
+    /// The defaults, then `extra`, then the user's arguments.
+    fn expected(extra: &[&str], user: &[&str]) -> Vec<String> {
+        args(&[&DEFAULTS[..], extra, user].concat())
+    }
+
     #[test]
     fn mysql_defaults_come_before_user_args() {
         let t = target("8.3");
-        let inv = tools::MysqlClient { binary: "mysqldump" }.invocation(&t, &args(&["--port=3307", "shop"])).unwrap();
-        assert_eq!(inv.program, PathBuf::from("C:\\mysql\\bin").join("mysqldump.exe"));
-        assert_eq!(inv.args, args(&["--host=127.0.0.1", "--port=3306", "--user=root", "--port=3307", "shop"]));
+        let inv = tools::Mysqldump.invocation(&t, &args(&["--port=3307", "shop"])).unwrap();
+        assert_eq!(inv.program, PathBuf::from(r"C:\mysql\bin").join("mysqldump.exe"));
+        assert_eq!(inv.args, expected(&[], &["--port=3307", "shop"]));
+        assert_eq!(mysql(&t, &["--default-character-set=latin1"]), expected(&["--database=shop"], &["--default-character-set=latin1"]));
         assert!(tools::RedisCli.invocation(&t, &[]).is_err());
+    }
+
+    #[test]
+    fn mysql_selects_the_sites_database_by_default() {
+        let t = target("8.3");
+        assert_eq!(mysql(&t, &[]), expected(&["--database=shop"], &[]));
+        assert_eq!(mysql(&t, &["-e", "SHOW TABLES"]), expected(&["--database=shop"], &["-e", "SHOW TABLES"]));
+        assert_eq!(mysql(&t, &["-N", "-B", "-e", "SELECT 1"]), expected(&["--database=shop"], &["-N", "-B", "-e", "SELECT 1"]));
+        assert_eq!(mysql(&t, &["-NBe", "SELECT 1"]), expected(&["--database=shop"], &["-NBe", "SELECT 1"]));
+        assert_eq!(mysql(&t, &["--execute", "SELECT 1"]), expected(&["--database=shop"], &["--execute", "SELECT 1"]));
+        assert_eq!(mysql(&t, &["-u", "root", "-h", "localhost", "-P", "3307"]), expected(&["--database=shop"], &["-u", "root", "-h", "localhost", "-P", "3307"]));
+        assert_eq!(mysql(&t, &["-psecret", "-e", "SELECT 1"]), expected(&["--database=shop"], &["-psecret", "-e", "SELECT 1"]));
+        assert_eq!(mysql(&t, &["--password", "-e", "SELECT 1"]), expected(&["--database=shop"], &["--password", "-e", "SELECT 1"]));
+        assert_eq!(mysql(&t, &["--"]), expected(&["--database=shop"], &["--"]));
+    }
+
+    #[test]
+    fn mysql_keeps_the_database_the_user_chose() {
+        let t = target("8.3");
+        for user in [
+            &["blog"][..],
+            &["-e", "SELECT 1", "blog"],
+            &["-D", "blog"],
+            &["-Dblog"],
+            &["-NBDblog"],
+            &["--database=blog"],
+            &["--database", "blog"],
+            &["--loose_database=blog"],
+            &["-u", "root", "blog"],
+            &["-p", "blog"],
+            &["--", "blog"],
+        ] {
+            assert_eq!(mysql(&t, user), expected(&[], user), "{user:?}");
+        }
+    }
+
+    #[test]
+    fn mysql_opt_out_is_an_empty_or_other_database() {
+        let t = target("8.3");
+        assert_eq!(mysql(&t, &["--database=", "-e", "CREATE DATABASE x"]), expected(&[], &["--database=", "-e", "CREATE DATABASE x"]));
+        assert_eq!(mysql(&t, &["-D", "information_schema", "-e", "SHOW DATABASES"]), expected(&[], &["-D", "information_schema", "-e", "SHOW DATABASES"]));
+    }
+
+    #[test]
+    fn no_database_for_the_default_target_or_a_site_without_one() {
+        let mut t = target("8.3");
+        t.services.get_mut(&ServiceKind::MYSQL).unwrap().database = None;
+        assert_eq!(mysql(&t, &["-e", "SHOW DATABASES"]), expected(&[], &["-e", "SHOW DATABASES"]));
+        assert_eq!(mysqldump(&t, &[]), expected(&[], &[]));
+    }
+
+    #[test]
+    fn option_file_options_stay_first() {
+        let t = target("8.3");
+        let inv = mysql(&t, &["--no-defaults", "--defaults-extra-file=C:/my.ini", "-e", "SELECT 1"]);
+        assert_eq!(inv[..2], args(&["--no-defaults", "--defaults-extra-file=C:/my.ini"]));
+        assert_eq!(inv[2..], expected(&["--database=shop"], &["-e", "SELECT 1"]));
+    }
+
+    #[test]
+    fn mysqldump_dumps_the_sites_database_when_nothing_is_named() {
+        let t = target("8.3");
+        assert_eq!(mysqldump(&t, &[]), expected(&[], &["shop"]));
+        assert_eq!(mysqldump(&t, &["--no-data", "-r", "out.sql"]), expected(&[], &["--no-data", "-r", "out.sql", "shop"]));
+        assert_eq!(mysqldump(&t, &["--result-file", "out.sql", "-e"]), expected(&[], &["--result-file", "out.sql", "-e", "shop"]));
+        assert_eq!(mysqldump(&t, &["--"]), expected(&[], &["--", "shop"]));
+        for user in [
+            &["blog"][..],
+            &["shop", "orders", "customers"],
+            &["-e", "blog"],
+            &["--all-databases"],
+            &["-A"],
+            &["--databases", "a", "b"],
+            &["-B", "a"],
+            &["--where", "id<10", "blog", "orders"],
+        ] {
+            assert_eq!(mysqldump(&t, user), expected(&[], user), "{user:?}");
+        }
     }
 
     #[test]

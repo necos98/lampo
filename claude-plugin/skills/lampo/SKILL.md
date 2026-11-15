@@ -130,6 +130,8 @@ that is not Lampo (Laragon, XAMPP, Docker, IIS) without the user's explicit appr
   environments get their own port. Prefer the URL printed by `agent context`.
 - MySQL: user `root`, empty password, host `127.0.0.1`, port of the series (3306 for 8.4 by
   default). The project database is named after the project id (`my-shop` -> `my_shop`).
+  The `mysql` shim already selects it: `mysql -N -B -e "SHOW TABLES"`. Always pass SQL with
+  `-e`, never open the interactive prompt (details: `lampo:database`).
 - Lampo never edits `.env`; copy the values from `agent context` when the app needs them.
 - A project's environment is edited with `lampo project set` (extensions, add-ons, php.ini
   values, services, database name, public folder, Apache directives; see

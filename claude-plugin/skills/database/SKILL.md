@@ -1,6 +1,6 @@
 ---
 name: database
-description: MySQL databases of a Lampo project: connection details, `lampo db list/create/import/export/drop`, the mysql and mysqldump shims, writing DB_* values into the app's .env, worktree database modes (shared, fresh, clone) and the safety rules for destructive operations. Use when the user asks "what are the database credentials", "create a database", "import this dump/.sql/.sql.gz/.zip file", "export/backup the database", "reset/drop the database", "connect with mysql", "the app cannot connect to MySQL", or needs a separate database for tests or a worktree.
+description: MySQL databases of a Lampo project: connection details, `lampo db list/create/import/export/drop`, running SQL as an agent with the mysql and mysqldump shims (default database, non-interactive `-e`, parseable output, SQL scripts), writing DB_* values into the app's .env, worktree database modes (shared, fresh, clone) and the safety rules for destructive operations. Use when the user asks "what are the database credentials", "create a database", "import this dump/.sql/.sql.gz/.zip file", "export/backup the database", "reset/drop the database", "connect with mysql", "run this query", "show the tables", "the app cannot connect to MySQL", or needs a separate database for tests or a worktree.
 ---
 
 # Databases on Lampo
@@ -21,16 +21,69 @@ series has its own port, see `services`), `user` (`root`), `password` (empty) an
 Inside a worktree environment with its own database these are that database's values. Use
 `127.0.0.1`, not `localhost` (on Windows `localhost` may resolve to IPv6 first).
 
-The `mysql` and `mysqldump` shims already connect to the site's instance:
+## The `mysql` client
+
+The `mysql` shim runs the site's client with `--host=127.0.0.1 --port=<the series' port>
+--user=root --default-character-set=utf8mb4` and **selects the site's database** (in a worktree
+environment with its own database, that one). Your options come after these defaults, so they
+win. Outside any project (the default PHP) no database is selected.
 
 ```powershell
-mysql -e "SHOW TABLES" my_shop
-mysqldump --single-transaction --result-file=backup.sql my_shop
+mysql -e "SHOW TABLES"
+mysql -N -B -e "SELECT id, email FROM users ORDER BY id LIMIT 5"
+mysql --vertical -e "SHOW CREATE TABLE users"
+mysql --table -e "SELECT status, COUNT(*) FROM orders GROUP BY status"
+mysql -D my_shop_testing -e "SHOW TABLES"
+mysql --database= -e "SHOW DATABASES"
 ```
 
-Prefer `--result-file` (or `lampo db export`) over `>`: in Windows PowerShell 5.1 a `>`
-redirection re-encodes the dump as UTF-16, which MySQL cannot import. For the same reason feed
-dumps with `lampo db import` (an import: ask first, see below), not `Get-Content | mysql`.
+- **Always non-interactive**: pass the SQL with `-e "..."` (several statements separated by
+  `;`; execution stops at the first error). Never run bare `mysql`: it opens a prompt (or waits
+  on stdin) and the command never returns.
+- **Parseable output**: `-N -B` (`--skip-column-names --batch`) prints one row per line,
+  columns separated by tabs, `NULL` for null, tabs/newlines/backslashes escaped as `\t`, `\n`,
+  `\\` (add `-r` to print them raw). Without `-N` the first line is the header. `--vertical`
+  (`-E`) prints one `column: value` line per field, best for wide rows; `--table` (`-t`) an
+  aligned grid to show the user. Output is UTF-8.
+- **Another database**: `-D <name>`, `--database=<name>` or a name as the last argument. **No
+  database** (`SHOW DATABASES`, `CREATE DATABASE`, the site's database does not exist yet):
+  `--database=` with nothing after `=`. Do not write `-D ""`: Windows PowerShell drops the
+  empty argument and `-D` then swallows the next one. To create a database prefer
+  `lampo db create <name>`.
+- **SQL scripts**: `mysql -e "source C:/path/to/script.sql"` (forward slashes; it runs against
+  the selected database and stops at the first error). PowerShell has no `<` redirection and
+  `Get-Content script.sql | mysql` re-encodes the text: use `source`. Dumps (backups, exports
+  from another machine, `.sql.gz`, `.zip`) are imports: `lampo db import` and ask first (below).
+- **Exit codes**: 0 success; 1 SQL or connection error (`ERROR 1146 (42S02) at line 1: ...` on
+  stderr, nothing on stdout); 2 bad command line; 127 the shim could not resolve the site or
+  the client (`lampo agent context --json`, read `hints`). `ERROR 1049 Unknown database` means
+  the site's database is missing: `lampo db list`, then `lampo db create` (allowed).
+- Keep host and user as they are: `127.0.0.1`, not `localhost` (on Windows it may resolve to
+  IPv6 first), and `root` with no password (do not pass `-p`, it would prompt).
+- Reading is allowed. Statements that destroy data on the project's main database (`DROP`,
+  `TRUNCATE`, `DELETE`/`UPDATE` of many rows, destructive `ALTER`) need the user's yes, like
+  `lampo db drop`; export first (`lampo db export before-change.sql`). A `fresh`/`clone:`
+  worktree database is the agent's own.
+- `lampo exec -- mysql -e "SHOW TABLES"` and a shell loaded with `lampo env` behave the same:
+  the shim directory comes first on their PATH and `LAMPO_PROJECT` pins the site. Scripts that
+  need the values themselves read `LAMPO_DB_HOST`, `LAMPO_DB_PORT`, `LAMPO_DB_USER` and
+  `LAMPO_DB_DATABASE` from `lampo env`.
+
+## `mysqldump`
+
+With no database named (no positional argument, no `--databases`/`--all-databases`) the shim
+dumps the site's database; names you pass are used as they are.
+
+```powershell
+mysqldump --single-transaction --result-file=backup.sql
+mysqldump --no-data --result-file=schema.sql
+mysqldump --single-transaction --result-file=orders.sql my_shop orders customers
+```
+
+For a backup prefer `lampo db export`. Prefer `--result-file` over `>`: in Windows PowerShell
+5.1 a `>` redirection re-encodes the dump as UTF-16, which MySQL cannot import. For the same
+reason feed dumps with `lampo db import` (an import: ask first, see below), not
+`Get-Content | mysql`.
 
 ## Writing `.env`
 

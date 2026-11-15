@@ -183,6 +183,34 @@ when needed. Shims never talk to the app.
 
 Shims return the tool's own exit code, or 127 when they cannot resolve a PHP/tool.
 
+### MySQL client shims
+
+`mysql` and `mysqldump` (`lampo_domain::shim::tools::{Mysql, Mysqldump}`) run the client of the
+site's instance as `[leading option-file options] --host --port --user
+--default-character-set=utf8mb4 [--database=<db>] <user args>`: option-file options the user
+puts first (`--no-defaults`, `--defaults-file=`, `--login-path=`…) must stay first for the
+client; every other user argument comes after the defaults, so it wins. `utf8mb4` is forced
+because the clients otherwise pick the Windows console code page (`cp850`) even for piped
+output, losing non-Latin-1 text, and 5.7's `mysqldump` would use 3-byte `utf8`.
+
+The database is the site's (`ShimService.database`: a worktree environment's own database or
+its parent's; `None` for the default target and sites without MySQL):
+
+* `mysql` adds `--database=<db>` unless the arguments choose one: a positional argument, `-D`
+  (separate, attached, grouped), `--database[=]` (`_`/`--loose-` forms too); `--database=` with
+  an empty value is the opt-out (no database; no env variable is needed). The scanner
+  (`shim/mysql_args.rs`) knows which short/long options take a separate value, so
+  `-e "SHOW TABLES"` is not a database; `-p`/`--password`/`-#` take only attached values; `--`
+  ends options. A misread errs towards "option value", which is harmless: the client lets a
+  positional database override the earlier `--database`.
+* `mysqldump` appends the database as the positional argument only when there is no positional
+  and no `-A`/`--all-databases`/`-B`/`--databases`; existing positionals are never touched.
+
+`lampo exec` and `lampo env` need nothing extra: the shim dir is first on their PATH and
+`LAMPO_PROJECT` is set, so `mysql` there is the shim with the same defaults. Lampo does not
+export `MYSQL_HOST`/`MYSQL_TCP_PORT` (only `PHPRC` and `LAMPO_*`), and no variable exists for
+the database anyway.
+
 ### Site resolution (shims and CLI)
 
 `LAMPO_PROJECT` (`shop` or `shop@feature-x`) → longest-prefix match of the cwd against project
