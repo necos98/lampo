@@ -177,6 +177,13 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         c("lampo project list", "lampo project list [--json]", "List projects.", false, false),
         c("lampo project info", "lampo project info [<id>] [--json]", "Show one project.", false, false),
         c(
+            "lampo project detect",
+            "lampo project detect [<path>] [--json]",
+            "Show what Lampo detects in a folder (type, preset, PHP, services, warnings) without registering it.",
+            false,
+            false,
+        ),
+        c(
             "lampo project create",
             "lampo project create [<path>] [--name] [--preset] [--php] [--activate] [--no-database]",
             "Register a folder as a project and create its MySQL database (unless --no-database).",

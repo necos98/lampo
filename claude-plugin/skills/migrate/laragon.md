@@ -34,9 +34,17 @@ The PHP version is the one active in Laragon (the menu "PHP" > version) unless t
 its own; confirm with the user when several are installed. Extensions enabled in Laragon's
 `php.ini` (`extension=` lines without `;`) are the ones to enable in Lampo.
 
+Laragon leaves no marker in the project folder, so Lampo's detection sees only the framework and
+`composer.json`'s minimum PHP. Check it against what Laragon actually ran:
+
+```powershell
+lampo project detect C:\laragon\www\shop --json
+```
+
 ## Register in place
 
-Laragon projects are normal Windows folders: register the same folder.
+Laragon projects are normal Windows folders: register the same folder, with Laragon's PHP
+(not the detected minimum) when they differ.
 
 ```powershell
 lampo project create C:\laragon\www\shop --php 8.2 --activate

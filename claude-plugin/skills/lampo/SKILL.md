@@ -33,7 +33,8 @@ ini dir, Composer), `database` (host, port, user, password, database), `services
 what to run next (for example "project is not active", "no worktree environment is up").
 
 Other read-only views: `lampo status` (services and projects), `lampo project list`,
-`lampo project info`, `lampo worktree list`, `lampo logs`, `lampo doctor`, `lampo env`.
+`lampo project info`, `lampo project detect` (what Lampo would detect in a folder, without
+registering it), `lampo worktree list`, `lampo logs`, `lampo doctor`, `lampo env`.
 
 ## 2. Which site a command acts on
 
@@ -86,7 +87,7 @@ Shims return the tool's own exit code, or 127 when they cannot resolve a PHP or 
 You MAY, without asking:
 
 - run any read-only `lampo` command (`agent context`, `status`, `project list`, `project info`,
-  `worktree list`, `logs`, `doctor`, `env`, `package list`, `db list`, `db export`, `shims status`);
+  `project detect`, `worktree list`, `logs`, `doctor`, `env`, `package list`, `db list`, `db export`, `shims status`);
 - start or restart services: `lampo up`, `lampo restart`;
 - create databases (`lampo db create`) and worktree environments (`lampo worktree up` with any
   `--db` mode);
@@ -133,6 +134,6 @@ that is not Lampo (Laragon, XAMPP, Docker, IIS) without the user's explicit appr
 | Databases: create, import, export, drop, `.env`, worktree database modes | `lampo:database` |
 | One environment per git worktree, parallel agents | `lampo:worktrees` |
 | Services, logs, `lampo doctor`, 500/404 errors, ports, MySQL not starting | `lampo:services-logs` |
-| Register a folder, clone a repository, new Laravel app, addresses | `lampo:new-project` |
+| Register a folder (preview detection first), clone a repository, new Laravel app, addresses | `lampo:new-project` |
 | Laravel on Lampo: `.env`, migrations, queues, scheduler, tests, Vite | `lampo:laravel` |
 | Move a project from Docker/Sail, Laragon, XAMPP/WAMP or Herd to Lampo | `lampo:migrate` |

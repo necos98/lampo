@@ -72,6 +72,7 @@ stato passano dall'app, che viene avviata in background se non è già aperta.
 ```powershell
 lampo status                          # servizi e progetti
 lampo agent context --json            # tutto sul progetto della cartella corrente (per gli agent)
+lampo project detect --json          # cosa rileva Lampo nella cartella, senza registrarla
 lampo project create --activate       # registra la cartella corrente come progetto
 lampo project new --git https://github.com/acme/shop.git --in D:\sites
 lampo project new --laravel shop --in D:\sites --php 8.4

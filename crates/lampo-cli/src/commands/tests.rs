@@ -79,6 +79,72 @@ async fn project_info_outside_a_project_is_exit_6() {
 }
 
 #[tokio::test]
+async fn project_detect_json_is_the_detection_dto_and_never_reaches_the_app() {
+    let fake = Fake::new();
+    fake.app_running.store(false, Ordering::SeqCst);
+    let (code, out, err) = run_cli(&fake, &["project", "detect", "--json", "--no-start"]).await;
+    assert_eq!((code, err.as_str()), (0, ""));
+    assert_eq!(parse(&out), detection_json(r"C:\work\shop"));
+    assert_eq!(fake.ensure_calls.load(Ordering::SeqCst), 0);
+    assert!(fake.sent.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn project_detect_resolves_relative_paths_against_the_cwd() {
+    let fake = Fake::new();
+    run_cli(&fake, &["project", "detect", r"..\blog", "--json"]).await;
+    run_cli(&fake, &["project", "detect", r"D:\sites\api"]).await;
+    assert_eq!(*fake.detect_folders.lock().unwrap(), vec![r"C:\work\blog".to_string(), r"D:\sites\api".to_string()]);
+}
+
+#[tokio::test]
+async fn project_detect_human_lists_the_findings_and_the_next_step() {
+    let fake = Fake::new();
+    let (code, out, _) = run_cli(&fake, &["project", "detect"]).await;
+    assert_eq!(code, 0);
+    for needle in [
+        r"C:\work\shop",
+        "type:       laravel",
+        "preset:     laravel",
+        "php:        8.2 (minimum",
+        "name:       shop (id: shop)",
+        "services:   mysql, redis",
+        "evidence:   found artisan, compose.yaml: php 8.2",
+        "warning:    PostgreSQL is not provided by Lampo",
+        r"registered: no (register it with `lampo project create C:\work\shop`)",
+    ] {
+        assert!(out.contains(needle), "missing {needle:?} in:\n{out}");
+    }
+
+    let mut unknown = detection_json(r"C:\work\shop");
+    for key in ["projectType", "presetId", "phpVersion"] {
+        unknown[key] = Value::Null;
+    }
+    unknown["alreadyRegistered"] = json!("shop");
+    *fake.detect_result.lock().unwrap() = Some(Ok(unknown));
+    let (_, out, _) = run_cli(&fake, &["project", "detect"]).await;
+    for needle in ["type:       not recognised", "falls back to generic-php", "php:        not detected", "registered: yes, as `shop`"] {
+        assert!(out.contains(needle), "missing {needle:?} in:\n{out}");
+    }
+}
+
+#[tokio::test]
+async fn project_detect_of_a_missing_folder_is_a_validation_error() {
+    let fake = Fake::new();
+    *fake.detect_result.lock().unwrap() = Some(Err(AppError::new(ErrorCode::Validation, r"folder `C:\work\nope` does not exist")));
+    let (code, out, err) = run_cli(&fake, &["project", "detect", "nope", "--json"]).await;
+    assert_eq!(code, 4);
+    assert_eq!(parse(&out)["error"]["code"], "validation");
+    assert!(err.contains("does not exist"), "{err}");
+}
+
+#[test]
+fn project_detect_is_advertised_as_read_only_and_offline() {
+    let entry = lampo_application::use_cases::agent::cli_command_catalog().into_iter().find(|c| c.name == "lampo project detect").expect("advertised");
+    assert!(!entry.mutating && !entry.requires_app, "{entry:?}");
+}
+
+#[tokio::test]
 async fn project_create_defaults_to_no_elevation_addressing_and_an_absolute_root() {
     let fake = Fake::new();
     fake.reply(Ok(project_json()));
@@ -402,6 +468,7 @@ async fn every_json_command_prints_exactly_one_document() {
         &["status"],
         &["project", "list"],
         &["project", "info"],
+        &["project", "detect"],
         &["worktree", "list"],
         &["logs"],
         &["logs", "apache"],

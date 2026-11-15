@@ -132,6 +132,20 @@ pub enum ProjectCommand {
         /// Project id (`shop`).
         id: Option<String>,
     },
+    /// Show what Lampo detects in a folder, WITHOUT registering it (read-only, no app needed).
+    ///
+    /// Reports the project type (laravel, wordpress, symfony, composer or none), the preset and
+    /// PHP minor `project create` would pick, the suggested name and id, the evidence found, the
+    /// services the folder's own files show it uses (Docker Compose: mysql, redis), warnings
+    /// about what Lampo cannot provide (PostgreSQL, Mailpit...) and the id of the project
+    /// already registered for the folder, if any. Nothing is written. Run it before
+    /// `project create` and pass `--preset` / `--php` there when a detected default is wrong.
+    ///
+    /// Example: lampo project detect C:\laragon\www\shop --json
+    Detect {
+        /// Folder to analyse (default: current directory; relative paths resolve against it).
+        path: Option<String>,
+    },
     /// Register a folder (default: current folder). Defaults come from detection and presets.
     ///
     /// Addressing defaults to `<id>.localhost` plus a dedicated loopback port, which never needs

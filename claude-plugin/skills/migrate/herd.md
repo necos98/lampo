@@ -35,9 +35,13 @@ and URL per site; "Services": database engine, version and port). From the proje
 Check `DB_CONNECTION`: `pgsql` means PostgreSQL, **not supported** (SKILL.md, step 2). `sqlite`
 needs no database migration: the file stays in the project (`database\database.sqlite`).
 
-## Register in place
+## Detect, then register in place
+
+Herd leaves no marker in the site folder: `lampo project detect` reports the framework and
+`composer.json`'s minimum PHP. Register with the PHP Herd ran (`herd which-php`) when it differs:
 
 ```powershell
+lampo project detect $HOME\Herd\shop --json
 lampo project create $HOME\Herd\shop --php 8.3 --activate
 ```
 

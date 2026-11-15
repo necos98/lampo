@@ -73,6 +73,8 @@ pub fn build() -> AppResult<CliContext> {
         env: CliEnv::from_process(),
         sites: resolver.clone(),
         projects: projects.clone(),
+        // Every detector, as in the app: the same folder analysis as `project create`.
+        detection: Arc::new(DetectProject::new(store::detectors::all(), projects_repo.clone(), fs.clone())),
         worktrees: Arc::new(WorktreeQueries::new(worktrees_repo.clone(), projects_repo.clone(), settings_repo.clone(), fs.clone())),
         agent: Arc::new(AgentContextQuery::new(AgentContextDeps {
             resolver: resolver.clone(),

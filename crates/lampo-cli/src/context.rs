@@ -63,6 +63,7 @@ pub struct CliContext {
     pub env: CliEnv,
     pub sites: Arc<dyn SiteLookup>,
     pub projects: Arc<dyn ProjectReader>,
+    pub detection: Arc<dyn ProjectDetection>,
     pub worktrees: Arc<dyn WorktreeReader>,
     pub logs: Arc<dyn LogReader>,
     pub packages: Arc<dyn PackageReader>,

@@ -26,6 +26,7 @@ fn every_subcommand_renders_help() {
         &["project"],
         &["project", "list"],
         &["project", "info"],
+        &["project", "detect"],
         &["project", "create"],
         &["project", "activate"],
         &["project", "deactivate"],
@@ -121,4 +122,45 @@ fn agent_context_hook_is_silent_outside_projects() {
     assert!(out.stdout.is_empty(), "{}", String::from_utf8_lossy(&out.stdout));
     assert!(out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
     assert!(started.elapsed() < std::time::Duration::from_secs(5));
+}
+
+/// `project detect` runs in-process with the real detectors and writes nothing: a Laravel folder
+/// with a Compose file, the current folder by default, and a missing folder (exit 4).
+#[test]
+fn project_detect_reads_a_real_folder_without_the_app() {
+    let home = tempfile::tempdir().unwrap();
+    let sites = tempfile::tempdir().unwrap();
+    let shop = sites.path().join("shop");
+    std::fs::create_dir(&shop).unwrap();
+    std::fs::write(shop.join("artisan"), "").unwrap();
+    std::fs::write(shop.join("composer.json"), r#"{"require":{"php":"^8.2","laravel/framework":"^11.0"}}"#).unwrap();
+    std::fs::write(shop.join("compose.yaml"), "services:\n  redis:\n    image: redis:7\n").unwrap();
+    let detect = |cwd: &std::path::Path, args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_lampo"))
+            .args(["project", "detect"])
+            .args(args)
+            .args(["--json", "--no-start"])
+            .env("LAMPO_HOME", home.path())
+            .env_remove("LAMPO_PROJECT")
+            .current_dir(cwd)
+            .output()
+            .unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stdout)));
+        (out.status.code().unwrap(), doc)
+    };
+
+    let (code, doc) = detect(sites.path(), &["shop"]);
+    assert_eq!(code, 0, "{doc}");
+    assert_eq!(doc["folder"], shop.display().to_string());
+    assert_eq!((doc["projectType"].as_str(), doc["presetId"].as_str(), doc["phpVersion"].as_str()), (Some("laravel"), Some("laravel"), Some("8.2")));
+    assert_eq!((doc["suggestedId"].as_str(), doc["alreadyRegistered"].as_str()), (Some("shop"), None));
+    assert!(doc["services"].as_array().unwrap().contains(&serde_json::json!("redis")), "{doc}");
+
+    let (code, doc) = detect(&shop, &[]);
+    assert_eq!((code, doc["folder"].as_str()), (0, Some(shop.display().to_string().as_str())));
+
+    let (code, doc) = detect(sites.path(), &["missing"]);
+    assert_eq!((code, doc["error"]["code"].as_str()), (4, Some("validation")));
+
+    assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0, "detection must not write to the data root");
 }

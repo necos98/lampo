@@ -31,9 +31,19 @@ Collect, from the project and the source environment (the reference says where t
 | Web server rules | `.htaccess` (works as is), nginx `location` blocks, Apache vhost directives |
 | Hostname | `shop.test` and the like (the source's hosts entries) |
 
-Lampo's own view of the folder (what it detects) appears when you register it; you can also
-read what Lampo already knows with `lampo project list` and `lampo status`. Write the inventory
-down for the user in a short table before changing anything.
+Then ask Lampo what it sees in the folder, without registering anything:
+
+```powershell
+lampo project detect C:\laragon\www\shop --json
+```
+
+It returns `projectType`, `presetId`, `phpVersion` (the minimum from `composer.json` or the
+Docker image), `suggestedId`, `evidence`, `services` (from a compose file: `mysql`, `redis`),
+`warnings` (what Lampo cannot provide: PostgreSQL, MariaDB, Mailpit, search engines) and
+`alreadyRegistered` (an id: the folder is a Lampo project already, do not create it again).
+Compare it with your inventory: where they differ, your inventory wins and you pass `--php` /
+`--preset` in step 3. `lampo project list` and `lampo status` show what Lampo already knows.
+Write the inventory down for the user in a short table before changing anything.
 
 ## Step 2: compatibility check
 
@@ -65,7 +75,8 @@ deliberate project change.
 in the dump, with the user's approval) and `DEFINER` clauses. If the import fails (exit 12),
 show the error line; fixing the dump is a change the user approves.
 
-If something essential is unsupported, stop and report before creating anything.
+Every entry of `warnings` from `lampo project detect` must appear in this check. If something
+essential is unsupported, stop and report before creating anything.
 
 ## Step 3: register the project
 

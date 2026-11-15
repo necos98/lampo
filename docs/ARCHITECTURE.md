@@ -127,7 +127,8 @@ claude plugin list --json                          (verify: exact id match)
 ## Process ownership and the CLI
 
 The desktop app is the single owner of service processes (all in one Windows Job Object). The
-CLI runs read-only, file-based commands itself (status offline, project/worktree list, logs,
+CLI runs read-only, file-based commands itself (status offline, project/worktree list,
+`project detect`, logs,
 `env`, `exec`, `agent context`, `doctor`) and sends mutating ones to the app over a per-user
 named pipe (`lampo_application::control`), starting the app headless (`--headless`, tray only)
 when needed. Shims never talk to the app.

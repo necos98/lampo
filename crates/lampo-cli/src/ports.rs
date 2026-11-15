@@ -20,6 +20,12 @@ pub trait ProjectReader: Send + Sync {
     fn get(&self, project_id: &str) -> AppResult<ProjectDto>;
 }
 
+/// Folder analysis that registers nothing (`project detect`).
+pub trait ProjectDetection: Send + Sync {
+    /// `folder` is absolute; `Validation` if it is not an existing directory.
+    fn detect(&self, folder: &str) -> AppResult<DetectionDto>;
+}
+
 pub trait WorktreeReader: Send + Sync {
     fn list(&self, project_id: Option<&str>) -> AppResult<Vec<WorktreeEnvironmentDto>>;
 }

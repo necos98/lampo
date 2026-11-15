@@ -5,7 +5,7 @@ Part of `lampo:migrate`. Read-only on the containers: never `docker compose down
 
 ## Inventory
 
-Files in the project (Lampo's detection reads them too when you register the folder):
+Files in the project (Lampo's detection reads them too):
 
 - `compose.yaml`, `compose.yml`, `docker-compose.yml`, `docker-compose.yaml`, plus overrides
   (`docker-compose.override.yml`): `services:` with their `image:`, `build:`, `ports:`,
@@ -26,6 +26,13 @@ docker compose ps
 docker compose config --services
 docker compose exec app php -v
 docker compose exec app php -m
+```
+
+Lampo's reading of the same files, nothing registered (`services`, `warnings`, and
+`phpVersion` from the PHP image or the Sail runtime):
+
+```powershell
+lampo project detect C:\sites\shop --json
 ```
 
 Image to Lampo mapping: `php:<x.y>-*` -> PHP x.y; `mysql:5.7` -> MySQL 5.7 (`--preset legacy`

@@ -21,7 +21,14 @@ lampo project create C:\sites\blog --preset wordpress --php 8.3 --activate
 Defaults come from detection: Laravel (`artisan` + `laravel/framework`), WordPress
 (`wp-config.php`), Symfony (`bin/console`), any `composer.json`, and Docker files
 (`compose.yaml`, `docker-compose.yml`, `Dockerfile`: the PHP of the image, MySQL/Redis
-services, warnings for PostgreSQL or Mailpit). Options:
+services, warnings for PostgreSQL or Mailpit). To see those defaults before registering
+anything (read-only; `alreadyRegistered` names the project if the folder is one already):
+
+```powershell
+lampo project detect C:\sites\blog --json
+```
+
+Options:
 
 | Option | Effect |
 |--------|--------|

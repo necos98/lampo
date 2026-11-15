@@ -25,6 +25,12 @@ impl ProjectReader for ProjectQueries {
     }
 }
 
+impl ProjectDetection for DetectProject {
+    fn detect(&self, folder: &str) -> AppResult<DetectionDto> {
+        self.execute(folder)
+    }
+}
+
 impl WorktreeReader for WorktreeQueries {
     fn list(&self, project_id: Option<&str>) -> AppResult<Vec<WorktreeEnvironmentDto>> {
         WorktreeQueries::list(self, project_id)

@@ -36,9 +36,15 @@ Defaults: user `root`, empty password, port 3306 (check `port=` in `my.ini`).
 Find which engine and port the project uses from its `.env` / `wp-config.php` (`DB_PORT`,
 `DB_HOST=localhost:3308`).
 
-## Register in place
+## Detect, then register in place
+
+XAMPP and WAMP leave no marker in the project folder. See what Lampo detects (framework,
+`composer.json` PHP minimum; a WordPress site usually has no `composer.json`, so no PHP), then
+pass the PHP the old stack ran and, if `presetId` is wrong or `null`, the preset:
 
 ```powershell
+lampo project detect C:\xampp\htdocs\shop --json
+lampo project detect C:\wamp64\www\blog --json
 lampo project create C:\xampp\htdocs\shop --php 8.2 --activate
 lampo project create C:\wamp64\www\blog --preset wordpress --php 7.4 --activate
 ```

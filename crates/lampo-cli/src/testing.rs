@@ -62,6 +62,15 @@ pub fn agent_context_json() -> Value {
     })
 }
 
+/// A Laravel folder with a Docker Compose file (MySQL, Redis, PostgreSQL), not registered.
+pub fn detection_json(folder: &str) -> Value {
+    json!({
+        "folder": folder, "projectType": "laravel", "presetId": "laravel", "phpVersion": "8.2",
+        "suggestedName": "shop", "suggestedId": "shop", "evidence": ["found artisan", "compose.yaml: php 8.2"],
+        "services": ["mysql", "redis"], "warnings": ["PostgreSQL is not provided by Lampo"], "alreadyRegistered": null
+    })
+}
+
 /// Every port in one struct. Public fields are the knobs; `Mutex`es hold recorded calls.
 pub struct Fake {
     pub site: Mutex<AppResult<ResolvedSiteDto>>,
@@ -84,6 +93,9 @@ pub struct Fake {
     /// Replaces the canned agent context (`None`: [`agent_context_json`]).
     pub agent_result: Mutex<Option<AppResult<Value>>>,
     pub agent_requests: Mutex<Vec<ResolveRequestDto>>,
+    /// Replaces the canned detection (`None`: [`detection_json`] for the requested folder).
+    pub detect_result: Mutex<Option<AppResult<Value>>>,
+    pub detect_folders: Mutex<Vec<String>>,
 }
 
 impl Fake {
@@ -109,6 +121,8 @@ impl Fake {
             hook_payload: Mutex::new(None),
             agent_result: Mutex::new(None),
             agent_requests: Mutex::new(Vec::new()),
+            detect_result: Mutex::new(None),
+            detect_folders: Mutex::new(Vec::new()),
         })
     }
 
@@ -130,6 +144,7 @@ impl Fake {
             env: CliEnv { cwd: r"C:\work\shop".into(), lampo_project: None, now_unix_ms: 1_000_000, follow_interval: Duration::from_millis(1) },
             sites: self.clone(),
             projects: self.clone(),
+            detection: self.clone(),
             worktrees: self.clone(),
             logs: self.clone(),
             packages: self.clone(),
@@ -158,6 +173,16 @@ impl ProjectReader for Fake {
     }
     fn get(&self, id: &str) -> AppResult<ProjectDto> {
         if id == "shop" { Ok(dto(project_json())) } else { Err(AppError::not_found("project", id)) }
+    }
+}
+
+impl ProjectDetection for Fake {
+    fn detect(&self, folder: &str) -> AppResult<DetectionDto> {
+        self.detect_folders.lock().unwrap().push(folder.to_string());
+        match self.detect_result.lock().unwrap().clone() {
+            Some(result) => result.map(dto),
+            None => Ok(dto(detection_json(folder))),
+        }
     }
 }
 

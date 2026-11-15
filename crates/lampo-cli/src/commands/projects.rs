@@ -18,6 +18,10 @@ pub async fn run(c: &Cmd<'_>, command: ProjectCommand) -> AppResult<i32> {
             let project = c.ctx.projects.get(&c.project_id(id.as_ref())?)?;
             c.io.emit(&project, render::project);
         }
+        ProjectCommand::Detect { path } => {
+            let detection = c.ctx.detection.detect(&c.ctx.env.absolute(path.as_deref().unwrap_or(".")))?;
+            c.io.emit(&detection, render::detection);
+        }
         ProjectCommand::Create(args) => {
             let request = create_request(c, args);
             let result: CreateProjectResultDto = c.app(ControlRequest::ProjectCreate(request)).await?;
