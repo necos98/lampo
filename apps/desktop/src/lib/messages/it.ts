@@ -123,7 +123,7 @@ export const it = {
 			general: 'Generale',
 			php: 'PHP',
 			addresses: 'Indirizzi',
-			data: 'Database e cache',
+			data: 'Database, cache e posta',
 			apache: 'Apache',
 			worktrees: 'Worktree'
 		},
@@ -171,7 +171,14 @@ export const it = {
 			databaseName: 'Nome del database',
 			database: 'Database',
 			connection: 'Connessione',
-			noDatabase: 'Questo progetto non usa un database.'
+			noDatabase: 'Questo progetto non usa un database.',
+			mail: 'Posta (Mailpit)',
+			mailHelp: 'La posta inviata dal progetto non esce dal computer: Mailpit la raccoglie e la mostra nella sua interfaccia web. mail() di PHP la usa già; per i framework copia le variabili.',
+			smtp: 'SMTP',
+			webUi: 'Interfaccia web',
+			openWebUi: 'Apri Mailpit',
+			copyMailEnv: 'Copia variabili MAIL_',
+			noMail: 'Questo progetto non usa Mailpit: attivalo qui sopra per raccogliere la posta.'
 		},
 		apache: {
 			title: 'Direttive Apache personalizzate',
@@ -288,7 +295,8 @@ export const it = {
 	},
 	services: {
 		title: 'Servizi',
-		subtitle: 'Apache, MySQL e Redis gestiti da Lampo.',
+		subtitle: 'Apache, MySQL, Redis e Mailpit gestiti da Lampo.',
+		openUi: (label: string) => `Apri l’interfaccia web di ${label}`,
 		start: 'Avvia',
 		stop: 'Ferma',
 		restart: 'Riavvia',
@@ -340,13 +348,14 @@ export const it = {
 		empty: 'Nessun pacchetto in questa categoria.',
 		forPhp: (v: string) => `per PHP ${v}`,
 		failed: 'Installazione non riuscita.',
-		tabs: { php: 'PHP', apache: 'Apache', mysql: 'MySQL', redis: 'Redis', tools: 'Strumenti', addons: 'Estensioni' },
+		tabs: { php: 'PHP', apache: 'Apache', mysql: 'MySQL', redis: 'Redis', mailpit: 'Mailpit', tools: 'Strumenti', addons: 'Estensioni' },
 		kinds: {
 			php: 'PHP',
 			apache: 'Apache',
 			'mod-fcgid': 'mod_fcgid',
 			mysql: 'MySQL',
 			redis: 'Redis',
+			mailpit: 'Mailpit',
 			composer: 'Composer',
 			xdebug: 'Xdebug',
 			'php-redis': 'Estensione Redis'
@@ -363,10 +372,10 @@ export const it = {
 	},
 	presetActions: { saved: 'Preset salvato.', deleted: 'Preset eliminato.' },
 	presets: {
-		laravel: { name: 'Laravel', description: 'Cartella pubblica `public`, MySQL, ultima versione di PHP.' },
-		wordpress: { name: 'WordPress', description: 'Cartella del progetto come document root, MySQL.' },
-		symfony: { name: 'Symfony', description: 'Cartella pubblica `public`, MySQL, intl.' },
-		'generic-php': { name: 'PHP generico', description: 'Sito PHP servito dalla cartella del progetto.' },
+		laravel: { name: 'Laravel', description: 'Cartella pubblica `public`, MySQL, Mailpit, ultima versione di PHP.' },
+		wordpress: { name: 'WordPress', description: 'Cartella del progetto come document root, MySQL, Mailpit.' },
+		symfony: { name: 'Symfony', description: 'Cartella pubblica `public`, MySQL, Mailpit, intl.' },
+		'generic-php': { name: 'PHP generico', description: 'Sito PHP servito dalla cartella del progetto, con Mailpit per la posta.' },
 		legacy: { name: 'Legacy', description: 'Applicazioni datate: PHP 7.4 e MySQL 5.7.' }
 	} as Record<string, { name: string; description: string }>,
 	logs: {
@@ -402,6 +411,7 @@ export const it = {
 		serviceInstances: 'Servizi',
 		alwaysOn: 'sempre attivo',
 		onDemand: 'su richiesta',
+		uiPort: 'interfaccia web',
 		worktreeRange: 'Intervallo porte worktree',
 		worktreeRangeHelp: 'Ogni ambiente worktree riceve una porta libera di questo intervallo.',
 		rangeStart: 'Da',

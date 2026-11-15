@@ -37,7 +37,7 @@ export class SettingsDraft {
 
 	get valid(): boolean {
 		const v = this.value;
-		return this.rangeValid && v.tld.trim().length > 0 && validPort(v.apachePort) && v.services.every((i) => validPort(i.port));
+		return this.rangeValid && v.tld.trim().length > 0 && validPort(v.apachePort) && v.services.every((i) => validPort(i.port) && (i.uiPort == null || validPort(i.uiPort)));
 	}
 
 	toSettings(): Settings {

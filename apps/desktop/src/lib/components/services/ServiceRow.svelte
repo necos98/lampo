@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import Play from '@lucide/svelte/icons/play';
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import Square from '@lucide/svelte/icons/square';
@@ -7,6 +8,7 @@
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { messages as m } from '#lib/messages/index.js';
 	import { describeError, errorOutput } from '#lib/services/errors.js';
+	import { openExternal } from '#lib/services/platform.js';
 	import { services } from '#lib/stores/index.js';
 
 	import StatusDot, { type Tone } from '../common/StatusDot.svelte';
@@ -23,15 +25,19 @@
 </script>
 
 <li class="rounded-md border bg-card px-3 py-2.5">
-	<div class="grid grid-cols-[auto_minmax(0,1fr)_6rem_5rem_auto] items-center gap-x-4">
+	<div class="grid grid-cols-[auto_minmax(0,1fr)_6rem_minmax(5rem,auto)_auto] items-center gap-x-4">
 		<StatusDot tone={tones[service.state]} label={t.states[service.state]} />
 		<div class="min-w-0">
 			<p class="font-medium">{label}</p>
 			<p class="truncate text-xs text-muted-foreground">{reason}</p>
 		</div>
 		<span class="text-sm {service.state === 'failed' ? 'text-destructive' : 'text-muted-foreground'}">{t.states[service.state]}</span>
-		<span class="font-mono text-xs text-muted-foreground">{service.port ? `:${service.port}` : ''}{service.pid ? ` · ${service.pid}` : ''}</span>
+		<span class="font-mono text-xs text-muted-foreground">{service.port ? `:${service.port}` : ''}{service.uiPort ? ` · ui :${service.uiPort}` : ''}{service.pid ? ` · ${service.pid}` : ''}</span>
 		<div class="flex gap-1">
+			{#if service.uiUrl}
+				<!-- The web UI (Mailpit's caught mail) opens in the default browser. -->
+				<Button variant="ghost" size="icon-xs" disabled={!running} title={t.openUi(label)} onclick={() => openExternal(service.uiUrl ?? '')} aria-label={t.openUi(label)}><ExternalLink /></Button>
+			{/if}
 			{#if running}
 				<Button variant="ghost" size="icon-xs" disabled={busy} onclick={() => services.act('restart', [service.service])} aria-label="{t.restart} {label}"><RotateCw /></Button>
 				<Button variant="ghost" size="icon-xs" disabled={busy} onclick={() => services.act('stop', [service.service])} aria-label="{t.stop} {label}"><Square /></Button>

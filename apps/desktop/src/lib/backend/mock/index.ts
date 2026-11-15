@@ -48,7 +48,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 		services: [
 			{ service: 'mysql-8.4', label: 'MySQL 8.4', port: 3306, alwaysOn: true },
 			{ service: 'mysql-5.7', label: 'MySQL 5.7', port: 3307, alwaysOn: false },
-			{ service: 'redis', label: 'Redis', port: 6379, alwaysOn: false }
+			{ service: 'redis', label: 'Redis', port: 6379, alwaysOn: false },
+			{ service: 'mailpit', label: 'Mailpit', port: 1025, alwaysOn: false, uiPort: 8025 }
 		],
 		loopbackPortRange: { start: 8100, end: 8199 },
 		closeToTray: true,
@@ -76,6 +77,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 	addService({ service: 'mysql-8.4', kind: 'mysql', state: fresh ? 'stopped' : 'running', pid: fresh ? null : 5230, port: 3306, required: true });
 	addService({ service: 'mysql-5.7', kind: 'mysql', port: 3307, requiredBy: ['crm-legacy'] });
 	addService({ service: 'redis', kind: 'redis', state: fresh ? 'stopped' : 'running', pid: fresh ? null : 6310, port: 6379, requiredBy: ['shop'] });
+	addService({ service: 'mailpit', kind: 'mailpit', state: fresh ? 'stopped' : 'running', pid: fresh ? null : 7020, port: 1025, uiPort: 8025, uiUrl: 'http://127.0.0.1:8025', requiredBy: ['shop'] });
 
 	const syncProject = (id: string) => emitter.emit<T.ProjectsChangedPayload>('projects-changed', { projectIds: [id] });
 	const syncWorktrees = (projectId: string) => emitter.emit<T.WorktreesChangedPayload>('worktrees-changed', { projectId });
@@ -83,7 +85,13 @@ export function createMockBackend({ fresh }: Options): Backend {
 
 	const isInstalled = (p: T.PackageId) => installed.some((i) => packageKey(i) === packageKey(p));
 	const withInstalledFlag = (e: T.CatalogEntry): T.CatalogEntry => ({ ...e, installed: isInstalled(e.id) });
-	const attachWorktrees = (p: T.Project): T.Project => ({ ...p, worktrees: worktrees.filter((w) => w.projectId === p.id) });
+	/** Like the backend: projects using Mailpit get its SMTP endpoint and web UI. */
+	const mailOf = (p: T.Project): T.MailConnection | null => {
+		if (!p.environment.services.some((s) => s.kind === 'mailpit')) return null;
+		const instance = settings.services.find((s) => s.service === 'mailpit');
+		return { host: '127.0.0.1', smtpPort: instance?.port ?? 1025, webUrl: `http://127.0.0.1:${instance?.uiPort ?? 8025}` };
+	};
+	const attachWorktrees = (p: T.Project): T.Project => ({ ...p, mail: mailOf(p), worktrees: worktrees.filter((w) => w.projectId === p.id) });
 
 	const find = (id: string) => projects.find((p) => p.id === id) ?? fail('not-found', `project ${id}`);
 	const replace = (next: T.Project) => {
@@ -562,7 +570,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 			const sites = projects.filter((p) => p.active && (!site || p.id === site));
 			const src = (id: string, exists = true): T.LogSource => ({ id, file: `C:\\Users\\dev\\AppData\\Local\\Lampo\\logs\\${id.replace(':', '-')}.log`, exists });
 			return [
-				...(site ? [] : [src('apache'), src('apache-error'), src('mysql-8.4'), src('mysql-8.4-error'), src('mysql-5.7', false), src('redis')]),
+				...(site ? [] : [src('apache'), src('apache-error'), src('mysql-8.4'), src('mysql-8.4-error'), src('mysql-5.7', false), src('redis'), src('mailpit')]),
 				...sites.flatMap((p) => [src(`access:${p.id}`), src(`error:${p.id}`), src(`php:${p.id}`, p.id !== 'blog')])
 			];
 		},
@@ -575,7 +583,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 			const mysql = settings.services.filter((s) => s.service.startsWith('mysql-'));
 			return [
 				{ kind: 'mysql', label: 'MySQL', versioned: true, versions: mysql.map((s) => s.service.slice(6)), defaultVersion: mysql.find((s) => s.alwaysOn)?.service.slice(6) ?? null },
-				{ kind: 'redis', label: 'Redis', versioned: false, versions: [], defaultVersion: null }
+				{ kind: 'redis', label: 'Redis', versioned: false, versions: [], defaultVersion: null },
+				{ kind: 'mailpit', label: 'Mailpit', versioned: false, versions: [], defaultVersion: null }
 			];
 		},
 		getSettings: async () => {

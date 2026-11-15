@@ -1,15 +1,15 @@
 import type * as T from '../../api/types.js';
 
-/** Test shorthand: `mysql` / `redis` become entries of `services`, as the backend stores them. */
-type EnvOverrides = Partial<T.ProjectEnvironment> & { mysql?: string | null; redis?: boolean };
+/** Test shorthand: `mysql` / `redis` / `mail` (Mailpit) become entries of `services`, as the backend stores them. */
+type EnvOverrides = Partial<T.ProjectEnvironment> & { mysql?: string | null; redis?: boolean; mail?: boolean };
 
-const env = ({ mysql = '8.4', redis = false, ...over }: EnvOverrides): T.ProjectEnvironment => ({
+const env = ({ mysql = '8.4', redis = false, mail = false, ...over }: EnvOverrides): T.ProjectEnvironment => ({
 	phpVersion: '8.4',
 	extensions: ['curl', 'mbstring', 'openssl', 'pdo_mysql', 'mysqli', 'fileinfo'],
 	addons: [],
 	phpIni: {},
 	publicDir: 'public',
-	services: [...(mysql ? [{ kind: 'mysql', version: mysql }] : []), ...(redis ? [{ kind: 'redis', version: null }] : [])],
+	services: [...(mysql ? [{ kind: 'mysql', version: mysql }] : []), ...(redis ? [{ kind: 'redis', version: null }] : []), ...(mail ? [{ kind: 'mailpit', version: null }] : [])],
 	apacheDirectives: '',
 	...over
 });
@@ -19,15 +19,15 @@ export const mysqlOf = (e: T.ProjectEnvironment): string | null => e.services.fi
 
 /** What the backend computes for catalog entries: the series and the GUI group. */
 export const seriesOf = (version: string): string => version.split('.').slice(0, 2).join('.');
-const SERVICE_PACKAGES = ['apache', 'mysql', 'redis'];
+const SERVICE_PACKAGES = ['apache', 'mysql', 'redis', 'mailpit'];
 export const groupOf = (id: T.PackageId): string => (id.phpVersion ? 'addons' : id.kind === 'php' ? 'php' : SERVICE_PACKAGES.includes(id.kind) ? id.kind : 'tools');
 
 export function seedPresets(): T.Preset[] {
 	return [
-		{ id: 'laravel', name: 'Laravel', description: '', builtin: true, environment: env({ extensions: ['curl', 'mbstring', 'openssl', 'pdo_mysql', 'fileinfo', 'bcmath', 'zip'] }) },
-		{ id: 'wordpress', name: 'WordPress', description: '', builtin: true, environment: env({ publicDir: '', phpVersion: '8.3', extensions: ['curl', 'mbstring', 'mysqli', 'gd', 'zip', 'exif'] }) },
-		{ id: 'symfony', name: 'Symfony', description: '', builtin: true, environment: env({ extensions: ['curl', 'mbstring', 'intl', 'pdo_mysql', 'xml'] }) },
-		{ id: 'generic-php', name: 'Generic PHP', description: '', builtin: true, environment: env({ publicDir: '', mysql: null }) },
+		{ id: 'laravel', name: 'Laravel', description: '', builtin: true, environment: env({ mail: true, extensions: ['curl', 'mbstring', 'openssl', 'pdo_mysql', 'fileinfo', 'bcmath', 'zip'] }) },
+		{ id: 'wordpress', name: 'WordPress', description: '', builtin: true, environment: env({ mail: true, publicDir: '', phpVersion: '8.3', extensions: ['curl', 'mbstring', 'mysqli', 'gd', 'zip', 'exif'] }) },
+		{ id: 'symfony', name: 'Symfony', description: '', builtin: true, environment: env({ mail: true, extensions: ['curl', 'mbstring', 'intl', 'pdo_mysql', 'xml'] }) },
+		{ id: 'generic-php', name: 'Generic PHP', description: '', builtin: true, environment: env({ mail: true, publicDir: '', mysql: null }) },
 		{ id: 'legacy', name: 'Legacy', description: '', builtin: true, environment: env({ phpVersion: '7.4', publicDir: '', mysql: '5.7', extensions: ['mysqli', 'mbstring', 'curl'] }) },
 		{ id: 'agency-base', name: 'Agency base', description: 'Il mio setup per i clienti', builtin: false, environment: env({ phpVersion: '8.3', redis: true, addons: ['xdebug'] }) }
 	];
@@ -64,7 +64,7 @@ function project(id: string, name: string, root: string, host: string, e: T.Proj
 
 export function seedProjects(): T.Project[] {
 	return [
-		project('shop', 'Shop', 'C:\\Dev\\shop', 'shop.test', env({ addons: ['xdebug'], redis: true }), { originPreset: 'laravel' }),
+		project('shop', 'Shop', 'C:\\Dev\\shop', 'shop.test', env({ addons: ['xdebug'], redis: true, mail: true }), { originPreset: 'laravel' }),
 		project('blog', 'Blog aziendale', 'C:\\Dev\\blog', 'blog.test', env({ phpVersion: '8.3', publicDir: '', extensions: ['curl', 'mbstring', 'mysqli', 'gd', 'zip'] }), { originPreset: 'wordpress' }),
 		project('crm-legacy', 'CRM legacy', 'C:\\Dev\\crm-legacy', 'crm.test', env({ phpVersion: '5.6', publicDir: '', mysql: '5.7', extensions: ['mysqli', 'mbstring'] }), { originPreset: 'legacy' }),
 		project('api-symfony', 'API Symfony', 'D:\\Work\\api-symfony', 'api.test', env({ phpVersion: '8.4', extensions: ['intl', 'pdo_mysql', 'xml'] }), { active: false, originPreset: 'symfony' }),
@@ -149,6 +149,7 @@ export function seedCatalog(): { catalog: T.CatalogEntry[]; installed: T.Package
 		entry(pid('mysql', '8.4.3'), { sizeBytes: 220_000_000, vcRuntime: 'vs17', vcRuntimeInstalled: true }),
 		entry(pid('mysql', '5.7.44'), { endOfLife: true, channel: 'frozen', sizeBytes: 380_000_000, vcRuntime: 'vc15', vcRuntimeInstalled: true }),
 		entry(pid('redis', '7.4.1'), { sizeBytes: 9_000_000 }),
+		entry(pid('mailpit', '1.33.1'), { sizeBytes: 11_186_131 }),
 		entry(pid('composer', '2.8.3'), { sizeBytes: 2_900_000 })
 	);
 	const installed = [
@@ -160,6 +161,7 @@ export function seedCatalog(): { catalog: T.CatalogEntry[]; installed: T.Package
 		pid('mod-fcgid', '2.3.9'),
 		pid('mysql', '8.4.3'),
 		pid('composer', '2.8.3'),
+		pid('mailpit', '1.33.1'),
 		pid('xdebug', '3.4.0', '8.4')
 	];
 	return { catalog, installed };

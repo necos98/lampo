@@ -54,6 +54,21 @@
 				<Input type="number" min="1" max="65535" class="h-8 w-28 font-mono text-xs" value={instance.port} oninput={(e) => (draft.value.services[i].port = num(e))} aria-label="{m.common.port} {instance.label}" />
 				<span class="text-xs text-muted-foreground">{instance.alwaysOn ? t.alwaysOn : t.onDemand}</span>
 			</li>
+			{#if instance.uiPort != null}
+				<!-- Kinds with a second listener (Mailpit's web UI) edit it right below. -->
+				<li class="flex items-center gap-3">
+					<span class="w-24 text-xs text-muted-foreground">{instance.label} · {t.uiPort}</span>
+					<Input
+						type="number"
+						min="1"
+						max="65535"
+						class="h-8 w-28 font-mono text-xs"
+						value={instance.uiPort}
+						oninput={(e) => (draft.value.services[i].uiPort = num(e))}
+						aria-label="{m.common.port} {instance.label} {t.uiPort}"
+					/>
+				</li>
+			{/if}
 		{/each}
 	</ul>
 </FormRow>

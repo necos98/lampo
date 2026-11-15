@@ -93,6 +93,14 @@ export interface DatabaseConnection {
 	database: string;
 }
 
+/** Where a project's mail goes: the shared Mailpit (plain SMTP, no auth, no TLS). */
+export interface MailConnection {
+	host: string;
+	smtpPort: number;
+	/** Web UI with the caught messages ("http://127.0.0.1:8025"). */
+	webUrl: string;
+}
+
 export interface Project {
 	id: string;
 	name: string;
@@ -105,6 +113,8 @@ export interface Project {
 	environment: ProjectEnvironment;
 	databaseName: string | null;
 	database: DatabaseConnection | null;
+	/** Set when the project uses Mailpit. */
+	mail?: MailConnection | null;
 	tls: TlsMode;
 	active: boolean;
 	originPreset: string | null;
@@ -361,6 +371,10 @@ export interface ServiceStatus {
 	state: ServiceState;
 	pid: number | null;
 	port: number | null;
+	/** Web UI port of kinds that have one (Mailpit). */
+	uiPort?: number | null;
+	/** "http://127.0.0.1:8025": what the "open web UI" button opens. */
+	uiUrl?: string | null;
 	message: string | null;
 	required: boolean;
 	requiredBy: string[];
@@ -477,13 +491,16 @@ export interface LogLines {
 // Settings
 // ---------------------------------------------------------------------------------------------
 
-/** One configured service instance ("mysql-8.4", "redis"). */
+/** One configured service instance ("mysql-8.4", "redis", "mailpit"). */
 export interface ServiceInstance {
 	service: string;
 	/** "MySQL 8.4"; ignored when saving. */
 	label: string;
+	/** Main port (Mailpit: SMTP). */
 	port: number;
 	alwaysOn: boolean;
+	/** Web UI port of kinds that have one (Mailpit), absent otherwise. */
+	uiPort?: number | null;
 }
 
 /** A service kind the backend registers (`list_service_kinds`), for the project editor. */

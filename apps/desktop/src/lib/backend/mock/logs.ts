@@ -21,7 +21,8 @@ const TEMPLATES: Record<string, string[]> = {
 	],
 	php: ['PHP Deprecated: Return type of Foo::count() should be compatible in {root}\\src\\Foo.php on line 22', 'PHP Warning: Undefined variable $user in {root}\\views\\nav.php on line 7', 'PHP Notice: A non well formed numeric value encountered in {root}\\lib\\money.php on line 130'],
 	mysql: ['[System] [MY-010931] [Server] ready for connections. port: 3306', '[Warning] [MY-010055] [Server] IP address could not be resolved', '[Note] [MY-013386] [Server] Running queries to upgrade MySQL server.'],
-	redis: ['* Ready to accept connections tcp', '- DB 0: 3 keys (0 volatile) in 4 slots HT.', '* 1 changes in 3600 seconds. Saving...']
+	redis: ['* Ready to accept connections tcp', '- DB 0: 3 keys (0 volatile) in 4 slots HT.', '* 1 changes in 3600 seconds. Saving...'],
+	mailpit: ['[smtpd] starting on 127.0.0.1:1025 (no encryption)', '[http] starting on 127.0.0.1:8025', '[smtpd] message received from shop@localhost via 127.0.0.1 (1 recipient)']
 };
 
 function family(source: string): keyof typeof TEMPLATES {
@@ -30,6 +31,7 @@ function family(source: string): keyof typeof TEMPLATES {
 	if (source.startsWith('error:') || source.endsWith('-error') || source === 'apache-error') return 'error';
 	if (source.startsWith('mysql')) return 'mysql';
 	if (source.startsWith('redis')) return 'redis';
+	if (source.startsWith('mailpit')) return 'mailpit';
 	return 'apache';
 }
 

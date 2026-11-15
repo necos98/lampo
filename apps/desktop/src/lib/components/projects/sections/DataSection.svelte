@@ -10,7 +10,7 @@
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import { messages as m } from '#lib/messages/index.js';
 	import { notifier } from '#lib/services/notifier.js';
-	import { copyText } from '#lib/services/platform.js';
+	import { copyText, openExternal } from '#lib/services/platform.js';
 	import { settings } from '#lib/stores/index.js';
 	import type { ProjectDraft } from '#lib/stores/projectDraft.svelte.js';
 	import { DATABASE_KIND, serviceVersion, setService, usesService } from '#lib/projects/services.js';
@@ -41,6 +41,17 @@
 
 	async function copyEnv() {
 		if (await copyText(envBlock)) notifier.success(m.common.copied);
+		else notifier.error(m.common.copyFailed);
+	}
+
+	const mail = $derived(project.mail ?? null);
+	// Mailpit takes plain SMTP: no credentials, no encryption.
+	const mailEnvBlock = $derived(
+		mail ? ['MAIL_MAILER=smtp', `MAIL_HOST=${mail.host}`, `MAIL_PORT=${mail.smtpPort}`, 'MAIL_USERNAME=null', 'MAIL_PASSWORD=null', 'MAIL_ENCRYPTION=null'].join('\n') : ''
+	);
+
+	async function copyMailEnv() {
+		if (await copyText(mailEnvBlock)) notifier.success(m.common.copied);
 		else notifier.error(m.common.copyFailed);
 	}
 </script>
@@ -86,5 +97,26 @@
 		<p class="mt-2 text-xs text-muted-foreground">{m.projects.envNotice}</p>
 	{:else}
 		<p class="text-sm text-muted-foreground">{t.noDatabase}</p>
+	{/if}
+</div>
+
+<div class="mt-4 rounded-md border bg-card p-3">
+	<div class="mb-2 flex items-center justify-between">
+		<h3 class="text-sm font-medium">{t.mail}</h3>
+		{#if mail}
+			<div class="flex gap-1.5">
+				<Button variant="outline" size="xs" onclick={() => openExternal(mail.webUrl)}>{t.openWebUi}</Button>
+				<Button variant="outline" size="xs" onclick={copyMailEnv}>{t.copyMailEnv}</Button>
+			</div>
+		{/if}
+	</div>
+	{#if mail}
+		<div class="flex flex-col gap-1">
+			<CopyField label={t.smtp} value="{mail.host}:{mail.smtpPort}" />
+			<CopyField label={t.webUi} value={mail.webUrl} />
+		</div>
+		<p class="mt-2 text-xs text-muted-foreground">{t.mailHelp}</p>
+	{:else}
+		<p class="text-sm text-muted-foreground">{t.noMail}</p>
 	{/if}
 </div>
