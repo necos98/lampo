@@ -163,6 +163,11 @@ export interface CreateProjectResult extends Project {
 	databaseSetup?: DatabaseSetup;
 }
 
+export interface DeleteProjectResult {
+	/** Own databases of the project's worktree environments, left in MySQL (never dropped). */
+	orphanedDatabases: string[];
+}
+
 // --- New project setup (`scaffold_project`) ---
 
 export type StarterKit = 'none' | 'react' | 'vue' | 'livewire' | 'svelte';
@@ -466,6 +471,15 @@ export interface PruneReport {
 	dryRun: boolean;
 	removed: string[];
 	droppedDatabases: string[];
+	/** Environments that could not be removed (still registered); the others were removed. */
+	failed: PruneFailure[];
+}
+
+export interface PruneFailure {
+	/** "shop@feature-login" */
+	site: string;
+	code: ErrorCode;
+	message: string;
 }
 
 // ---------------------------------------------------------------------------------------------

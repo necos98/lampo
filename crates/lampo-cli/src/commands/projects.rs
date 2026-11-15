@@ -68,6 +68,8 @@ pub struct ProjectRemovedDto {
     pub was_active: bool,
     /// Worktree environments unregistered with it (their folders are kept too).
     pub worktree_environments: usize,
+    /// The worktree environments' own databases, kept in MySQL and no longer used by any site.
+    pub orphaned_databases: Vec<String>,
 }
 
 /// Reads the project (file-based: unknown id = exit 3 without starting the app), then removes it.
@@ -77,7 +79,8 @@ async fn remove(c: &Cmd<'_>, id: Option<String>, yes: bool) -> AppResult<()> {
         return Err(validation(format!("refusing to remove project `{project_id}` without --yes (lampo never prompts; its folder and databases are kept)")));
     }
     let project = c.ctx.projects.get(&project_id)?;
-    let _: serde_json::Value = c.app(ControlRequest::ProjectDelete { project_id: project.id.clone() }).await?;
+    // `null` from an app that predates the result.
+    let result: Option<DeleteProjectResultDto> = c.app(ControlRequest::ProjectDelete { project_id: project.id.clone() }).await?;
     let removed = ProjectRemovedDto {
         project_id: project.id,
         name: project.name,
@@ -85,11 +88,17 @@ async fn remove(c: &Cmd<'_>, id: Option<String>, yes: bool) -> AppResult<()> {
         database_name: project.database_name,
         was_active: project.active,
         worktree_environments: project.worktrees.len(),
+        orphaned_databases: result.unwrap_or_default().orphaned_databases,
     };
     c.io.emit(&removed, |r| {
         let worktrees = if r.worktree_environments > 0 { format!(" with {} worktree environment(s)", r.worktree_environments) } else { String::new() };
         let database = r.database_name.as_deref().map(|db| format!(" and database `{db}`")).unwrap_or_default();
-        format!("removed project {} ({}){worktrees} from Lampo; folder {}{database} kept", r.project_id, r.name, r.root)
+        let orphaned = if r.orphaned_databases.is_empty() {
+            String::new()
+        } else {
+            format!("; worktree databases {} kept in MySQL", r.orphaned_databases.iter().map(|d| format!("`{d}`")).collect::<Vec<_>>().join(", "))
+        };
+        format!("removed project {} ({}){worktrees} from Lampo; folder {}{database} kept{orphaned}", r.project_id, r.name, r.root)
     });
     Ok(())
 }

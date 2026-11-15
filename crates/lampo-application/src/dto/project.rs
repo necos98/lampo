@@ -156,6 +156,16 @@ pub struct CreateProjectResultDto {
     pub database_setup: Option<super::database::DatabaseSetupDto>,
 }
 
+/// Result of removing a project: what was kept on purpose and is no longer reachable from Lampo.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteProjectResultDto {
+    /// The own databases of its worktree environments, left in MySQL (a removal never drops a
+    /// database): drop them by hand if they are not needed.
+    #[serde(default)]
+    pub orphaned_databases: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateProjectRequest {

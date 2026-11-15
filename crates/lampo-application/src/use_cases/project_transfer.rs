@@ -10,7 +10,8 @@ use lampo_domain::ports::{FileSystemInspector, ProjectRepository, ProjectTransfe
 use lampo_domain::project::{TlsMode, unique_project_id};
 use lampo_domain::project_import::ImportedProject;
 
-use super::projects::{ProjectWriter, existing_folder, require_hosts_elevation};
+use super::project_writer::ProjectWriter;
+use super::projects::{existing_folder, require_project_hosts_elevation};
 use super::support::{load_project, validation};
 use crate::context::CallContext;
 use crate::dto::{ExportProjectRequest, ImportProjectRequest, ImportProjectResultDto};
@@ -53,7 +54,8 @@ impl ImportProject {
     /// folder is kept even if missing here (relink later). When the id is already taken it gets
     /// a numeric suffix and its addresses are regenerated for the new id (the old ones would
     /// collide with the existing project). Exported addresses are otherwise kept and validated
-    /// like any other save (`Conflict` when a loopback port belongs to another site). A project
+    /// like any other save (`Conflict` when a loopback port belongs to another site; `Validation`
+    /// or `PackageMissing` for a MySQL instance or add-on this machine lacks). A project
     /// with hosts-file names needs elevation (`ElevationRequired`, nothing imported, otherwise).
     pub async fn execute(&self, request: ImportProjectRequest, ctx: &CallContext) -> AppResult<ImportProjectResultDto> {
         if request.file.trim().is_empty() {
@@ -67,8 +69,7 @@ impl ImportProject {
         project.tls = TlsMode::Disabled;
         let project = self
             .writer
-            .allocator
-            .reserve(|snap| {
+            .insert(|snap| {
                 let id = unique_project_id(&snap.projects, &project.id);
                 if id != project.id {
                     project.set_addresses(SiteAddress::defaults_for(id.as_str(), &snap.settings.tld)?)?;
@@ -77,13 +78,10 @@ impl ImportProject {
                     }
                     project.id = id;
                 }
-                let names: Vec<String> = project.hosts_file_names().map(ToString::to_string).collect();
-                require_hosts_elevation(ctx, &names, &format!("importing `{}`", project.id), "nothing was imported")?;
-                self.writer.save_checked(snap, &project, true)?;
+                require_project_hosts_elevation(ctx, &project, "importing", "nothing was imported")?;
                 Ok(project)
             })
             .await?;
-        self.writer.changed(&project.id);
         let project = self.writer.finish(&project, ctx).await?;
         Ok(ImportProjectResultDto { project, dropped_apache_directives: dropped.apache_directives, dropped_php_ini_keys: dropped.php_ini_keys })
     }

@@ -48,7 +48,10 @@ export class WorktreesStore {
 	}
 
 	async prune(projectId: string, dropDatabases: boolean) {
-		const result = await this.#runner.run<PruneReport>(() => this.#backend.commands.pruneWorktrees({ projectId, dryRun: false, dropDatabases }), { success: m.worktrees.pruned });
+		const result = await this.#runner.run<PruneReport>(() => this.#backend.commands.pruneWorktrees({ projectId, dryRun: false, dropDatabases }), {
+			success: m.worktrees.pruned,
+			warning: (r) => (r.failed.length ? m.worktrees.prunedPartially(r.failed.map((f) => `${f.site}: ${f.message}`).join('; ')) : null)
+		});
 		if (result.ok) await this.list.load();
 		return result;
 	}

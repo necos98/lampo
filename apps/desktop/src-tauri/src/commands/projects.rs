@@ -30,7 +30,7 @@ pub async fn update_project(state: State<'_, AppState>, request: UpdateProjectRe
 }
 
 #[tauri::command]
-pub async fn delete_project(state: State<'_, AppState>, project_id: String) -> AppResult<()> {
+pub async fn delete_project(state: State<'_, AppState>, project_id: String) -> AppResult<DeleteProjectResultDto> {
     state.delete_project.execute(&project_id, &CallContext::GUI).await
 }
 

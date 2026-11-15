@@ -213,15 +213,19 @@ pub fn worktree_down(result: &WorktreeDownResultDto) -> String {
 }
 
 pub fn prune(report: &PruneReportDto) -> String {
-    let verb = if report.dry_run { "Would remove" } else { "Removed" };
-    if report.removed.is_empty() {
+    if report.removed.is_empty() && report.failed.is_empty() {
         return "No stale worktree environments.".into();
     }
-    let mut out = format!("{verb} {} environment(s): {}", report.removed.len(), report.removed.join(", "));
-    if !report.dropped_databases.is_empty() {
-        out.push_str(&format!("\n{} databases: {}", if report.dry_run { "Would drop" } else { "Dropped" }, report.dropped_databases.join(", ")));
+    let mut lines = Vec::new();
+    if !report.removed.is_empty() {
+        let verb = if report.dry_run { "Would remove" } else { "Removed" };
+        lines.push(format!("{verb} {} environment(s): {}", report.removed.len(), report.removed.join(", ")));
     }
-    out
+    if !report.dropped_databases.is_empty() {
+        lines.push(format!("{} databases: {}", if report.dry_run { "Would drop" } else { "Dropped" }, report.dropped_databases.join(", ")));
+    }
+    lines.extend(report.failed.iter().map(|f| format!("Could not remove {}: {}", f.site, f.message)));
+    lines.join("\n")
 }
 
 pub fn sync_report(report: &SyncReportDto) -> String {

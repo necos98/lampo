@@ -480,6 +480,8 @@ pub struct FakeDb {
     pub fail_clone: AtomicBool,
     /// `create` fails (MySQL error) without creating anything.
     pub fail_create: AtomicBool,
+    /// `drop_database` fails (MySQL error) for these names, dropping nothing.
+    pub fail_drop_of: Mutex<BTreeSet<String>>,
 }
 impl FakeDb {
     pub fn has(&self, name: &str) -> bool {
@@ -506,6 +508,9 @@ impl DatabaseAdmin for FakeDb {
     }
     async fn drop_database(&self, e: &MysqlEndpoint, name: &DatabaseName) -> PortResult<()> {
         lock(&self.calls).push(format!("drop:{}:{name}", e.port));
+        if lock(&self.fail_drop_of).contains(name.as_str()) {
+            return Err(PortError::process("mysql", "ERROR 1010: error dropping database"));
+        }
         lock(&self.dbs).remove(name.as_str());
         Ok(())
     }
@@ -976,20 +981,31 @@ impl World {
         Arc::new(ProjectQueries::new(self.projects.clone(), self.worktrees.clone(), self.settings.clone(), self.fs.clone()))
     }
 
+    /// The rules of every project save; every installed PHP ships [`FAKE_BUNDLED_EXTENSIONS`].
+    pub fn project_policy(&self) -> Arc<ProjectEnvironmentPolicy> {
+        let scanner = Arc::new(FakeExtensionScanner(FAKE_BUNDLED_EXTENSIONS));
+        Arc::new(ProjectEnvironmentPolicy::new(self.services.clone(), self.installed.clone(), Arc::new(PhpExtensionsQuery::new(self.installed.clone(), scanner))))
+    }
+
     /// The writer every project-mutating use case takes, syncing through `env`.
     pub fn project_writer_with(&self, env: Arc<dyn EnvironmentSync>) -> ProjectWriter {
-        ProjectWriter {
+        ProjectWriter::new(ProjectWriterDeps {
             projects: self.projects.clone(),
             allocator: self.allocator.clone(),
             env,
             events: self.events.clone(),
             queries: self.project_queries(),
-            services: self.services.clone(),
-        }
+            policy: self.project_policy(),
+        })
     }
 
     pub fn project_writer(&self) -> ProjectWriter {
         self.project_writer_with(self.env.clone())
+    }
+
+    /// `delete_project`, syncing through `env`.
+    pub fn delete_project_with(&self, env: Arc<dyn EnvironmentSync>) -> DeleteProject {
+        DeleteProject::new(self.project_writer_with(env), self.worktrees.clone(), self.events.clone())
     }
 
     pub fn import_project(&self, transfer: Arc<FakeTransfer>) -> ImportProject {
@@ -1000,10 +1016,9 @@ impl World {
         RelinkProject::new(self.project_writer(), self.fs.clone())
     }
 
-    /// `lampo project set`, syncing through `env`; every installed PHP ships [`FAKE_BUNDLED_EXTENSIONS`].
+    /// `lampo project set`, syncing through `env`.
     pub fn patch_project_with(&self, env: Arc<dyn EnvironmentSync>) -> PatchProjectEnvironment {
-        let scanner = Arc::new(FakeExtensionScanner(FAKE_BUNDLED_EXTENSIONS));
-        PatchProjectEnvironment::new(self.project_writer_with(env), self.installed.clone(), Arc::new(PhpExtensionsQuery::new(self.installed.clone(), scanner)))
+        PatchProjectEnvironment::new(self.project_writer_with(env))
     }
 
     pub fn patch_project(&self) -> PatchProjectEnvironment {

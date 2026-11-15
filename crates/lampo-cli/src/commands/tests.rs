@@ -354,6 +354,17 @@ async fn worktree_up_and_down() {
     assert!(out.contains("Would remove 1"));
     let (ControlRequest::WorktreePrune(r), _) = fake.last_request() else { panic!("wrong request") };
     assert_eq!((r.project_id.as_deref(), r.dry_run), (Some("shop"), true));
+
+    // A partial failure: the whole report is printed, the exit code is the failure's.
+    let failed = json!({"dryRun": false, "removed": ["shop@a"], "droppedDatabases": [], "failed": [{"site": "shop@b", "code": "process-failed", "message": "mysql: ERROR 1010"}]});
+    fake.reply(Ok(failed.clone()));
+    let (code, out, _) = run_cli(&fake, &["worktree", "prune"]).await;
+    assert_eq!(code, 12);
+    assert!(out.contains("Removed 1 environment(s): shop@a") && out.contains("Could not remove shop@b: mysql: ERROR 1010"), "{out}");
+    fake.reply(Ok(failed));
+    let (code, out, _) = run_cli(&fake, &["worktree", "prune", "--json"]).await;
+    assert_eq!(code, 12);
+    assert_eq!(parse(&out)["failed"][0]["site"], "shop@b", "one JSON document: the report");
 }
 
 #[tokio::test]
@@ -814,13 +825,25 @@ async fn project_remove_needs_yes_and_reports_what_was_kept() {
     fake.reply(Ok(Value::Null));
     let (code, out, _) = run_cli(&fake, &["project", "remove", "--yes", "--json"]).await;
     assert_eq!(code, 0, "{out}");
-    assert_eq!(parse(&out), json!({"projectId": "shop", "name": "Shop", "root": "C:\\work\\shop", "databaseName": "shop", "wasActive": true, "worktreeEnvironments": 0}));
+    assert_eq!(
+        parse(&out),
+        json!({"projectId": "shop", "name": "Shop", "root": "C:\\work\\shop", "databaseName": "shop", "wasActive": true, "worktreeEnvironments": 0, "orphanedDatabases": []}),
+        "`null` from an app that predates the result"
+    );
     assert_eq!(fake.last_request().0, ControlRequest::ProjectDelete { project_id: "shop".into() });
 
-    fake.reply(Ok(Value::Null));
+    fake.reply(Ok(json!({"orphanedDatabases": []})));
     let (code, out, _) = run_cli(&fake, &["project", "remove", "shop", "--yes"]).await;
     assert_eq!(code, 0);
     assert!(out.contains("removed project shop (Shop) from Lampo; folder C:\\work\\shop and database `shop` kept"), "{out}");
+
+    fake.reply(Ok(json!({"orphanedDatabases": ["shop_wt_login"]})));
+    let (code, out, _) = run_cli(&fake, &["project", "remove", "shop", "--yes", "--json"]).await;
+    assert_eq!(code, 0);
+    assert_eq!(parse(&out)["orphanedDatabases"], json!(["shop_wt_login"]));
+    fake.reply(Ok(json!({"orphanedDatabases": ["shop_wt_login"]})));
+    let (_, out, _) = run_cli(&fake, &["project", "remove", "shop", "--yes"]).await;
+    assert!(out.contains("; worktree databases `shop_wt_login` kept in MySQL"), "{out}");
 
     fake.reply(Err(AppError::new(ErrorCode::ElevationRequired, "removing `shop` changes the hosts file")));
     let (code, _, _) = run_cli(&fake, &["project", "remove", "shop", "--yes"]).await;

@@ -68,7 +68,7 @@ pub enum ControlRequest {
     ProjectSetPhp(SetProjectPhpRequest),
     /// Partial environment change (`lampo project set`). → [`ProjectDto`]
     ProjectPatch(ProjectPatchRequest),
-    /// → `null`
+    /// → [`DeleteProjectResultDto`]
     ProjectDelete { project_id: String },
     /// Imports an exported project (`lampo project import`). → [`ImportProjectResultDto`] (a
     /// [`ProjectDto`] plus what was left out of the file)

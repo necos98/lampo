@@ -342,9 +342,11 @@ export function createMockBackend({ fresh }: Options): Backend {
 		deleteProject: async (id) => {
 			await sleep(250);
 			find(id);
+			const orphanedDatabases = worktrees.flatMap((w) => (w.projectId === id && w.databaseMode.mode !== 'shared' && w.database ? [w.database.database] : []));
 			projects = projects.filter((p) => p.id !== id);
 			worktrees = worktrees.filter((w) => w.projectId !== id);
 			syncProject(id);
+			return { orphanedDatabases };
 		},
 		setProjectActive: async ({ projectId, active }) => {
 			await sleep(300);
@@ -567,7 +569,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 					syncProject(id);
 				}
 			}
-			return { dryRun, removed: stale.map((w) => w.site), droppedDatabases: dropDatabases ? stale.flatMap((w) => (w.database ? [w.database.database] : [])) : [] };
+			return { dryRun, removed: stale.map((w) => w.site), droppedDatabases: dropDatabases ? stale.flatMap((w) => (w.database ? [w.database.database] : [])) : [], failed: [] };
 		},
 
 		// Logs

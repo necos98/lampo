@@ -74,7 +74,10 @@ export class ProjectsStore {
 	}
 
 	remove(projectId: string) {
-		return this.#runner.run(() => this.#backend.commands.deleteProject(projectId), { success: m.projects.deleted });
+		return this.#runner.run(() => this.#backend.commands.deleteProject(projectId), {
+			success: m.projects.deleted,
+			warning: (r) => (r.orphanedDatabases.length ? m.projects.deletedWithOrphanedDatabases(r.orphanedDatabases.join(', ')) : null)
+		});
 	}
 
 	relink(request: RelinkProjectRequest) {

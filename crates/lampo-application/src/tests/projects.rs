@@ -155,7 +155,7 @@ async fn the_cli_gets_elevation_required_when_a_new_hostname_needs_the_hosts_fil
     w.fs.add("C:\\sites\\shop");
     let err = create(&w, None).execute(req("C:\\sites\\shop"), &cli()).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::ElevationRequired);
-    assert_eq!(w.projects.list().unwrap().len(), 1, "the project is saved; only the hosts file waits");
+    assert!(w.projects.list().unwrap().is_empty(), "refused before saving: a retry with --allow-elevation creates it");
 }
 
 #[tokio::test]
@@ -201,7 +201,7 @@ async fn activate_set_php_relink_update_and_delete() {
     let wt = WorktreeEnvironment::derive(&parent, &[], ProjectRoot::new("D:\\wt\\a").unwrap(), None, 8100, &DatabaseMode::Shared, 1).unwrap();
     w.worktrees.save(&wt).unwrap();
     assert_eq!(queries.get("shop").unwrap().worktrees.len(), 1);
-    DeleteProject::new(w.projects.clone(), w.worktrees.clone(), sync.clone(), w.events.clone()).execute("shop", &cli()).await.unwrap();
+    w.delete_project_with(sync.clone()).execute("shop", &cli()).await.unwrap();
     assert!(w.projects.list().unwrap().is_empty());
     assert!(w.worktrees.list_all().unwrap().is_empty());
     assert!(w.events.all().contains(&DomainEvent::WorktreesChanged { project: ProjectId::new("shop").unwrap() }));
@@ -649,7 +649,7 @@ async fn delete_from_the_cli_needs_elevation_only_for_hosts_file_names() {
     w.project("api", r"C:\sites\api", true);
     one_address(&w, "api", "api.localhost");
     w.hosts_in_sync();
-    let delete = DeleteProject::new(w.projects.clone(), w.worktrees.clone(), w.env.clone(), w.events.clone());
+    let delete = w.delete_project_with(w.env.clone());
 
     let err = delete.execute("shop", &cli()).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::ElevationRequired);

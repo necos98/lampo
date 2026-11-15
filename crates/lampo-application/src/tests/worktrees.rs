@@ -204,3 +204,27 @@ async fn stale_environments_are_detected_and_pruned() {
     assert_eq!(left[0].root, ProjectRoot::new("D:\\wt\\cart").unwrap());
     assert!(!w.web.last().unwrap().vhosts.iter().any(|v| v.site.to_string() == "shop@feature-login"));
 }
+
+#[tokio::test]
+async fn prune_reports_a_failed_environment_and_still_removes_and_syncs_the_others() {
+    let w = setup();
+    up(&w, r"D:\wt\login", DatabaseModeDto::Fresh).await.unwrap();
+    up(&w, r"D:\wt\cart", DatabaseModeDto::Fresh).await.unwrap();
+    w.fs.remove(r"D:\wt\login");
+    w.fs.remove(r"D:\wt\cart");
+    w.db.fail_drop_of.lock().unwrap().insert("shop_wt_feature_login".into());
+    let events = w.events.all().len();
+
+    let report = w.prune_worktrees().execute(PruneWorktreesRequest { project_id: None, dry_run: false, drop_databases: true }, &gui()).await.unwrap();
+    assert_eq!(report.removed, ["shop@feature-cart"]);
+    assert_eq!(report.dropped_databases, ["shop_wt_feature_cart"]);
+    assert_eq!(report.failed.len(), 1);
+    assert_eq!((report.failed[0].site.as_str(), report.failed[0].code), ("shop@feature-login", ErrorCode::ProcessFailed));
+    assert!(report.failed[0].message.contains("ERROR 1010"), "{}", report.failed[0].message);
+    // The failed one stays registered with its database, for a retry.
+    let left = w.worktrees.list_all().unwrap();
+    assert_eq!(left.iter().map(|e| e.root.as_str()).collect::<Vec<_>>(), [r"D:\wt\login"]);
+    assert!(w.db.has("shop_wt_feature_login"));
+    assert!(w.events.all()[events..].contains(&DomainEvent::WorktreesChanged { project: lampo_domain::project::ProjectId::new("shop").unwrap() }));
+    assert!(!w.web.last().unwrap().vhosts.iter().any(|v| v.site.to_string() == "shop@feature-cart"), "synced");
+}

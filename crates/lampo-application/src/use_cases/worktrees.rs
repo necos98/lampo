@@ -312,9 +312,12 @@ impl PruneWorktrees {
         Ok(envs.into_iter().filter(|w| w.is_stale(&projects, |root| self.fs.is_dir(root.as_path()))).collect())
     }
 
+    /// Removes every stale environment it can; one that fails (its database cannot be dropped,
+    /// its config cannot be deleted) is reported in `failed` and stays registered for a retry,
+    /// while the others are removed, published and synced all the same.
     pub async fn execute(&self, request: PruneWorktreesRequest, ctx: &CallContext) -> AppResult<PruneReportDto> {
         let stale = self.stale(request.project_id.as_deref())?;
-        let mut report = PruneReportDto { dry_run: request.dry_run, removed: Vec::new(), dropped_databases: Vec::new() };
+        let mut report = PruneReportDto { dry_run: request.dry_run, removed: Vec::new(), dropped_databases: Vec::new(), failed: Vec::new() };
         if request.dry_run {
             report.removed = stale.iter().map(|w| w.site_id().to_string()).collect();
             report.dropped_databases = if request.drop_databases { stale.iter().filter_map(|w| w.owned_database()).map(|n| n.to_string()).collect() } else { Vec::new() };
@@ -322,17 +325,15 @@ impl PruneWorktrees {
         }
         let mut parents = std::collections::BTreeSet::new();
         for env in &stale {
-            if request.drop_databases {
-                // An orphan's MySQL series is unknown: its database cannot be located.
-                if self.projects.get(&env.parent)?.is_some() {
-                    if let Some(name) = self.databases.drop_owned(env).await? {
-                        report.dropped_databases.push(name.to_string());
-                    }
+            match self.prune_one(env, request.drop_databases, &mut report).await {
+                Ok(()) => {
+                    parents.insert(env.parent.clone());
+                }
+                Err(e) => {
+                    tracing::warn!("could not prune {}: {e}", env.site_id());
+                    report.failed.push(PruneFailureDto { site: env.site_id().to_string(), code: e.code, message: e.message });
                 }
             }
-            self.worktrees.delete(&env.parent, &env.slug)?;
-            report.removed.push(env.site_id().to_string());
-            parents.insert(env.parent.clone());
         }
         for project in parents {
             self.events.publish(DomainEvent::WorktreesChanged { project });
@@ -341,5 +342,19 @@ impl PruneWorktrees {
             sync_without_elevation(self.env.as_ref(), ctx).await?;
         }
         Ok(report)
+    }
+
+    /// Drops the environment's own database (if asked), then unregisters it, recording both in
+    /// `report`. A failed drop leaves it registered.
+    async fn prune_one(&self, env: &WorktreeEnvironment, drop_database: bool, report: &mut PruneReportDto) -> AppResult<()> {
+        // An orphan's MySQL series is unknown: its database cannot be located.
+        if drop_database && self.projects.get(&env.parent)?.is_some() {
+            if let Some(name) = self.databases.drop_owned(env).await? {
+                report.dropped_databases.push(name.to_string());
+            }
+        }
+        self.worktrees.delete(&env.parent, &env.slug)?;
+        report.removed.push(env.site_id().to_string());
+        Ok(())
     }
 }

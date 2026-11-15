@@ -1,4 +1,5 @@
 import type { Project, ProjectEnvironment, SiteAddress, TlsMode, UpdateProjectRequest } from '../api/index.js';
+import { DATABASE_KIND, usesService } from '../projects/services.js';
 
 const plain = <V>(v: V): V => JSON.parse(JSON.stringify(v)) as V;
 
@@ -51,13 +52,15 @@ export class ProjectDraft {
 		return this.name.trim().length > 0 && this.addresses.length > 0 && this.addresses.every(isAddressFilled);
 	}
 
+	/** The database name is only sent while the project uses MySQL (the backend refuses it otherwise). */
 	toRequest(): UpdateProjectRequest {
+		const databaseName = usesService(this.environment, DATABASE_KIND) ? this.databaseName?.trim() : null;
 		return {
 			projectId: this.projectId,
 			name: this.name.trim(),
 			addresses: plain(this.addresses),
 			environment: plain(this.environment),
-			databaseName: this.databaseName && this.databaseName.trim() ? this.databaseName.trim() : null,
+			databaseName: databaseName || null,
 			tls: this.tls
 		};
 	}

@@ -73,23 +73,33 @@ win), a `mail` object (host, SMTP port, web URL) in `ProjectDto` and `agent cont
 Docker detector maps `axllent/mailpit` and `mailhog/mailhog` (with a warning) to it.
 
 Loopback ports are handed out by one `LoopbackPortAllocator` (shared by project creation and
-`worktree up`), which also serialises every project save with its conflict check.
+`worktree up`), which also serialises every project save and removal with its conflict check.
+`ProjectWriter` is the only way to save or remove a project (its fields are private): under that
+lock it runs `ProjectEnvironmentPolicy` and `check_conflicts`, then saves. The policy is the
+same for every front-end and path (GUI update, CLI patch, create, import, PHP switch): add-ons
+installed for the project's PHP, bundled extensions present in its `ext` dir, MySQL series
+configured in the settings, checked for what a save introduces (a PHP switch re-checks every
+add-on; a bundled extension is checked when added to an existing project, since a build
+without it only comments its php.ini line out), so a project left outdated by an uninstall can
+still be renamed or switched off. A database name without MySQL is refused, not dropped.
+`DeleteProject` removes the project first and then its worktree environments, inside the lock,
+so a concurrent edit never brings it back; it returns the worktree databases it leaves in MySQL
+(`orphanedDatabases`). `lampo worktree prune` removes what it can and reports the rest in
+`failed` (exit code of the first failure), publishing and syncing the removals all the same.
 
 The GUI saves a whole project (`UpdateProject`); the CLI edits one with `lampo project set`
 (`PatchProjectEnvironment`, control request `project-patch`): a patch of extensions, add-ons,
 php.ini values, services, database name, public folder and Apache directives, applied to the
-stored project under that same lock, so a CLI edit never reverts a concurrent GUI save. It
-also checks what the GUI only offers as choices: add-ons installed for the project's PHP,
-bundled extensions present in its `ext` dir, MySQL series configured in the settings.
+stored project under that same lock, so a CLI edit never reverts a concurrent GUI save.
 The same patch renames (`lampo project rename`, `--name`) and adds or removes addresses
 (`--address`/`--no-address`, the displayed form parsed by `SiteAddress::parse`; `loopback`
 draws a free port from the allocator in the same commit). Additions are appended (the first
 address stays primary), at least one must remain, and `check_conflicts` refuses names and ports
 of other sites. `lampo project remove` sends `project-delete` (`DeleteProject`, as the GUI);
 `lampo project import` sends `project-import` (`ImportProject`, as the GUI).
-From the CLI, a patch that changes hosts-file names or removes a project that has some fails
-with `ElevationRequired` *before* saving anything unless `--allow-elevation`, so a retry with
-the flag finds the same state.
+From the CLI, a create, import or patch that adds or removes hosts-file names, or the removal
+of a project that has some, fails with `ElevationRequired` *before* saving anything unless
+`--allow-elevation`, so a retry with the flag finds the same state.
 
 Custom Apache directives reach the vhost verbatim and come from the GUI, the CLI, agents and
 imported files, so they are untrusted: `ApacheDirectives::new` refuses whatever runs programs,

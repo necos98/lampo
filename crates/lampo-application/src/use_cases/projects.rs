@@ -1,8 +1,8 @@
 //! Project CRUD and lifecycle. Config only: these never touch the project folder or `.env`.
 //!
-//! Every use case that saves a project does it through [`ProjectWriter`]: under the shared
-//! [`LoopbackPortAllocator`] lock, after `project::check_conflicts` against every project *and
-//! every worktree environment*. The rule cannot be skipped by forgetting an optional builder.
+//! Every use case that saves or removes a project does it through [`ProjectWriter`] (under the
+//! shared allocator lock, after the environment policy and the conflict checks): the rules
+//! cannot be skipped by forgetting an optional builder.
 
 use std::sync::Arc;
 
@@ -14,14 +14,15 @@ use lampo_domain::package::PackageKind;
 use lampo_domain::php::PhpMinor;
 use lampo_domain::ports::{EventPublisher, FileSystemInspector, InstalledPackageRegistry, ProjectDetector, ProjectRepository, SettingsRepository, WorktreeRepository};
 use lampo_domain::preset::Preset;
-use lampo_domain::project::{DisplayName, Project, ProjectEnvironment, ProjectId, ProjectRoot, TlsMode, check_conflicts, unique_project_id};
+use lampo_domain::project::{DisplayName, Project, ProjectEnvironment, ProjectId, ProjectRoot, TlsMode, unique_project_id};
 use lampo_domain::service::ServiceKind;
+use lampo_domain::worktree::WorktreeEnvironment;
 
 use super::allocation::{LoopbackPortAllocator, SiteSnapshot};
 use super::database::DatabaseService;
-use super::environment::EnvironmentSync;
 use super::presets::PresetQueries;
-use super::service_catalog::ServiceCatalog;
+use super::project_policy::require_mysql_for_database;
+use super::project_writer::ProjectWriter;
 use super::support::{load_project, newest_of, package_missing, parse_project_id, project_dto, validation};
 use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::*;
@@ -135,64 +136,6 @@ impl DetectProject {
     }
 }
 
-/// What every project-mutating use case needs: the repository, the allocator owning the
-/// loopback-port lock, the environment sync, events and the full project view. All required.
-#[derive(Clone)]
-pub struct ProjectWriter {
-    pub projects: Arc<dyn ProjectRepository>,
-    pub allocator: Arc<LoopbackPortAllocator>,
-    pub env: Arc<dyn EnvironmentSync>,
-    pub events: Arc<dyn EventPublisher>,
-    pub queries: Arc<ProjectQueries>,
-    /// Registered service kinds: a project may only use these.
-    pub services: Arc<ServiceCatalog>,
-}
-
-impl ProjectWriter {
-    /// Validates `candidate` (its custom Apache directives against the current policy, its
-    /// services, its conflicts with every project and worktree environment) and saves it. Call
-    /// only inside an allocator commit (`snap` comes from it).
-    pub(super) fn save_checked(&self, snap: &SiteSnapshot, candidate: &Project, is_new: bool) -> AppResult<()> {
-        // A stored project may predate a rule: it loads, but is never saved again unfixed.
-        candidate.environment.apache_directives.validate()?;
-        self.services.validate_environment(&candidate.environment)?;
-        check_conflicts(&snap.projects, &snap.worktrees, candidate, is_new, &snap.settings)?;
-        self.projects.save(candidate)?;
-        Ok(())
-    }
-
-    /// Loads `project_id`, applies `change` and, if it reports a change, saves the result, all
-    /// under the allocator lock (no lost update, no conflict slipping in).
-    pub(crate) async fn modify(&self, project_id: &str, change: impl FnOnce(&mut Project, &SiteSnapshot) -> AppResult<bool>) -> AppResult<Project> {
-        self.allocator.reserve(|snap| self.commit_change(project_id, snap, change)).await
-    }
-
-    /// Like [`Self::modify`], also handing `change` a free loopback port picked under the same
-    /// lock (it may leave it unused).
-    pub(crate) async fn modify_with_free_port(&self, project_id: &str, change: impl FnOnce(&mut Project, &SiteSnapshot, u16) -> AppResult<bool>) -> AppResult<Project> {
-        self.allocator.allocate(|port, snap| self.commit_change(project_id, snap, |project, snap| change(project, snap, port))).await
-    }
-
-    fn commit_change(&self, project_id: &str, snap: &SiteSnapshot, change: impl FnOnce(&mut Project, &SiteSnapshot) -> AppResult<bool>) -> AppResult<Project> {
-        let mut project = load_project(self.projects.as_ref(), project_id)?;
-        if change(&mut project, snap)? {
-            self.save_checked(snap, &project, false)?;
-            self.changed(&project.id);
-        }
-        Ok(project)
-    }
-
-    pub(super) fn changed(&self, id: &ProjectId) {
-        self.events.publish(DomainEvent::ProjectsChanged { changed: vec![id.clone()] });
-    }
-
-    /// Syncs, then returns the full view of `project`.
-    pub(crate) async fn finish(&self, project: &Project, ctx: &CallContext) -> AppResult<ProjectDto> {
-        self.env.sync(ctx).await?;
-        self.queries.get(project.id.as_str())
-    }
-}
-
 /// Registers a folder as a project (copying a preset), creates its MySQL database, then syncs
 /// the environment.
 pub struct CreateProject {
@@ -223,7 +166,7 @@ impl CreateProject {
     /// registered, unversioned kinds (a versioned one, MySQL, keeps the preset's series).
     fn add_detected_services(&self, environment: &mut ProjectEnvironment, detected: &[String]) {
         for kind in detected.iter().filter_map(|k| ServiceKind::new(k.as_str()).ok()) {
-            let known = self.writer.services.descriptor(&kind).is_some_and(|d| !d.versioned());
+            let known = self.writer.services().descriptor(&kind).is_some_and(|d| !d.versioned());
             if known && !environment.uses(&kind) {
                 environment.use_service(kind, None);
             }
@@ -231,9 +174,11 @@ impl CreateProject {
     }
 
     /// Fills omitted fields (see [`CreateProjectRequest`]), allocates a loopback port for
-    /// `AddressingDto::NoElevation` (atomically with the save), checks conflicts, saves,
-    /// publishes `ProjectsChanged`, creates the database (when the project uses MySQL and
-    /// `create_database`), syncs.
+    /// `AddressingDto::NoElevation` (atomically with the save), checks the rules of every save,
+    /// saves, publishes `ProjectsChanged`, creates the database (when the project uses MySQL and
+    /// `create_database`), syncs. A project with hosts-file names needs elevation
+    /// (`ElevationRequired`, nothing created, otherwise), so a retry with `--allow-elevation`
+    /// creates it instead of finding a half-done first attempt.
     ///
     /// PHP: the request's `phpVersion`, else the preset's — raised to the detected minimum
     /// (`composer.json` `require.php`, a container image) when the preset's PHP is older than that.
@@ -277,14 +222,13 @@ impl CreateProject {
             let mut project = Project::new(id, name.clone(), root.clone(), addresses, environment.clone())?;
             project.origin_preset = Some(preset.id.clone());
             project.set_active(request.activate);
-            self.writer.save_checked(snap, &project, true)?;
+            require_project_hosts_elevation(ctx, &project, "creating", "nothing was created")?;
             Ok(project)
         };
         let project = match (&explicit, request.addressing) {
-            (None, AddressingDto::NoElevation) => self.writer.allocator.allocate(|port, snap| build(snap, Some(port))).await?,
-            _ => self.writer.allocator.reserve(|snap| build(snap, None)).await?,
+            (None, AddressingDto::NoElevation) => self.writer.insert_with_free_port(|snap, port| build(snap, Some(port))).await?,
+            _ => self.writer.insert(|snap| build(snap, None)).await?,
         };
-        self.writer.changed(&project.id);
         let database_setup = if request.create_database { self.databases.provision_project(&project).await } else { None };
         let project = self.writer.finish(&project, ctx).await?;
         Ok(CreateProjectResultDto { project, database_setup })
@@ -300,7 +244,8 @@ impl UpdateProject {
         Self { writer }
     }
 
-    /// `Unsupported` for `tls: local-ca` until the local CA exists.
+    /// `Unsupported` for `tls: local-ca` until the local CA exists; `Validation` for a database
+    /// name without MySQL. The environment goes through the same rules as `lampo project set`.
     pub async fn execute(&self, request: UpdateProjectRequest, ctx: &CallContext) -> AppResult<ProjectDto> {
         if request.tls == TlsModeDto::LocalCa {
             return Err(AppError::new(ErrorCode::Unsupported, "HTTPS with a local certificate authority is not available yet"));
@@ -309,6 +254,9 @@ impl UpdateProject {
         let addresses = request.addresses.iter().map(address_from_dto).collect::<Result<Vec<_>, _>>()?;
         let environment = environment_from_dto(&request.environment)?;
         let database = request.database_name.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(DatabaseName::new).transpose()?;
+        if database.is_some() {
+            require_mysql_for_database(&environment)?;
+        }
         let project = self
             .writer
             .modify(&request.project_id, |project, _| {
@@ -336,36 +284,54 @@ pub(crate) fn require_hosts_elevation(ctx: &CallContext, names: &[String], actio
     Err(AppError::new(ErrorCode::ElevationRequired, format!("{action} changes the hosts file ({list}), which needs administrator permission: re-run with --allow-elevation ({outcome})")))
 }
 
+/// [`require_hosts_elevation`] for adding or removing every hosts-file name of `project`
+/// (`action` is the verb: "creating", "importing", "removing").
+pub(crate) fn require_project_hosts_elevation(ctx: &CallContext, project: &Project, action: &str, outcome: &str) -> AppResult<()> {
+    let names: Vec<String> = project.hosts_file_names().map(ToString::to_string).collect();
+    require_hosts_elevation(ctx, &names, &format!("{action} `{}`", project.id), outcome)
+}
+
 /// Removes the project's config and its worktree environments' configs. Never deletes folders
 /// or databases.
 pub struct DeleteProject {
-    projects: Arc<dyn ProjectRepository>,
+    writer: ProjectWriter,
     worktrees: Arc<dyn WorktreeRepository>,
-    env: Arc<dyn EnvironmentSync>,
     events: Arc<dyn EventPublisher>,
 }
 
 impl DeleteProject {
-    pub fn new(projects: Arc<dyn ProjectRepository>, worktrees: Arc<dyn WorktreeRepository>, env: Arc<dyn EnvironmentSync>, events: Arc<dyn EventPublisher>) -> Self {
-        Self { projects, worktrees, env, events }
+    pub fn new(writer: ProjectWriter, worktrees: Arc<dyn WorktreeRepository>, events: Arc<dyn EventPublisher>) -> Self {
+        Self { writer, worktrees, events }
     }
 
     /// Active projects are removed too (the sync stops serving them). A project with hosts-file
     /// names needs elevation (`ElevationRequired` with nothing removed otherwise), so a retry
-    /// with `--allow-elevation` finds it still there.
-    pub async fn execute(&self, project_id: &str, ctx: &CallContext) -> AppResult<()> {
-        let project = load_project(self.projects.as_ref(), project_id)?;
-        let names: Vec<String> = project.hosts_file_names().map(ToString::to_string).collect();
-        require_hosts_elevation(ctx, &names, &format!("removing `{}`", project.id), "nothing was removed")?;
-        let had_worktrees = !self.worktrees.list_for(&project.id)?.is_empty();
-        self.worktrees.delete_all_for(&project.id)?;
-        self.projects.delete(&project.id)?;
-        self.events.publish(DomainEvent::ProjectsChanged { changed: vec![project.id.clone()] });
-        if had_worktrees {
+    /// with `--allow-elevation` finds it still there. Runs under the allocator lock, so a
+    /// concurrent edit never brings the project back. The result lists the worktree databases
+    /// left in MySQL.
+    pub async fn execute(&self, project_id: &str, ctx: &CallContext) -> AppResult<DeleteProjectResultDto> {
+        let (project, worktrees) = self
+            .writer
+            .remove(project_id, |project| require_project_hosts_elevation(ctx, project, "removing", "nothing was removed"), |project, snap| self.remove_worktrees(project, snap))
+            .await?;
+        if !worktrees.is_empty() {
             self.events.publish(DomainEvent::WorktreesChanged { project: project.id.clone() });
         }
-        self.env.sync(ctx).await?;
-        Ok(())
+        self.writer.sync(ctx).await?;
+        Ok(DeleteProjectResultDto { orphaned_databases: worktrees.iter().filter_map(WorktreeEnvironment::owned_database).map(ToString::to_string).collect() })
+    }
+
+    /// Unregisters the worktree environments of the (already removed) `project`. On failure they
+    /// are left stale, never served without their parent, for `lampo worktree prune` and
+    /// `lampo doctor` to report: the removal itself has happened.
+    fn remove_worktrees(&self, project: &Project, snap: &SiteSnapshot) -> Vec<WorktreeEnvironment> {
+        let environments: Vec<WorktreeEnvironment> = snap.worktrees.iter().filter(|w| w.parent == project.id).cloned().collect();
+        if !environments.is_empty() {
+            if let Err(e) = self.worktrees.delete_all_for(&project.id) {
+                tracing::warn!("project `{}` removed, but not its worktree environments (left stale for `lampo worktree prune`): {e}", project.id);
+            }
+        }
+        environments
     }
 }
 
@@ -392,7 +358,8 @@ impl SetProjectActive {
     }
 }
 
-/// Switches a project to another PHP minor (`PackageMissing` if not installed).
+/// Switches a project to another PHP minor (`PackageMissing` if not installed, or if one of its
+/// add-ons is not installed for it).
 pub struct SetProjectPhp {
     writer: ProjectWriter,
     installed: Arc<dyn InstalledPackageRegistry>,
@@ -406,7 +373,7 @@ impl SetProjectPhp {
     pub async fn execute(&self, request: SetProjectPhpRequest, ctx: &CallContext) -> AppResult<ProjectDto> {
         let php = PhpMinor::parse(&request.php_version)?;
         if newest_of(&self.installed.list()?, &PackageKind::PHP, Some(php.as_series()), None).is_none() {
-            load_project(self.writer.projects.as_ref(), &request.project_id)?;
+            self.writer.load(&request.project_id)?;
             return Err(package_missing(format!("PHP {php}")));
         }
         let project = self

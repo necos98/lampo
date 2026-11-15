@@ -92,4 +92,18 @@ pub struct PruneReportDto {
     /// Site ids removed (or that would be, with `dryRun`).
     pub removed: Vec<String>,
     pub dropped_databases: Vec<String>,
+    /// Environments that could not be removed (still registered, for a retry): the others are
+    /// removed and synced all the same.
+    #[serde(default)]
+    pub failed: Vec<PruneFailureDto>,
+}
+
+/// One environment `prune` could not remove.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PruneFailureDto {
+    /// Site id (`shop@feature-x`).
+    pub site: String,
+    pub code: crate::error::ErrorCode,
+    pub message: String,
 }

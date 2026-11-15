@@ -5,6 +5,7 @@ mod claude_code;
 mod environment;
 mod misc;
 mod packages;
+mod project_saves;
 mod projects;
 mod scaffold;
 mod settings;

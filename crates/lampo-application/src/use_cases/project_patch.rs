@@ -5,41 +5,39 @@
 //! The patch is applied to the *stored* project inside [`ProjectWriter::modify`] (under the
 //! allocator lock), so it never overwrites a concurrent edit with stale data the way a
 //! read-modify-write of the full [`UpdateProjectRequest`] from another process would. It goes
-//! through the same domain rules as the GUI's update (`Project::set_environment`, the service
-//! catalog's validation, `check_conflicts`) and the same sync afterwards.
+//! through the same rules as the GUI's update (`Project::set_environment`, the
+//! [`ProjectEnvironmentPolicy`](super::project_policy::ProjectEnvironmentPolicy) of every save,
+//! `check_conflicts`) and the same sync afterwards.
 
 use std::collections::BTreeSet;
-use std::sync::Arc;
 
 use lampo_domain::address::SiteAddress;
 use lampo_domain::mysql::DatabaseName;
 use lampo_domain::package::PackageKind;
-use lampo_domain::php::{ExtensionName, IniKey, PhpMinor, php_ini_overrides};
-use lampo_domain::ports::InstalledPackageRegistry;
+use lampo_domain::php::{ExtensionName, IniKey, php_ini_overrides};
 use lampo_domain::project::{ApacheDirectives, DisplayName, Project, ProjectEnvironment, PublicDir};
 use lampo_domain::service::ServiceKind;
 use lampo_domain::settings::Settings;
 use lampo_domain::version::VersionSeries;
 
 use super::allocation::SiteSnapshot;
-use super::packages::PhpExtensionsQuery;
-use super::projects::{ProjectWriter, require_hosts_elevation};
+use super::project_policy::require_mysql_for_database;
+use super::project_writer::ProjectWriter;
+use super::projects::require_hosts_elevation;
 use super::service_catalog::ServiceCatalog;
-use super::support::{newest_of, validation};
+use super::support::validation;
 use crate::context::CallContext;
 use crate::dto::*;
-use crate::error::{AppError, AppResult, ErrorCode};
+use crate::error::{AppError, AppResult};
 
 /// Applies a [`ProjectPatchRequest`].
 pub struct PatchProjectEnvironment {
     writer: ProjectWriter,
-    installed: Arc<dyn InstalledPackageRegistry>,
-    extensions: Arc<PhpExtensionsQuery>,
 }
 
 impl PatchProjectEnvironment {
-    pub fn new(writer: ProjectWriter, installed: Arc<dyn InstalledPackageRegistry>, extensions: Arc<PhpExtensionsQuery>) -> Self {
-        Self { writer, installed, extensions }
+    pub fn new(writer: ProjectWriter) -> Self {
+        Self { writer }
     }
 
     /// `NotFound` for an unknown project; `Validation` for malformed values, an item both added
@@ -52,19 +50,12 @@ impl PatchProjectEnvironment {
     /// error. Then syncs like every project update.
     pub async fn execute(&self, request: ProjectPatchRequest, ctx: &CallContext) -> AppResult<ProjectDto> {
         let patch = Patch::parse(&request)?;
-        let installed = if patch.addons_add.is_empty() { Vec::new() } else { self.installed.list()? };
-        let catalog = self.writer.services.clone();
+        let catalog = self.writer.services().clone();
         let change = |project: &mut Project, snap: &SiteSnapshot, free_port: Option<u16>| -> AppResult<bool> {
             let mut env = project.environment.clone();
             patch.apply(&mut env, catalog.as_ref(), &snap.settings)?;
-            for kind in &patch.addons_add {
-                if newest_of(&installed, kind, None, Some(env.php)).is_none() {
-                    return Err(addon_missing(kind, env.php));
-                }
-            }
-            self.check_bundled(&patch.extensions_add, env.php)?;
-            if patch.database.is_some() && env.mysql().is_none() {
-                return Err(validation("the project uses no MySQL: add it with `--service mysql` to set a database name"));
+            if patch.database.is_some() {
+                require_mysql_for_database(&env)?;
             }
             let mut addresses = project.addresses.clone();
             patch.apply_addresses(&mut addresses, free_port)?;
@@ -90,32 +81,6 @@ impl PatchProjectEnvironment {
         };
         self.writer.finish(&project, ctx).await
     }
-
-    /// Bundled extensions must exist in the project's PHP build (`ext\php_<name>.dll`). Skipped
-    /// when the build cannot be scanned (PHP not installed: the sync reports that).
-    fn check_bundled(&self, names: &BTreeSet<ExtensionName>, php: PhpMinor) -> AppResult<()> {
-        if names.is_empty() {
-            return Ok(());
-        }
-        let Ok(available) = self.extensions.list(&php.to_string()) else { return Ok(()) };
-        let unknown: Vec<&str> = names.iter().map(ExtensionName::as_str).filter(|n| !available.iter().any(|a| a.name == *n)).collect();
-        if unknown.is_empty() {
-            return Ok(());
-        }
-        let list: Vec<&str> = available.iter().map(|a| a.name.as_str()).collect();
-        Err(validation(format!(
-            "PHP {php} has no bundled extension {} (available: {}); add-on packages such as xdebug go in `--addon`",
-            unknown.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", "),
-            list.join(", ")
-        )))
-    }
-}
-
-fn addon_missing(kind: &PackageKind, php: PhpMinor) -> AppError {
-    AppError::new(
-        ErrorCode::PackageMissing,
-        format!("{kind} for PHP {php} is not installed: run `lampo package install {kind} --php {php}` first (add-ons are PHP-pinned packages, see `lampo package list --kind {kind}`)"),
-    )
 }
 
 /// The request, parsed and checked for contradictions before taking the lock.
@@ -273,24 +238,19 @@ impl Patch {
 }
 
 /// The version a project uses of `kind`: none for unversioned kinds (`redis`); for versioned
-/// ones (`mysql`) the requested series, which must be a configured instance, else the default
-/// instance (the always-on one).
+/// ones (`mysql`) the requested series (the save's policy refuses one the settings do not
+/// configure), else the default instance (the always-on one).
 fn service_version(catalog: &ServiceCatalog, settings: &Settings, kind: &ServiceKind, requested: Option<VersionSeries>) -> AppResult<Option<VersionSeries>> {
     let known = || catalog.descriptors().iter().map(|d| d.kind()).filter(|k| k != &ServiceKind::APACHE).map(|k| k.to_string()).collect::<Vec<_>>().join(", ");
     let descriptor = catalog.descriptor(kind).ok_or_else(|| validation(format!("unknown service kind `{kind}` (known: {})", known())))?;
-    if !descriptor.versioned() {
-        // A version given for an unversioned kind is rejected by the catalog's validation.
+    if !descriptor.versioned() || requested.is_some() {
+        // Checked by the save: the catalog refuses a version of an unversioned kind, the
+        // policy an instance the settings do not configure.
         return Ok(requested);
     }
-    let configured: Vec<VersionSeries> = settings.services.iter().filter(|s| s.service.kind() == kind).filter_map(|s| s.service.version()).collect();
-    let list = || configured.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ");
-    match requested {
-        Some(v) if configured.contains(&v) => Ok(Some(v)),
-        Some(v) => Err(validation(format!("{} {v} is not a configured instance (configured: {}); add it in the Lampo settings", descriptor.display_name(), list()))),
-        None => catalog
-            .default_instance(kind, settings)
-            .and_then(|id| id.version())
-            .map(Some)
-            .ok_or_else(|| validation(format!("no {} instance is configured: add one in the Lampo settings", descriptor.display_name()))),
-    }
+    catalog
+        .default_instance(kind, settings)
+        .and_then(|id| id.version())
+        .map(Some)
+        .ok_or_else(|| validation(format!("no {} instance is configured: add one in the Lampo settings", descriptor.display_name())))
 }

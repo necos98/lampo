@@ -89,7 +89,7 @@ export const createProject = (request: T.CreateProjectRequest) => call<T.CreateP
 /** Background task: clone / Laravel Installer into `<parentDir>\<folderName>`; output lines arrive as progress messages. */
 export const scaffoldProject = (request: T.ScaffoldProjectRequest) => call<T.TaskStarted>(COMMANDS.scaffoldProject, { request });
 export const updateProject = (request: T.UpdateProjectRequest) => call<T.Project>(COMMANDS.updateProject, { request });
-export const deleteProject = (projectId: string) => call<void>(COMMANDS.deleteProject, { projectId });
+export const deleteProject = (projectId: string) => call<T.DeleteProjectResult>(COMMANDS.deleteProject, { projectId });
 export const setProjectActive = (request: T.SetProjectActiveRequest) => call<T.Project>(COMMANDS.setProjectActive, { request });
 export const setProjectPhp = (request: T.SetProjectPhpRequest) => call<T.Project>(COMMANDS.setProjectPhp, { request });
 export const relinkProject = (request: T.RelinkProjectRequest) => call<T.Project>(COMMANDS.relinkProject, { request });

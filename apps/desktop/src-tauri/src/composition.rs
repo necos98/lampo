@@ -121,14 +121,17 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let project_queries = Arc::new(ProjectQueries::new(projects.clone(), worktrees.clone(), settings.clone(), fs.clone()));
     // One allocator for the whole app: projects and worktree environments share its lock.
     let allocator = Arc::new(LoopbackPortAllocator::new(projects.clone(), worktrees.clone(), settings.clone(), port_probe.clone()));
-    let project_writer = ProjectWriter {
+    let php_extensions = Arc::new(PhpExtensionsQuery::new(installed.clone(), Arc::new(packages::FsPhpExtensionScanner)));
+    // Every project save and removal (GUI, CLI patch, create, import, PHP switch, delete) goes
+    // through this writer: the allocator lock plus the environment policy and the conflict checks.
+    let project_writer = ProjectWriter::new(ProjectWriterDeps {
         projects: projects.clone(),
         allocator: allocator.clone(),
         env: env.clone(),
         events: events.clone(),
         queries: project_queries.clone(),
-        services: service_catalog.clone(),
-    };
+        policy: Arc::new(ProjectEnvironmentPolicy::new(service_catalog.clone(), installed.clone(), php_extensions.clone())),
+    });
     let service_queries = Arc::new(ServiceQueries::new(runners.clone(), service_catalog.clone(), projects.clone(), worktrees.clone(), settings.clone()));
     let service_control = Arc::new(ServiceControl::new(ServiceControlDeps {
         runners: runners.clone(),
@@ -186,13 +189,12 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         paths: paths.clone(),
     }));
     let update_project = Arc::new(UpdateProject::new(project_writer.clone()));
-    let delete_project = Arc::new(DeleteProject::new(projects.clone(), worktrees.clone(), env.clone(), events.clone()));
+    let delete_project = Arc::new(DeleteProject::new(project_writer.clone(), worktrees.clone(), events.clone()));
     let import_project = Arc::new(ImportProject::new(project_writer.clone(), transfer.clone(), fs.clone()));
     let set_project_active = Arc::new(SetProjectActive::new(project_writer.clone()));
     let set_project_php = Arc::new(SetProjectPhp::new(project_writer.clone(), installed.clone()));
-    let php_extensions = Arc::new(PhpExtensionsQuery::new(installed.clone(), Arc::new(packages::FsPhpExtensionScanner)));
     // CLI-only (`lampo project set`, via the control pipe): the GUI edits the full project.
-    let patch_project = Arc::new(PatchProjectEnvironment::new(project_writer.clone(), installed.clone(), php_extensions.clone()));
+    let patch_project = Arc::new(PatchProjectEnvironment::new(project_writer.clone()));
     // CLI-only (`lampo settings set`, via the control pipe): the GUI saves the full settings.
     let patch_settings = Arc::new(PatchSettings::new(settings_writer.clone(), env.clone()));
     let worktree_up = Arc::new(WorktreeUp::new(WorktreeUpDeps {

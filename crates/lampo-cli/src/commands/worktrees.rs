@@ -7,6 +7,7 @@ use lampo_domain::site::SiteId;
 
 use super::{Cmd, validation};
 use crate::cli::{WorktreeCommand, WorktreeDownArgs, WorktreePruneArgs, WorktreeUpArgs};
+use crate::exit_code::ExitCode;
 use crate::render;
 
 pub async fn run(c: &Cmd<'_>, command: WorktreeCommand) -> AppResult<i32> {
@@ -17,7 +18,7 @@ pub async fn run(c: &Cmd<'_>, command: WorktreeCommand) -> AppResult<i32> {
             let list = c.ctx.worktrees.list(project_filter(c).as_deref())?;
             c.io.emit(&list, |l| render::worktrees(l));
         }
-        WorktreeCommand::Prune(args) => prune(c, args).await?,
+        WorktreeCommand::Prune(args) => return prune(c, args).await,
     }
     Ok(0)
 }
@@ -73,11 +74,13 @@ async fn down(c: &Cmd<'_>, args: WorktreeDownArgs) -> AppResult<()> {
     Ok(())
 }
 
-async fn prune(c: &Cmd<'_>, args: WorktreePruneArgs) -> AppResult<()> {
+/// Prints the whole report; when an environment could not be removed, exits with the code of
+/// its error (the others were removed all the same).
+async fn prune(c: &Cmd<'_>, args: WorktreePruneArgs) -> AppResult<i32> {
     let request = PruneWorktreesRequest { project_id: project_filter(c), dry_run: args.dry_run, drop_databases: args.drop_databases };
     let report: PruneReportDto = c.app(ControlRequest::WorktreePrune(request)).await?;
     c.io.emit(&report, render::prune);
-    Ok(())
+    Ok(report.failed.first().map_or(ExitCode::Success, |f| ExitCode::from(f.code)).code())
 }
 
 #[cfg(test)]
