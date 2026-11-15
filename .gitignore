@@ -1,0 +1,39 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node / SvelteKit (more in apps/desktop/.gitignore)
+node_modules/
+apps/desktop/build/
+apps/desktop/.svelte-kit/
+
+# Tauri generated schemas and staged external binaries (scripts/prepare-sidecars.ps1)
+apps/desktop/src-tauri/gen/schemas/
+apps/desktop/src-tauri/binaries/
+
+# Editors / OS
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local env
+.env
+.env.*
+!.env.example
+
+# Signing keys and secrets (the updater key lives in ~/.tauri, never in the repo)
+.tauri/
+*.key
+*.key.password
+*.pem
+*.pfx
+*.p12
+
+# Logs and local scratch / test artifacts
+*.log
+*.tmp
+/scratch/
+/tmp/
+lampo-e2e*/
+e2e-results/

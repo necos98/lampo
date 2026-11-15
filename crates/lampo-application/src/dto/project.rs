@@ -1,0 +1,255 @@
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
+
+use super::database::DatabaseConnectionDto;
+use super::worktree::WorktreeEnvironmentDto;
+
+/// How a site is reached. Wire form: `{ "kind": "hostname", "host": "shop.test" }`,
+/// `{ "kind": "localhost", "host": "shop.localhost" }`, `{ "kind": "loopback-port", "port": 8101 }`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum SiteAddressDto {
+    /// Listed in the hosts file (changing it needs a UAC prompt).
+    Hostname { host: String },
+    /// `*.localhost`, no hosts entry.
+    Localhost { host: String },
+    /// Dedicated `127.0.0.1:<port>` listener, no hosts entry.
+    LoopbackPort { port: u16 },
+}
+
+/// Default addresses for a new project when none are given explicitly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AddressingDto {
+    /// `<id>.<tld>` (hosts file) + `<id>.localhost`. Used when the field is omitted (protocol
+    /// compatibility); the GUI offers it as an explicit option.
+    #[default]
+    Standard,
+    /// `<id>.localhost` + a dedicated loopback port: never needs elevation. Default of both the
+    /// CLI and the GUI.
+    NoElevation,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TlsModeDto {
+    #[default]
+    Disabled,
+    /// Reserved for the future local-CA feature; rejected with `unsupported` for now.
+    LocalCa,
+}
+
+/// The environment a preset carries and a project copies.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectEnvironmentDto {
+    /// PHP minor, e.g. `"8.3"`.
+    pub php_version: String,
+    /// Bundled extensions (`"intl"`, `"pdo_mysql"`).
+    pub extensions: Vec<String>,
+    /// Add-on extension package kinds (`"xdebug"`, `"php-redis"`).
+    pub addons: Vec<String>,
+    pub php_ini: BTreeMap<String, String>,
+    /// Relative to the project folder; `""` = the folder itself.
+    pub public_dir: String,
+    /// Services the project needs while served (`{ "kind": "mysql", "version": "8.4" }`,
+    /// `{ "kind": "redis", "version": null }`). The MySQL entry also holds its database.
+    pub services: Vec<ServiceUseDto>,
+    pub apache_directives: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDto {
+    pub id: String,
+    pub name: String,
+    pub root: String,
+    /// `false` when the folder was moved/deleted (offer "relink").
+    pub folder_exists: bool,
+    pub addresses: Vec<SiteAddressDto>,
+    /// Primary URL.
+    pub url: String,
+    /// One URL per address, primary first.
+    pub urls: Vec<String>,
+    pub document_root: String,
+    pub environment: ProjectEnvironmentDto,
+    pub database_name: Option<String>,
+    /// Connection details to show (never written to `.env`).
+    pub database: Option<DatabaseConnectionDto>,
+    pub tls: TlsModeDto,
+    pub active: bool,
+    pub origin_preset: Option<String>,
+    /// Worktree environments of this project.
+    pub worktrees: Vec<WorktreeEnvironmentDto>,
+}
+
+/// Compact row for `lampo status` / `lampo project list`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSummaryDto {
+    pub id: String,
+    pub name: String,
+    pub root: String,
+    pub active: bool,
+    pub url: String,
+    pub php_version: String,
+    pub mysql_version: Option<String>,
+    pub worktree_count: usize,
+}
+
+/// Create a project. Only `root` is required: anything omitted is filled from the preset
+/// (`preset_id`, else the detected one, else `generic-php`), detection and settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CreateProjectRequest {
+    pub root: String,
+    /// Default: folder name.
+    pub name: Option<String>,
+    /// Default: derived from the name.
+    pub id: Option<String>,
+    pub preset_id: Option<String>,
+    /// Overrides the preset's PHP minor.
+    pub php_version: Option<String>,
+    /// Full environment; when present the preset is only recorded as origin.
+    pub environment: Option<ProjectEnvironmentDto>,
+    /// Explicit addresses; when absent `addressing` decides.
+    pub addresses: Option<Vec<SiteAddressDto>>,
+    pub addressing: AddressingDto,
+    pub activate: bool,
+    /// Create the project's MySQL database (if it uses MySQL), starting the instance on demand.
+    /// Default `true` (also when the field is omitted). A failure never fails the creation: it
+    /// is reported in [`CreateProjectResultDto::database_setup`].
+    pub create_database: bool,
+}
+
+impl Default for CreateProjectRequest {
+    fn default() -> Self {
+        Self {
+            root: String::new(),
+            name: None,
+            id: None,
+            preset_id: None,
+            php_version: None,
+            environment: None,
+            addresses: None,
+            addressing: AddressingDto::default(),
+            activate: false,
+            create_database: true,
+        }
+    }
+}
+
+/// Result of creating a project: the project itself (flattened, so on the wire this *is* a
+/// [`ProjectDto`] plus one optional field) and what happened to its database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateProjectResultDto {
+    #[serde(flatten)]
+    pub project: ProjectDto,
+    /// `null`/absent when nothing was attempted: the project uses no MySQL, or
+    /// `createDatabase` was `false`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database_setup: Option<super::database::DatabaseSetupDto>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateProjectRequest {
+    pub project_id: String,
+    pub name: String,
+    pub addresses: Vec<SiteAddressDto>,
+    pub environment: ProjectEnvironmentDto,
+    pub database_name: Option<String>,
+    pub tls: TlsModeDto,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetProjectActiveRequest {
+    pub project_id: String,
+    pub active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetProjectPhpRequest {
+    pub project_id: String,
+    pub php_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelinkProjectRequest {
+    pub project_id: String,
+    pub root: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportProjectRequest {
+    pub project_id: String,
+    /// Destination file (`.toml`).
+    pub file: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportProjectRequest {
+    pub file: String,
+    /// Folder on this machine, if different from the exported one.
+    pub root: Option<String>,
+}
+
+/// Result of analysing a folder before creating a project.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DetectionDto {
+    pub folder: String,
+    /// `laravel`, `wordpress`, `symfony`, `composer` or `null`.
+    pub project_type: Option<String>,
+    pub preset_id: Option<String>,
+    pub php_version: Option<String>,
+    pub suggested_name: String,
+    pub suggested_id: String,
+    pub evidence: Vec<String>,
+    /// Id of the project already registered for this folder, if any.
+    pub already_registered: Option<String>,
+}
+
+/// One service a project uses: its kind and, for versioned kinds, the series.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceUseDto {
+    pub kind: String,
+    pub version: Option<String>,
+}
+
+impl ProjectEnvironmentDto {
+    /// The entry of `kind`, if the project uses it.
+    pub fn service(&self, kind: &str) -> Option<&ServiceUseDto> {
+        self.services.iter().find(|s| s.kind == kind)
+    }
+
+    /// The version used of a versioned `kind` (`mysql` → `8.4`).
+    pub fn service_version(&self, kind: &str) -> Option<&str> {
+        self.service(kind).and_then(|s| s.version.as_deref())
+    }
+}
+
+/// Addresses to offer for a project id, built by the domain rules and the port allocator
+/// (`project suggest-addresses`): one per kind, plus the two default sets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddressSuggestionsDto {
+    /// `<id>.<tld>` (hosts file, needs the UAC prompt once).
+    pub hostname: SiteAddressDto,
+    /// `<id>.localhost`.
+    pub localhost: SiteAddressDto,
+    /// The loopback port the allocator would assign now (not reserved).
+    pub loopback_port: SiteAddressDto,
+    /// `AddressingDto::NoElevation` defaults: localhost + loopback port (the default).
+    pub no_elevation: Vec<SiteAddressDto>,
+    /// `AddressingDto::Standard` defaults: hostname + localhost.
+    pub standard: Vec<SiteAddressDto>,
+}

@@ -1,0 +1,36 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogSourceDto {
+    /// `apache`, `apache-error`, `mysql-8.4`, `mysql-8.4-error`, `redis`,
+    /// `access:<site>`, `error:<site>`, `php:<site>`.
+    pub id: String,
+    pub file: String,
+    pub exists: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogTailRequest {
+    pub source: String,
+    pub lines: usize,
+    pub since_unix_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogLineDto {
+    pub text: String,
+    pub at_unix_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogLinesDto {
+    pub source: String,
+    pub file: String,
+    pub lines: Vec<LogLineDto>,
+    /// Pass back to `read_from` to follow the file.
+    pub next_offset: u64,
+}

@@ -1,0 +1,2 @@
+# Hosts fixtures are byte-exact (BOM, ANSI bytes, CRLF vs LF): never convert line endings.
+fixtures/** -text

@@ -1,0 +1,38 @@
+[package]
+name = "lampo-cli"
+description = "The `lampo` command-line front-end and the `lampo-shim` executable copied as php/composer/mysql/mysqldump/redis-cli."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "lampo_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "lampo"
+path = "src/main.rs"
+
+[[bin]]
+# Copied by the ShimInstaller as php.exe, composer.exe, mysql.exe, mysqldump.exe, redis-cli.exe.
+# Must stay tiny and fast: no async runtime, no network, reads the shim index only.
+name = "lampo-shim"
+path = "src/bin/lampo-shim.rs"
+
+[dependencies]
+lampo-domain = { workspace = true }
+lampo-application = { workspace = true }
+lampo-infra-store = { workspace = true }
+lampo-infra-packages = { workspace = true }
+lampo-infra-web = { workspace = true }
+lampo-infra-services = { workspace = true }
+async-trait = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "time", "signal"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,6 @@
+127.0.0.1 localhost
+# >>> Lampo managed block - do not edit >>>
+127.0.0.1	old.test
+::1	old.test
+# <<< Lampo managed block <<<
+10.1.1.1 keep.lan

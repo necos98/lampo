@@ -1,0 +1,470 @@
+# Lampo embedded package catalog (Windows x64). Parsed by catalog::embedded; a parse failure is
+# a build defect caught by the unit tests.
+#
+# Each [[entry]] is one CatalogEntry (see lampo_domain::package):
+#
+#   [[entry]]
+#   kind = "php"                     # PackageKind id
+#   version = "7.4.33"
+#   php = "8.3"                      # only for add-on extensions (xdebug, php-redis)
+#   url = "https://..."              # https, the vendor's own official location
+#   sha256 = "<64 hex chars>"        # REQUIRED
+#   size_bytes = 25000000            # optional
+#   vc_runtime = "vc15"              # optional: vc11 | vc14 | vc15 | vs16 | vs17 | vs18
+#   end_of_life = true               # optional, default false
+#   payload = { type = "zip", strip_prefix = "Apache24" }   # or { type = "single-file", file_name = "composer.phar" }
+#
+# Every entry below was verified on 2026-11-13: the URL was downloaded and its SHA-256 computed
+# from the file; where the vendor publishes a checksum (php.net releases.json, Apache Lounge .txt,
+# getcomposer.org .sha256sum, xdebug.org, GitHub asset digest, MySQL MD5) it matched.
+# Nothing here is hosted by Lampo.
+# ---------------------------------------------------------------- PHP (EOL series, final release)
+# Source: https://windows.php.net/downloads/releases/archives/ (NTS x64). Supported series come
+# from the live releases.json (catalog::php_net). 7.4/8.0/8.1 hashes match releases.json.
+[[entry]]
+kind = "php"
+version = "5.6.40"
+url = "https://windows.php.net/downloads/releases/archives/php-5.6.40-nts-Win32-VC11-x64.zip"
+sha256 = "3d7668280fa4b16f70705539ba1e4ea17eef344c81e82881cbeca26fb7f181f1"
+size_bytes = 23032238
+vc_runtime = "vc11"
+end_of_life = true
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php"
+version = "7.0.33"
+url = "https://windows.php.net/downloads/releases/archives/php-7.0.33-nts-Win32-VC14-x64.zip"
+sha256 = "bba39bde5b0bd50efadc11e2716c7528669945f9d1397d707486e401e67e89fb"
+size_bytes = 24425705
+vc_runtime = "vc14"
+end_of_life = true
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php"
+version = "7.1.33"
+url = "https://windows.php.net/downloads/releases/archives/php-7.1.33-nts-Win32-VC14-x64.zip"
+sha256 = "071438be5bbaee8b34894ddba7852b6040991a3c853ab8141efcb1b6655bbbef"
+size_bytes = 24268222
+vc_runtime = "vc14"
+end_of_life = true
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php"
+version = "7.2.34"
+url = "https://windows.php.net/downloads/releases/archives/php-7.2.34-nts-Win32-VC15-x64.zip"
+sha256 = "3c673eab656e26fd6bc3ad27fe71169ad888b04e21d63d3c6b3151d5ed216563"
+size_bytes = 26121534
+vc_runtime = "vc15"
+end_of_life = true
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php"
+version = "7.3.33"
+url = "https://windows.php.net/downloads/releases/archives/php-7.3.33-nts-Win32-VC15-x64.zip"
+sha256 = "5eaf3cad80e678623f222a42c99bcefcc60eea359d407fb51e805afdb3b13e5e"
+size_bytes = 25625477
+vc_runtime = "vc15"
+end_of_life = true
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php"
+version = "7.4.33"
+url = "https://windows.php.net/downloads/releases/archives/php-7.4.33-nts-Win32-vc15-x64.zip"
+sha256 = "14ae3250d4447c8ccfc4c45a70d90adfbcd61e728d85f0be56a7ddf8f9c8aace"
+size_bytes = 26132214
+vc_runtime = "vc15"
+end_of_life = true
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php"
+version = "8.0.30"
+url = "https://windows.php.net/downloads/releases/archives/php-8.0.30-nts-Win32-vs16-x64.zip"
+sha256 = "dfb70498ffa2c617f2f655a155564697e3c9cca41709938fd1a5997d1d5b0785"
+size_bytes = 26766957
+vc_runtime = "vs16"
+end_of_life = true
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php"
+version = "8.1.34"
+url = "https://windows.php.net/downloads/releases/archives/php-8.1.34-nts-Win32-vs16-x64.zip"
+sha256 = "9cfe246cb144076c16f5913a3ef88a474c3dd7e60f0f0c8bb95faf68674016cc"
+size_bytes = 30822368
+vc_runtime = "vs16"
+end_of_life = true
+payload = { type = "zip" }
+
+# ---------------------------------------------------------------- Apache httpd (Apache Lounge, Win64)
+# SHA-256 published by Apache Lounge in <zip>.txt. Lounge only keeps the newest build of each
+# toolset online, so the live source (catalog::apache_lounge) normally supersedes these.
+# httpd.exe is linked with MSVC 14.51 (VS18) / 14.44 (VS17).
+[[entry]]
+kind = "apache"
+version = "2.4.71-261112"
+url = "https://www.apachelounge.com/download/VS18/binaries/httpd-2.4.71-261112-Win64-VS18.zip"
+sha256 = "44961a929dff16b767b3adbcea55760a942a00239b2891dc55806be34029e1fc"
+size_bytes = 14518924
+vc_runtime = "vs18"
+end_of_life = false
+payload = { type = "zip", strip_prefix = "Apache24" }
+
+# Last VS17 build; the VS17 folder is frozen, so this URL is the most durable fallback.
+[[entry]]
+kind = "apache"
+version = "2.4.66-251206"
+url = "https://www.apachelounge.com/download/VS17/binaries/httpd-2.4.66-251206-Win64-VS17.zip"
+sha256 = "2cd1f349b6705e43e784e876a233eeb1a859fa6b8abc693a91f87b35a368f7f9"
+size_bytes = 11527838
+vc_runtime = "vs17"
+end_of_life = false
+payload = { type = "zip", strip_prefix = "Apache24" }
+
+# ---------------------------------------------------------------- mod_fcgid (Apache Lounge, Win64)
+# No checksum is published for modules: SHA-256 computed from the downloaded file.
+# mod_fcgid.so sits at the zip root (hooks::ModFcgidInstallHook keeps it there).
+[[entry]]
+kind = "mod-fcgid"
+version = "2.3.10"
+url = "https://www.apachelounge.com/download/VS18/modules/mod_fcgid-2.3.10-win64-VS18.zip"
+sha256 = "a92808ef3069366c8fcc939f5449f119ed4f0e37eda5575d1fe265e6937ab88a"
+size_bytes = 44638
+vc_runtime = "vs18"
+end_of_life = false
+payload = { type = "zip" }
+
+# ---------------------------------------------------------------- MySQL Community Server (zip, x64)
+# MySQL publishes MD5 only (matched); SHA-256 computed from the file. cdn.mysql.com is used
+# directly because dev.mysql.com/get answers 403 to non-allow-listed user agents; the
+# downloader falls back to cdn.mysql.com/archives/ once a release is archived (mirrors.rs).
+# mysqld.exe is linked with MSVC 14.29 (VS2019) in both series.
+[[entry]]
+kind = "mysql"
+version = "8.4.13"
+url = "https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-8.4.13-winx64.zip"
+sha256 = "e9cd98b1d23f122987b1afca26ad942efec5891481103d48ae3cde237fa3ea54"
+size_bytes = 281154912
+vc_runtime = "vs16"
+end_of_life = false
+payload = { type = "zip", strip_prefix = "mysql-8.4.13-winx64" }
+
+[[entry]]
+kind = "mysql"
+version = "5.7.44"
+url = "https://cdn.mysql.com/archives/mysql-5.7/mysql-5.7.44-winx64.zip"
+sha256 = "aed661fe8120254a1dc30f5a4d5de346681922f4847cf025e2d4084eca78e70e"
+size_bytes = 352891656
+vc_runtime = "vs16"
+end_of_life = true
+payload = { type = "zip", strip_prefix = "mysql-5.7.44-winx64" }
+
+# ---------------------------------------------------------------- Redis (redis-windows/redis-windows, MSYS2 build)
+# Official release assets of the redis-windows project; SHA-256 matches the asset digest
+# GitHub publishes. Self-contained (msys-2.0.dll included), no VC++ runtime needed.
+[[entry]]
+kind = "redis"
+version = "8.10.3"
+url = "https://github.com/redis-windows/redis-windows/releases/download/8.10.3/Redis-8.10.3-Windows-x64-msys2.zip"
+sha256 = "af16df340525b431e9ec8dabfd625d5e7a233f82805b5418819904ea909c447f"
+size_bytes = 14036243
+end_of_life = false
+payload = { type = "zip", strip_prefix = "Redis-8.10.3-Windows-x64-msys2" }
+
+# ---------------------------------------------------------------- Composer
+# SHA-256 from getcomposer.org/download/<v>/composer.phar.sha256sum. The live source
+# (catalog::composer) tracks newer releases.
+# Latest stable (PHP >= 7.2.5).
+[[entry]]
+kind = "composer"
+version = "2.11.2"
+url = "https://getcomposer.org/download/2.11.2/composer.phar"
+sha256 = "dd158c0afd41d15fac89e1b4e47b5d42911fe316c3687cd5edac98319b25d028"
+size_bytes = 3815650
+end_of_life = false
+payload = { type = "single-file", file_name = "composer.phar" }
+
+# 2.2 LTS (PHP 5.3 - 7.1).
+[[entry]]
+kind = "composer"
+version = "2.2.32"
+url = "https://getcomposer.org/download/2.2.32/composer.phar"
+sha256 = "241a3d13b7c6d35d970b1f69a000298b66943541302148a438a932f5dd44a9fc"
+size_bytes = 2439754
+end_of_life = false
+payload = { type = "single-file", file_name = "composer.phar" }
+
+# ---------------------------------------------------------------- Xdebug (NTS x64), newest stable per PHP minor
+# SHA-256 published on https://xdebug.org/download/historical (matched).
+[[entry]]
+kind = "xdebug"
+version = "2.5.5"
+php = "5.6"
+url = "https://xdebug.org/files/php_xdebug-2.5.5-5.6-vc11-nts-x86_64.dll"
+sha256 = "990e457e05e0f8678db21534931b0699d89d5f06d9ee42e26cde9f225c4e4b8b"
+size_bytes = 219136
+vc_runtime = "vc11"
+end_of_life = true
+payload = { type = "single-file", file_name = "php_xdebug.dll" }
+
+[[entry]]
+kind = "xdebug"
+version = "2.6.1"
+php = "7.0"
+url = "https://xdebug.org/files/php_xdebug-2.6.1-7.0-vc14-nts-x86_64.dll"
+sha256 = "a7b7ebcaaabb6840751c83411fb3e787d04be6e75e95df96b3ba88a581215b2d"
+size_bytes = 249856
+vc_runtime = "vc14"
+end_of_life = true
+payload = { type = "single-file", file_name = "php_xdebug.dll" }
+
+[[entry]]
+kind = "xdebug"
+version = "2.9.8"
+php = "7.1"
+url = "https://xdebug.org/files/php_xdebug-2.9.8-7.1-vc14-nts-x86_64.dll"
+sha256 = "3bf7895bdadb5d938be4e464bcc29b110e7f8f00bc6349731e4f1a01aeda850c"
+size_bytes = 235520
+vc_runtime = "vc14"
+end_of_life = true
+payload = { type = "single-file", file_name = "php_xdebug.dll" }
+
+[[entry]]
+kind = "xdebug"
+version = "3.1.6"
+php = "7.2"
+url = "https://xdebug.org/files/php_xdebug-3.1.6-7.2-vc15-nts-x86_64.dll"
+sha256 = "83c0082be8b056ff9170622b3365e5a876e4819d558056c487e26726f95afc71"
+size_bytes = 281088
+vc_runtime = "vc15"
+end_of_life = true
+payload = { type = "single-file", file_name = "php_xdebug.dll" }
+
+[[entry]]
+kind = "xdebug"
+version = "3.1.6"
+php = "7.3"
+url = "https://xdebug.org/files/php_xdebug-3.1.6-7.3-vc15-nts-x86_64.dll"
+sha256 = "daff084a9822c63e9837fe062f23ff00119cedf01fb5aed149742dd039f067bd"
+size_bytes = 281088
+vc_runtime = "vc15"
+end_of_life = true
+payload = { type = "single-file", file_name = "php_xdebug.dll" }
+
+[[entry]]
+kind = "xdebug"
+version = "3.1.6"
+php = "7.4"
+url = "https://xdebug.org/files/php_xdebug-3.1.6-7.4-vc15-nts-x86_64.dll"
+sha256 = "704a27985094e71803ab5dd2e75099d860d9fdb1de623013f567219c3d780721"
+size_bytes = 283648
+vc_runtime = "vc15"
+end_of_life = true
+payload = { type = "single-file", file_name = "php_xdebug.dll" }
+
+[[entry]]
+kind = "xdebug"
+version = "3.5.3"
+php = "8.0"
+url = "https://xdebug.org/files/php_xdebug-3.5.3-8.0-nts-vs16-x86_64.dll"
+sha256 = "a3ffd4d5b1f9ca0766b1f3ed321246808a51ce4ba49dc32ae195bfafc4d4d9a2"
+size_bytes = 327680
+vc_runtime = "vs16"
+end_of_life = false
+payload = { type = "single-file", file_name = "php_xdebug.dll" }
+
+[[entry]]
+kind = "xdebug"
+version = "3.5.3"
+php = "8.1"
+url = "https://xdebug.org/files/php_xdebug-3.5.3-8.1-nts-vs16-x86_64.dll"
+sha256 = "15bb3abcd0755af8378550793bcf7603636add31dc4a04d24bfd2a1f764399b4"
+size_bytes = 331264
+vc_runtime = "vs16"
+end_of_life = false
+payload = { type = "single-file", file_name = "php_xdebug.dll" }
+
+[[entry]]
+kind = "xdebug"
+version = "3.5.3"
+php = "8.2"
+url = "https://xdebug.org/files/php_xdebug-3.5.3-8.2-nts-vs16-x86_64.dll"
+sha256 = "b449eda7eeefc80c651fac334582c5f0877cd72cfe55fc1c5f0f98bf6a4edb94"
+size_bytes = 330240
+vc_runtime = "vs16"
+end_of_life = false
+payload = { type = "single-file", file_name = "php_xdebug.dll" }
+
+[[entry]]
+kind = "xdebug"
+version = "3.5.3"
+php = "8.3"
+url = "https://xdebug.org/files/php_xdebug-3.5.3-8.3-nts-vs16-x86_64.dll"
+sha256 = "4c80487592484c36d21a7006a53738dfc07884fc6867720ddc5c11559371cdce"
+size_bytes = 330240
+vc_runtime = "vs16"
+end_of_life = false
+payload = { type = "single-file", file_name = "php_xdebug.dll" }
+
+[[entry]]
+kind = "xdebug"
+version = "3.5.3"
+php = "8.4"
+url = "https://xdebug.org/files/php_xdebug-3.5.3-8.4-nts-vs17-x86_64.dll"
+sha256 = "a94d4fcfe4086a300b2decaf7c04e59f4981aa5e56992d48b55c5e49dfd9b9ee"
+size_bytes = 331776
+vc_runtime = "vs17"
+end_of_life = false
+payload = { type = "single-file", file_name = "php_xdebug.dll" }
+
+[[entry]]
+kind = "xdebug"
+version = "3.5.3"
+php = "8.5"
+url = "https://xdebug.org/files/php_xdebug-3.5.3-8.5-nts-vs17-x86_64.dll"
+sha256 = "0a0d52bf276dad7e5f90ac30a5110b3119d291b20c118be0cb7f5752064f1811"
+size_bytes = 331776
+vc_runtime = "vs17"
+end_of_life = false
+payload = { type = "single-file", file_name = "php_xdebug.dll" }
+
+# ---------------------------------------------------------------- phpredis (PECL Windows builds, NTS x64)
+# https://downloads.php.net/~windows/pecl/releases/redis/ publishes no checksums: SHA-256
+# computed from the downloaded files. Newest release built for each PHP minor.
+[[entry]]
+kind = "php-redis"
+version = "2.2.7"
+php = "5.6"
+url = "https://downloads.php.net/~windows/pecl/releases/redis/2.2.7/php_redis-2.2.7-5.6-nts-vc11-x64.zip"
+sha256 = "08254d17e2994e7bfcb1ed290d8c7795225a2bfdae5fd86da44e75d8fc48d7a7"
+size_bytes = 301190
+vc_runtime = "vc11"
+end_of_life = true
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php-redis"
+version = "4.2.0"
+php = "7.0"
+url = "https://downloads.php.net/~windows/pecl/releases/redis/4.2.0/php_redis-4.2.0-7.0-nts-vc14-x64.zip"
+sha256 = "94cf0379a7601175170f58afc93956b147f96c9e6a12f14f4627fc2425383d44"
+size_bytes = 568444
+vc_runtime = "vc14"
+end_of_life = true
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php-redis"
+version = "5.1.1"
+php = "7.1"
+url = "https://downloads.php.net/~windows/pecl/releases/redis/5.1.1/php_redis-5.1.1-7.1-nts-vc14-x64.zip"
+sha256 = "71781d739c4030f5feb79cc9a3fb1cd06d13552356186c833bdd0636cb600f7b"
+size_bytes = 604971
+vc_runtime = "vc14"
+end_of_life = true
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php-redis"
+version = "5.2.2"
+php = "7.2"
+url = "https://downloads.php.net/~windows/pecl/releases/redis/5.2.2/php_redis-5.2.2-7.2-nts-vc15-x64.zip"
+sha256 = "1a55a741b618ea161ced19c26a8ab753a13f7e438c49b75606849528aed8e647"
+size_bytes = 618464
+vc_runtime = "vc15"
+end_of_life = true
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php-redis"
+version = "5.3.4"
+php = "7.3"
+url = "https://downloads.php.net/~windows/pecl/releases/redis/5.3.4/php_redis-5.3.4-7.3-nts-vc15-x64.zip"
+sha256 = "ae4b9a910c87b55bfcf21e6a19918a9b49e6d2961a43ab8cffff322c9211d7be"
+size_bytes = 659556
+vc_runtime = "vc15"
+end_of_life = true
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php-redis"
+version = "6.3.0"
+php = "7.4"
+url = "https://downloads.php.net/~windows/pecl/releases/redis/6.3.0/php_redis-6.3.0-7.4-nts-vc15-x64.zip"
+sha256 = "c74f1fb5500b493050839330b4cbfb84dafc07da99b898939ac4b690fe74de1a"
+size_bytes = 720719
+vc_runtime = "vc15"
+end_of_life = false
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php-redis"
+version = "6.3.0"
+php = "8.0"
+url = "https://downloads.php.net/~windows/pecl/releases/redis/6.3.0/php_redis-6.3.0-8.0-nts-vs16-x64.zip"
+sha256 = "9d3143049d3c27e715ea92a023dfab92389df985aec224d6ed9d092b4ba5ea9a"
+size_bytes = 750005
+vc_runtime = "vs16"
+end_of_life = false
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php-redis"
+version = "6.3.0"
+php = "8.1"
+url = "https://downloads.php.net/~windows/pecl/releases/redis/6.3.0/php_redis-6.3.0-8.1-nts-vs16-x64.zip"
+sha256 = "952ec845408e343f273eab109e62a9c7732178d93985120736da4a171d41b9b0"
+size_bytes = 751232
+vc_runtime = "vs16"
+end_of_life = false
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php-redis"
+version = "6.3.0"
+php = "8.2"
+url = "https://downloads.php.net/~windows/pecl/releases/redis/6.3.0/php_redis-6.3.0-8.2-nts-vs16-x64.zip"
+sha256 = "b2b730b99b97352212b338c01f7dde577857e31c5f8e1d011ec2871e63f8f87c"
+size_bytes = 763251
+vc_runtime = "vs16"
+end_of_life = false
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php-redis"
+version = "6.3.0"
+php = "8.3"
+url = "https://downloads.php.net/~windows/pecl/releases/redis/6.3.0/php_redis-6.3.0-8.3-nts-vs16-x64.zip"
+sha256 = "519fc1bdf54323d3ab08443c66f77e783d314c13b532e27cc8b390def7f81b60"
+size_bytes = 764694
+vc_runtime = "vs16"
+end_of_life = false
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php-redis"
+version = "6.3.0"
+php = "8.4"
+url = "https://downloads.php.net/~windows/pecl/releases/redis/6.3.0/php_redis-6.3.0-8.4-nts-vs17-x64.zip"
+sha256 = "6db881ed172703962002d7e02dacc8ddb3f789904c648fee3e6ceec1319679cd"
+size_bytes = 859841
+vc_runtime = "vs17"
+end_of_life = false
+payload = { type = "zip" }
+
+[[entry]]
+kind = "php-redis"
+version = "6.3.0"
+php = "8.5"
+url = "https://downloads.php.net/~windows/pecl/releases/redis/6.3.0/php_redis-6.3.0-8.5-nts-vs17-x64.zip"
+sha256 = "481d6d1af45060ab41af6abe250faa270276fc47a493badc2e178024cdf6e255"
+size_bytes = 861902
+vc_runtime = "vs17"
+end_of_life = false
+payload = { type = "zip" }
+

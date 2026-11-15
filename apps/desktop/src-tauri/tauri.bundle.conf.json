@@ -1,0 +1,19 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "build": {
+    "beforeBuildCommand": "pnpm build && powershell -NoProfile -ExecutionPolicy Bypass -File ../../scripts/prepare-sidecars.ps1"
+  },
+  "bundle": {
+    "createUpdaterArtifacts": true,
+    "externalBin": [
+      "binaries/lampo",
+      "binaries/lampo-shim",
+      "binaries/lampo-hosts-helper"
+    ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    }
+  }
+}

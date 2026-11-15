@@ -1,0 +1,41 @@
+[package]
+name = "lampo-desktop"
+description = "Lampo desktop app: Tauri shell, composition root, Tauri commands, tray, control-pipe server."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "lampo_desktop_lib"
+# Windows desktop only: the static/dynamic library outputs of the Tauri template exist for mobile
+# targets, and linking the unused DLL produced a linker warning on every build.
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+lampo-domain = { workspace = true }
+lampo-application = { workspace = true }
+lampo-infra-store = { workspace = true }
+lampo-infra-packages = { workspace = true }
+lampo-infra-web = { workspace = true }
+lampo-infra-services = { workspace = true }
+
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-log = "2"
+tauri-plugin-single-instance = "2"
+# Native folder/file pickers and opening links/folders in the system apps (GUI only).
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+# In-app updates (signed NSIS installer from the GitHub Releases, see docs/UPDATER.md) and the
+# relaunch fallback after installing one.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "sync", "time"] }
+tracing = { workspace = true }
+log = "0.4"

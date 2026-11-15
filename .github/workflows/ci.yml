@@ -1,0 +1,80 @@
+name: ci
+
+# Controlli di qualita' su ogni push a main e su ogni pull request:
+# tipi del front-end (svelte-check), test node (versioni sincronizzate, config updater),
+# formattazione (rustfmt), lint (clippy) e test del backend (cargo).
+# Non produce eseguibili ne' Release (vedi build-windows.yml).
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Format (rustfmt)
+        # Stile in rustfmt.toml; non serve compilare, quindi fallisce subito.
+        run: cargo fmt --all --check
+
+      - name: Cache Rust
+        # shared-key diversa da quella di release: qui si compila in profilo dev.
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          shared-key: ci
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install frontend deps
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (svelte-check)
+        working-directory: apps/desktop
+        run: pnpm check
+
+      - name: Test (node)
+        working-directory: apps/desktop
+        run: pnpm test
+
+      - name: Build frontend
+        # generate_context! di Tauri richiede apps/desktop/build per compilare lampo-desktop.
+        working-directory: apps/desktop
+        run: pnpm build
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test (cargo)
+        # I test che richiedono rete o binari reali sono #[ignore].
+        run: cargo test --workspace

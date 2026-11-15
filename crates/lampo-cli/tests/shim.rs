@@ -1,0 +1,183 @@
+//! End-to-end tests of the real `lampo-shim` binary, copied as `php.exe`, in front of a small
+//! test executable (`examples/argecho`) that echoes its arguments, stdin size and exit code.
+
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+use lampo_domain::php::{ComposerChannel, PhpMinor};
+use lampo_domain::project::ProjectRoot;
+use lampo_domain::shim::{ShimEntry, ShimIndex, ShimTarget};
+
+struct Sandbox {
+    _dir: tempfile::TempDir,
+    home: PathBuf,
+    shim_dir: PathBuf,
+    project: PathBuf,
+    php_dir: PathBuf,
+}
+
+fn argecho() -> PathBuf {
+    let shim = PathBuf::from(env!("CARGO_BIN_EXE_lampo-shim"));
+    shim.parent().unwrap().join("examples").join("argecho.exe")
+}
+
+fn target(php_dir: &Path) -> ShimTarget {
+    let php = PhpMinor::parse("8.3").unwrap();
+    ShimTarget {
+        php,
+        php_dir: php_dir.to_path_buf(),
+        php_exe: php_dir.join("php.exe"),
+        phprc_dir: Some(PathBuf::from(r"C:\lampo-test-ini")),
+        composer_phar: None,
+        composer_channel: ComposerChannel::for_php(php),
+        services: Default::default(),
+    }
+}
+
+impl Sandbox {
+    /// A Lampo home with one project served by the test tool installed as `php.exe`.
+    fn new(with_php: bool) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        let shim_dir = dir.path().join("shims");
+        let project = dir.path().join("work").join("shop");
+        let php_dir = dir.path().join("php");
+        for d in [&shim_dir, &project, &php_dir, &home.join("data").join("bin"), &home.join("config")] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        if with_php {
+            std::fs::copy(argecho(), php_dir.join("php.exe")).expect("build the argecho example first (cargo test builds it)");
+        }
+        let entry = ShimEntry { site: "shop".parse().unwrap(), root: ProjectRoot::new(project.to_str().unwrap()).unwrap(), target: target(&php_dir) };
+        let index = ShimIndex { version: 1, default: None, projects: vec![entry] };
+        std::fs::write(home.join("data").join("bin").join("shim-index.json"), serde_json::to_string(&index).unwrap()).unwrap();
+        Self { _dir: dir, home, shim_dir, project, php_dir }
+    }
+
+    fn install_shim(&self, name: &str) -> PathBuf {
+        let path = self.shim_dir.join(name);
+        std::fs::copy(env!("CARGO_BIN_EXE_lampo-shim"), &path).unwrap();
+        path
+    }
+
+    fn command(&self, shim: &Path, cwd: &Path) -> Command {
+        let mut c = Command::new(shim);
+        c.current_dir(cwd).env("LAMPO_HOME", &self.home).env_remove("LAMPO_PROJECT").env_remove("ARGECHO_EXIT");
+        c
+    }
+}
+
+fn run(mut command: Command, stdin: &[u8]) -> (i32, String, String) {
+    let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    child.stdin.take().unwrap().write_all(stdin).unwrap();
+    let out = child.wait_with_output().unwrap();
+    (out.status.code().unwrap(), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned())
+}
+
+#[test]
+fn arguments_stdin_env_and_exit_code_pass_through() {
+    let sb = Sandbox::new(true);
+    let shim = sb.install_shim("php.exe");
+    let tricky = ["-r", r#"echo "a b";"#, "two words", "", "it's", r#"say "hi""#, r"C:\dir with space\", r"back\\slash", "100%", "$HOME", "*.php", "caf\u{e9} \u{65e5}\u{672c}", "--", "-v"];
+    let mut command = sb.command(&shim, &sb.project.join("app"));
+    std::fs::create_dir_all(sb.project.join("app")).unwrap();
+    command.args(tricky).env("ARGECHO_EXIT", "7");
+    let (code, out, err) = run(command, b"hello stdin");
+    assert_eq!(code, 7, "exit code of the tool is forwarded; stderr: {err}");
+    let echoed: Vec<String> = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(echoed, tricky);
+    assert!(err.contains("stdin=11"), "stdin reaches the tool: {err}");
+    assert!(err.contains(r"phprc=C:\lampo-test-ini"), "PHPRC is set for the project: {err}");
+}
+
+#[test]
+fn exit_code_zero_and_large_codes_are_preserved() {
+    let sb = Sandbox::new(true);
+    let shim = sb.install_shim("php.exe");
+    let (code, _, _) = run(sb.command(&shim, &sb.project), b"");
+    assert_eq!(code, 0);
+    let mut command = sb.command(&shim, &sb.project);
+    command.env("ARGECHO_EXIT", "255");
+    assert_eq!(run(command, b"").0, 255);
+}
+
+#[test]
+fn works_in_any_case_of_the_file_name() {
+    let sb = Sandbox::new(true);
+    let shim = sb.install_shim("PHP.EXE");
+    let (code, out, err) = run(sb.command(&shim, &sb.project), b"");
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.trim(), "[]");
+}
+
+#[test]
+fn lampo_project_selects_the_site_regardless_of_the_folder() {
+    let sb = Sandbox::new(true);
+    let shim = sb.install_shim("php.exe");
+    let mut command = sb.command(&shim, sb.project.parent().unwrap().parent().unwrap());
+    command.env("LAMPO_PROJECT", "shop");
+    let (code, _, err) = run(command, b"");
+    assert_eq!(code, 0, "{err}");
+}
+
+#[test]
+fn outside_any_project_exits_127_with_one_line() {
+    let sb = Sandbox::new(true);
+    let shim = sb.install_shim("php.exe");
+    let outside = sb.home.clone();
+    let (code, out, err) = run(sb.command(&shim, &outside), b"");
+    assert_eq!((code, out.as_str()), (127, ""));
+    assert_eq!(err.lines().count(), 1, "{err}");
+    assert!(err.starts_with("lampo-shim: no Lampo project"), "{err}");
+}
+
+#[test]
+fn missing_tool_binary_exits_127_with_one_line() {
+    let sb = Sandbox::new(false);
+    let shim = sb.install_shim("php.exe");
+    let (code, _, err) = run(sb.command(&shim, &sb.project), b"");
+    assert_eq!(code, 127);
+    assert_eq!(err.lines().count(), 1, "{err}");
+    assert!(err.starts_with("lampo-shim: cannot start"), "{err}");
+    assert!(err.contains(sb.php_dir.join("php.exe").to_str().unwrap()), "{err}");
+}
+
+#[test]
+fn unknown_shim_name_exits_127() {
+    let sb = Sandbox::new(true);
+    let shim = sb.install_shim("notatool.exe");
+    let (code, _, err) = run(sb.command(&shim, &sb.project), b"");
+    assert_eq!(code, 127);
+    assert!(err.contains("not a Lampo shim name"), "{err}");
+}
+
+#[test]
+fn works_without_the_app_and_without_any_other_lampo_file() {
+    // The sandbox has no settings, no projects dir, no pipe: only the shim index.
+    let sb = Sandbox::new(true);
+    let shim = sb.install_shim("php.exe");
+    assert_eq!(run(sb.command(&shim, &sb.project), b"").0, 0);
+    assert!(!sb.home.join("config").join("settings.toml").exists());
+}
+
+#[test]
+fn startup_overhead_is_small() {
+    let sb = Sandbox::new(true);
+    let shim = sb.install_shim("php.exe");
+    let direct = sb.php_dir.join("php.exe");
+    let time = |program: &Path, via_shim: bool| {
+        let started = std::time::Instant::now();
+        let runs = 20;
+        for _ in 0..runs {
+            let mut c = if via_shim { sb.command(program, &sb.project) } else { Command::new(program) };
+            c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+            assert!(c.status().unwrap().success());
+        }
+        started.elapsed() / runs
+    };
+    let (shimmed, plain) = (time(&shim, true), time(&direct, false));
+    eprintln!("shim overhead: {shimmed:?} per run via shim vs {plain:?} direct (+{:?})", shimmed.saturating_sub(plain));
+    // Generous bound: debug build on a busy machine. The measured figure is printed above.
+    assert!(shimmed.saturating_sub(plain) < std::time::Duration::from_millis(250));
+}

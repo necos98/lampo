@@ -1,0 +1,39 @@
+﻿[package]
+name = "lampo-infra-web"
+description = "Lampo web adapters: Apache config rendering/validation and runner, php.ini rendering, hosts-file block and its elevated helper."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+# Tiny elevated helper: rewrites the Lampo block of the hosts file. Started via UAC (`runas`).
+name = "lampo-hosts-helper"
+path = "src/bin/lampo-hosts-helper.rs"
+
+[dependencies]
+lampo-domain = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+minijinja = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util", "net", "process", "rt", "sync", "time"] }
+tempfile = { workspace = true }
+tracing = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Registry",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time", "sync"] }

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024"><title>Lampo</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2A2420"/><stop offset="1" stop-color="#16120F"/></linearGradient>
+    <linearGradient id="bolt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FB923C"/><stop offset="1" stop-color="#F26A0F"/></linearGradient>
+  </defs>
+  <rect x="8" y="8" width="1008" height="1008" rx="222" fill="url(#bg)" stroke="#3A312A" stroke-width="16"/>
+  <path transform="translate(512 512) scale(.74) translate(-512 -512)" d="M600 96L248 584H488L408 928L776 424H536Z" fill="url(#bolt)"/>
+</svg>

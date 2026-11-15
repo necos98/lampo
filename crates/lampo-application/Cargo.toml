@@ -1,0 +1,22 @@
+[package]
+name = "lampo-application"
+description = "Lampo use cases and the serde DTOs/control protocol exposed to front-ends (GUI, CLI). Depends only on lampo-domain."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+lampo-domain = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+# Only `sync`/`time` primitives (task registry, timeouts); no IO.
+tokio = { workspace = true, features = ["sync", "time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }

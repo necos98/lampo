@@ -1,0 +1,170 @@
+name: build-windows
+
+# Build di release di Lampo (front-end SvelteKit con pnpm, backend Rust/Tauri v2, sidecar):
+# - parte solo su tag v* o manualmente (workflow_dispatch), non su push/PR:
+#   i controlli di qualita' (clippy, tipi, test) stanno in ci.yml;
+# - esegue i test (cargo + node) e poi `pnpm bundle`-equivalente: installer NSIS firmato
+#   (.sig), latest.json e checksum .sha256 come artifact CI e, su tag v*, crea anche la
+#   GitHub Release: latest.json e' il manifest che consuma tauri-plugin-updater
+#   (vedi docs/UPDATER.md).
+# Niente exe "portable": lampo-desktop.exe da solo non funziona senza i sidecar
+# (lampo.exe, lampo-shim.exe, lampo-hosts-helper.exe) che installa il setup.
+# La cache Rust (rust-cache) viene salvata solo da cache-rust-main.yml su main:
+# le cache create in un run su tag non sono ripristinabili da altri tag, mentre
+# un run puo' ripristinare quelle del proprio ref o del branch di default.
+# Qui si fa solo restore (save-if su main), con la stessa shared-key.
+on:
+  push:
+    # Nessuna build automatica sui branch: la build parte solo
+    # spingendo un tag v* (crea anche la Release) oppure
+    # manualmente da Actions -> build-windows -> Run workflow.
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # serve per creare la Release su tag v*
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      NSIS_DIR: target/release/bundle/nsis
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        # Prima di setup-node: la sua cache pnpm richiede pnpm gia' installato.
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - name: Setup Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust (restore da main)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+          shared-key: release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Versione coerente con il tag
+        # La versione vive in Cargo.toml ([workspace.package]) e apps/desktop/package.json,
+        # allineate da scripts/bump-version.mjs (il test "versioni sincronizzate" lo verifica).
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          $version = (Get-Content apps/desktop/package.json -Raw | ConvertFrom-Json).version
+          if ("${{ github.ref_name }}" -ne "v$version") {
+            throw "Il tag ${{ github.ref_name }} non corrisponde alla versione v$version: usa scripts/bump-version.mjs"
+          }
+
+      - name: Install frontend deps
+        working-directory: apps/desktop
+        run: pnpm install --frozen-lockfile
+
+      - name: Test (node)
+        working-directory: apps/desktop
+        run: pnpm test
+
+      - name: Build frontend
+        # generate_context! di Tauri richiede apps/desktop/build anche per `cargo test`.
+        working-directory: apps/desktop
+        run: pnpm build
+
+      - name: Test (cargo)
+        # I test che richiedono rete o binari reali sono #[ignore].
+        run: cargo test --workspace
+
+      - name: Build Tauri app + bundle Windows
+        # tauri.bundle.conf.json: beforeBuildCommand = pnpm build + scripts/prepare-sidecars.ps1
+        # (lampo.exe, lampo-shim.exe, lampo-hosts-helper.exe come externalBin), poi backend Rust
+        # in release e bundle NSIS (targets=["nsis"]). createUpdaterArtifacts produce anche
+        # <setup>.exe.sig, firmato con la chiave privata minisign: senza
+        # TAURI_SIGNING_PRIVATE_KEY la build fallisce. --ci evita prompt interattivi.
+        working-directory: apps/desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --ci --config src-tauri/tauri.bundle.conf.json
+
+      - name: Generate latest.json (manifest updater)
+        # Formato statico di tauri-plugin-updater: l'endpoint in tauri.conf.json
+        # punta a releases/latest/download/latest.json. La firma e' il contenuto
+        # del .sig; se manca la build non e' firmata e la release romperebbe
+        # gli aggiornamenti, quindi il passo fallisce. UTF-8 SENZA BOM: il
+        # plugin fa il parse JSON e un BOM lo manderebbe in errore.
+        run: |
+          $version = (Get-Content apps/desktop/package.json -Raw | ConvertFrom-Json).version
+          $setup = Get-ChildItem "$env:NSIS_DIR/*-setup.exe" | Select-Object -First 1
+          if (-not $setup) { throw "Installer NSIS non trovato: build fallita?" }
+          $sigFile = $setup.FullName + ".sig"
+          if (-not (Test-Path $sigFile)) { throw "Firma mancante ($sigFile): TAURI_SIGNING_PRIVATE_KEY non impostata?" }
+          $signature = (Get-Content $sigFile -Raw).Trim()
+          $tag = "v$version"
+          $entry = [ordered]@{
+            signature = $signature
+            url       = "https://github.com/necos98/lampo/releases/download/$tag/$($setup.Name)"
+          }
+          $manifest = [ordered]@{
+            version   = $version
+            notes     = "Lampo $tag"
+            pub_date  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = [ordered]@{
+              "windows-x86_64"      = $entry
+              "windows-x86_64-nsis" = $entry
+            }
+          }
+          $json = $manifest | ConvertTo-Json -Depth 5
+          $out = Join-Path $setup.DirectoryName "latest.json"
+          [System.IO.File]::WriteAllText($out, $json, (New-Object System.Text.UTF8Encoding($false)))
+          Write-Host "latest.json:"
+          Write-Host $json
+
+      - name: Generate SHA256 checksum
+        # Checksum di comodo per chi scarica a mano (l'updater verifica la firma
+        # minisign, non questo file).
+        run: |
+          $files = Get-ChildItem "$env:NSIS_DIR/*-setup.exe"
+          if (-not $files) { throw "Nessun installer trovato: build fallita?" }
+          foreach ($f in $files) {
+            $hash = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
+            Set-Content -Path ($f.FullName + ".sha256") -Value $hash -NoNewline
+            Write-Host "checksum: $($f.Name).sha256 = $hash ($($f.Length) bytes)"
+          }
+
+      - name: Upload artifacts (CI)
+        uses: actions/upload-artifact@v7
+        with:
+          name: lampo-windows
+          path: |
+            target/release/bundle/nsis/*-setup.exe
+            target/release/bundle/nsis/*-setup.exe.sig
+            target/release/bundle/nsis/*-setup.exe.sha256
+            target/release/bundle/nsis/latest.json
+          if-no-files-found: error
+
+      - name: Create GitHub Release (solo su tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $assets = @(
+            "$env:NSIS_DIR/*-setup.exe",
+            "$env:NSIS_DIR/*-setup.exe.sig",
+            "$env:NSIS_DIR/*-setup.exe.sha256",
+            "$env:NSIS_DIR/latest.json"
+          ) | ForEach-Object { Get-Item $_ -ErrorAction SilentlyContinue } | Where-Object { $_ -is [System.IO.FileInfo] } | Select-Object -ExpandProperty FullName
+          if (-not $assets) { throw "Nessun asset da pubblicare" }
+          gh release create "$tag" $assets --title "$tag" --generate-notes

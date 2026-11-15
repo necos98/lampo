@@ -1,0 +1,110 @@
+//! M4: one loopback-port allocator, shared by project creation and worktree environments, makes
+//! "allocate and save" atomic across concurrent callers (GUI + several agents on the pipe).
+
+use std::collections::BTreeSet;
+use std::sync::Arc;
+
+use lampo_domain::address::SiteAddress;
+use lampo_domain::ports::{ProjectRepository, WorktreeRepository};
+use lampo_domain::progress::CancelFlag;
+use lampo_domain::project::{ProjectId, ProjectRoot, check_conflicts};
+use lampo_domain::worktree::{DatabaseMode, WorktreeEnvironment};
+
+use super::cli;
+use crate::dto::*;
+use crate::testing::*;
+use crate::use_cases::*;
+
+/// Every loopback port in use, failing on a duplicate.
+fn assert_distinct_ports(w: &World) -> BTreeSet<u16> {
+    let mut seen = BTreeSet::new();
+    for p in w.projects.list().unwrap() {
+        for port in p.addresses.iter().filter_map(SiteAddress::loopback) {
+            assert!(seen.insert(port), "port {port} assigned twice (project {})", p.id);
+        }
+    }
+    for wt in w.worktrees.list_all().unwrap() {
+        assert!(seen.insert(wt.loopback_port), "port {} assigned twice (worktree {})", wt.loopback_port, wt.site_id());
+    }
+    seen
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn concurrent_allocations_never_hand_out_the_same_port() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", false);
+    let parent = w.projects.list().unwrap().remove(0);
+    w.ports.slow(3);
+    w.ports.busy(8101, "node.exe");
+
+    let mut tasks = Vec::new();
+    for n in 0..16 {
+        let allocator = w.allocator.clone();
+        let projects = w.projects.clone();
+        let worktrees = w.worktrees.clone();
+        let parent = parent.clone();
+        tasks.push(tokio::spawn(async move {
+            allocator
+                .allocate(|port, snap| {
+                    // Project and worktree saves interleave, as `lampo project create` and
+                    // `lampo worktree up` would.
+                    if n % 2 == 0 {
+                        let mut p = parent.clone();
+                        p.id = ProjectId::new(format!("p{n}")).unwrap();
+                        p.root = ProjectRoot::new(format!("C:\\sites\\p{n}")).unwrap();
+                        p.set_addresses(vec![SiteAddress::localhost(p.id.as_str())?, SiteAddress::LoopbackPort(port)])?;
+                        check_conflicts(&snap.projects, &snap.worktrees, &p, true, &snap.settings)?;
+                        projects.save(&p)?;
+                    } else {
+                        let siblings: Vec<_> = snap.worktrees.iter().filter(|e| e.parent == parent.id).cloned().collect();
+                        let root = ProjectRoot::new(format!("D:\\wt\\{n}")).unwrap();
+                        let env = WorktreeEnvironment::derive(&parent, &siblings, root, Some(format!("b{n}")), port, &DatabaseMode::Shared, 0)?;
+                        worktrees.save(&env)?;
+                    }
+                    Ok(port)
+                })
+                .await
+        }));
+    }
+    let mut ports = BTreeSet::new();
+    for t in tasks {
+        assert!(ports.insert(t.await.unwrap().unwrap()));
+    }
+    assert_eq!(assert_distinct_ports(&w), ports);
+    assert!(!ports.contains(&8101), "busy on the OS");
+    assert_eq!(ports.len(), 16);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn project_create_and_worktree_up_racing_get_distinct_ports() {
+    let w = Arc::new(World::with_basics());
+    w.project("shop", "C:\\sites\\shop", false);
+    w.hosts_in_sync();
+    w.ports.slow(2);
+    for n in 0..6 {
+        w.fs.add(&format!("C:\\sites\\new{n}"));
+        w.fs.add(&format!("D:\\wt\\{n}"));
+        w.git.linked(&format!("D:\\wt\\{n}"), "C:\\sites\\shop", Some(&format!("feature-{n}")));
+    }
+    let detect = Arc::new(DetectProject::new(vec![], w.projects.clone(), w.fs.clone()));
+    let create = Arc::new(CreateProject::new(w.project_writer(), w.presets(), detect, w.fs.clone(), w.database_service()));
+    let up = Arc::new(w.worktree_up());
+
+    let mut tasks = Vec::new();
+    for n in 0..6 {
+        let create = create.clone();
+        tasks.push(tokio::spawn(async move {
+            let request = CreateProjectRequest { root: format!("C:\\sites\\new{n}"), addressing: AddressingDto::NoElevation, ..Default::default() };
+            create.execute(request, &cli()).await.map(|_| ())
+        }));
+        let up = up.clone();
+        tasks.push(tokio::spawn(async move {
+            let request = WorktreeUpRequest { path: format!("D:\\wt\\{n}"), project_id: None, database: DatabaseModeDto::Shared };
+            up.execute(request, &cli(), &RecordingProgress::default(), &CancelFlag::new()).await.map(|_| ())
+        }));
+    }
+    for t in tasks {
+        t.await.unwrap().unwrap();
+    }
+    assert_eq!(assert_distinct_ports(&w).len(), 12);
+}

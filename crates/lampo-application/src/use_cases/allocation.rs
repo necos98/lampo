@@ -1,0 +1,84 @@
+//! Loopback-port allocation: the single owner of "pick a free `127.0.0.1:<port>` and persist it".
+//!
+//! Projects with a `LoopbackPort` address and worktree environments draw from the same range
+//! (`Settings::loopback_ports`). Several front-ends call into the app concurrently (the GUI plus
+//! any number of agents on the control pipe), so choosing a port and saving the site that owns it
+//! must be one atomic step. [`LoopbackPortAllocator`] holds that lock; every use case that saves
+//! loopback addresses goes through it, and the composition roots share **one** instance.
+
+use std::sync::Arc;
+
+use lampo_domain::ports::{PortAvailability, PortProbe, ProjectRepository, SettingsRepository, WorktreeRepository};
+use lampo_domain::project::Project;
+use lampo_domain::settings::Settings;
+use lampo_domain::worktree::{WorktreeEnvironment, allocate_loopback_port, used_loopback_ports};
+
+use crate::error::AppResult;
+
+/// The registry as seen under the allocation lock: what a commit validates against.
+#[derive(Debug, Clone)]
+pub struct SiteSnapshot {
+    pub projects: Vec<Project>,
+    pub worktrees: Vec<WorktreeEnvironment>,
+    pub settings: Settings,
+}
+
+pub struct LoopbackPortAllocator {
+    projects: Arc<dyn ProjectRepository>,
+    worktrees: Arc<dyn WorktreeRepository>,
+    settings: Arc<dyn SettingsRepository>,
+    probe: Arc<dyn PortProbe>,
+    lock: tokio::sync::Mutex<()>,
+}
+
+impl LoopbackPortAllocator {
+    pub fn new(projects: Arc<dyn ProjectRepository>, worktrees: Arc<dyn WorktreeRepository>, settings: Arc<dyn SettingsRepository>, probe: Arc<dyn PortProbe>) -> Self {
+        Self { projects, worktrees, settings, probe, lock: tokio::sync::Mutex::new(()) }
+    }
+
+    fn snapshot(&self) -> AppResult<SiteSnapshot> {
+        Ok(SiteSnapshot { projects: self.projects.list()?, worktrees: self.worktrees.list_all()?, settings: self.settings.load()? })
+    }
+
+    /// Lowest port of the configured range that is neither assigned to a site, nor a service
+    /// port, nor busy on the OS.
+    fn free_port(&self, snap: &SiteSnapshot) -> AppResult<u16> {
+        let mut used = used_loopback_ports(&snap.projects, &snap.worktrees);
+        loop {
+            let port = allocate_loopback_port(&used, &snap.settings)?;
+            match self.probe.check(port)? {
+                PortAvailability::Free => return Ok(port),
+                PortAvailability::InUse { .. } => {
+                    used.insert(port);
+                }
+            }
+        }
+    }
+
+    /// Allocate-and-reserve: under the lock, picks a free port and runs `commit(port, snapshot)`,
+    /// which must persist the site owning the port before returning. No other allocation or
+    /// reservation can observe the registry in between.
+    pub async fn allocate<T>(&self, commit: impl FnOnce(u16, &SiteSnapshot) -> AppResult<T>) -> AppResult<T> {
+        let _guard = self.lock.lock().await;
+        let snap = self.snapshot()?;
+        let port = self.free_port(&snap)?;
+        commit(port, &snap)
+    }
+
+    /// For saves whose addresses were chosen by the caller (explicit ports, updates, relinks,
+    /// imports): runs `commit(snapshot)` under the same lock, so its conflict check
+    /// (`project::check_conflicts`) and its save cannot interleave with an allocation.
+    pub async fn reserve<T>(&self, commit: impl FnOnce(&SiteSnapshot) -> AppResult<T>) -> AppResult<T> {
+        let _guard = self.lock.lock().await;
+        let snap = self.snapshot()?;
+        commit(&snap)
+    }
+
+    /// The port [`Self::allocate`] would pick right now, without reserving it (address
+    /// suggestions shown before a project is created).
+    pub async fn peek(&self) -> AppResult<u16> {
+        let _guard = self.lock.lock().await;
+        let snap = self.snapshot()?;
+        self.free_port(&snap)
+    }
+}

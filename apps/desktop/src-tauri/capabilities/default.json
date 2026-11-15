@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permissions of the main window: core APIs, native folder/file pickers, opening http(s) links in the browser, checking/installing app updates and relaunching.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "opener:default",
+    "updater:default",
+    "process:allow-restart"
+  ]
+}

@@ -1,0 +1,149 @@
+/**
+ * Typed wrappers for every Tauri command (`apps/desktop/src-tauri/src/commands`). The GUI never
+ * calls `invoke` with raw strings: use these functions. Rejections are `AppError`s.
+ *
+ * CONTRACT: keep 1:1 with `lampo_command_handler!` in `src-tauri/src/commands/mod.rs`.
+ */
+import { invoke } from '@tauri-apps/api/core';
+
+import type * as T from './types.js';
+
+/** Command names exactly as registered in Rust. */
+export const COMMANDS = {
+	appInfo: 'app_info',
+	getStatus: 'get_status',
+	quitApp: 'quit_app',
+	prepareUpdate: 'prepare_update',
+	cancelUpdate: 'cancel_update',
+	listProjects: 'list_projects',
+	getProject: 'get_project',
+	detectProject: 'detect_project',
+	suggestAddresses: 'suggest_addresses',
+	createProject: 'create_project',
+	scaffoldProject: 'scaffold_project',
+	updateProject: 'update_project',
+	deleteProject: 'delete_project',
+	setProjectActive: 'set_project_active',
+	setProjectPhp: 'set_project_php',
+	relinkProject: 'relink_project',
+	exportProject: 'export_project',
+	openTerminal: 'open_terminal',
+	openProjectFolder: 'open_project_folder',
+	openInVsCode: 'open_in_vscode',
+	importProject: 'import_project',
+	listPresets: 'list_presets',
+	savePreset: 'save_preset',
+	deletePreset: 'delete_preset',
+	listCatalog: 'list_catalog',
+	listInstalledPackages: 'list_installed_packages',
+	checkPackageUpdates: 'check_package_updates',
+	installPackage: 'install_package',
+	listPhpExtensions: 'list_php_extensions',
+	uninstallPackage: 'uninstall_package',
+	firstRunStatus: 'first_run_status',
+	runFirstRun: 'run_first_run',
+	cancelTask: 'cancel_task',
+	listRunningTasks: 'list_running_tasks',
+	listServices: 'list_services',
+	startServices: 'start_services',
+	stopServices: 'stop_services',
+	restartServices: 'restart_services',
+	applyEnvironment: 'apply_environment',
+	listWorktrees: 'list_worktrees',
+	createWorktree: 'create_worktree',
+	removeWorktree: 'remove_worktree',
+	pruneWorktrees: 'prune_worktrees',
+	listLogSources: 'list_log_sources',
+	tailLog: 'tail_log',
+	readLogFrom: 'read_log_from',
+	getSettings: 'get_settings',
+	listServiceKinds: 'list_service_kinds',
+	updateSettings: 'update_settings',
+	runDoctor: 'run_doctor',
+	shimStatus: 'shim_status',
+	installShims: 'install_shims'
+} as const;
+
+export type CommandName = (typeof COMMANDS)[keyof typeof COMMANDS];
+
+const call = <R>(cmd: CommandName, args?: Record<string, unknown>): Promise<R> => invoke<R>(cmd, args);
+
+// App
+export const appInfo = () => call<T.AppInfo>(COMMANDS.appInfo);
+export const getStatus = () => call<T.Status>(COMMANDS.getStatus);
+export const quitApp = () => call<void>(COMMANDS.quitApp);
+/** Stops every service before an update installs (the installer then closes the app). */
+export const prepareUpdate = () => call<void>(COMMANDS.prepareUpdate);
+/** The update could not start after `prepareUpdate`: services back to the configured state. */
+export const cancelUpdate = () => call<void>(COMMANDS.cancelUpdate);
+
+// Projects
+export const listProjects = () => call<T.Project[]>(COMMANDS.listProjects);
+export const getProject = (projectId: string) => call<T.Project>(COMMANDS.getProject, { projectId });
+export const detectProject = (folder: string) => call<T.Detection>(COMMANDS.detectProject, { folder });
+export const suggestAddresses = (projectId: string) => call<T.AddressSuggestions>(COMMANDS.suggestAddresses, { projectId });
+export const createProject = (request: T.CreateProjectRequest) => call<T.CreateProjectResult>(COMMANDS.createProject, { request });
+/** Background task: clone / Laravel Installer into `<parentDir>\<folderName>`; output lines arrive as progress messages. */
+export const scaffoldProject = (request: T.ScaffoldProjectRequest) => call<T.TaskStarted>(COMMANDS.scaffoldProject, { request });
+export const updateProject = (request: T.UpdateProjectRequest) => call<T.Project>(COMMANDS.updateProject, { request });
+export const deleteProject = (projectId: string) => call<void>(COMMANDS.deleteProject, { projectId });
+export const setProjectActive = (request: T.SetProjectActiveRequest) => call<T.Project>(COMMANDS.setProjectActive, { request });
+export const setProjectPhp = (request: T.SetProjectPhpRequest) => call<T.Project>(COMMANDS.setProjectPhp, { request });
+export const relinkProject = (request: T.RelinkProjectRequest) => call<T.Project>(COMMANDS.relinkProject, { request });
+export const exportProject = (request: T.ExportProjectRequest) => call<void>(COMMANDS.exportProject, { request });
+export const openTerminal = (projectId: string) => call<void>(COMMANDS.openTerminal, { projectId });
+/** Opens the project folder in Windows Explorer; `validation` if the folder is missing. */
+export const openProjectFolder = (projectId: string) => call<void>(COMMANDS.openProjectFolder, { projectId });
+/** Opens the project folder in VS Code; `package-missing` if VS Code is not installed. */
+export const openInVsCode = (projectId: string) => call<void>(COMMANDS.openInVsCode, { projectId });
+export const importProject = (request: T.ImportProjectRequest) => call<T.Project>(COMMANDS.importProject, { request });
+
+// Presets
+export const listPresets = () => call<T.Preset[]>(COMMANDS.listPresets);
+export const savePreset = (request: T.SavePresetRequest) => call<T.Preset>(COMMANDS.savePreset, { request });
+export const deletePreset = (presetId: string) => call<void>(COMMANDS.deletePreset, { presetId });
+
+// Packages and tasks
+export const listCatalog = (kind: T.PackageKind | null = null) => call<T.CatalogEntry[]>(COMMANDS.listCatalog, { kind });
+export const listInstalledPackages = () => call<T.InstalledPackage[]>(COMMANDS.listInstalledPackages);
+export const checkPackageUpdates = () => call<T.UpdateAvailable[]>(COMMANDS.checkPackageUpdates);
+/** Starts a background task; follow it with `onTaskProgress` / `onTaskFinished`. */
+export const installPackage = (request: T.InstallPackageRequest) => call<T.TaskStarted>(COMMANDS.installPackage, { request });
+/** Extensions the installed PHP minor (`"8.3"`) can load; `package-missing` if not installed. */
+export const listPhpExtensions = (phpVersion: string) => call<T.PhpExtension[]>(COMMANDS.listPhpExtensions, { phpVersion });
+export const uninstallPackage = (id: T.PackageId) => call<void>(COMMANDS.uninstallPackage, { id });
+export const firstRunStatus = () => call<T.FirstRunStatus>(COMMANDS.firstRunStatus);
+/** Starts a background task. */
+export const runFirstRun = () => call<T.TaskStarted>(COMMANDS.runFirstRun);
+export const cancelTask = (taskId: string) => call<boolean>(COMMANDS.cancelTask, { taskId });
+/** Tasks still running, e.g. started before this window was (re)created. */
+export const listRunningTasks = () => call<T.RunningTask[]>(COMMANDS.listRunningTasks);
+
+// Services
+export const listServices = () => call<T.ServiceStatus[]>(COMMANDS.listServices);
+export const startServices = (request: T.ServicesRequest = { services: [] }) => call<T.SyncReport>(COMMANDS.startServices, { request });
+export const stopServices = (request: T.ServicesRequest = { services: [] }) => call<T.SyncReport>(COMMANDS.stopServices, { request });
+export const restartServices = (request: T.ServicesRequest = { services: [] }) => call<T.SyncReport>(COMMANDS.restartServices, { request });
+export const applyEnvironment = () => call<T.SyncReport>(COMMANDS.applyEnvironment);
+
+// Worktree environments
+export const listWorktrees = (projectId: string | null = null) => call<T.WorktreeEnvironment[]>(COMMANDS.listWorktrees, { projectId });
+/** Starts a background task; `onWorktreesChanged` fires on success. */
+export const createWorktree = (request: T.WorktreeUpRequest) => call<T.TaskStarted>(COMMANDS.createWorktree, { request });
+export const removeWorktree = (request: T.WorktreeDownRequest) => call<T.WorktreeDownResult>(COMMANDS.removeWorktree, { request });
+export const pruneWorktrees = (request: T.PruneWorktreesRequest = {}) => call<T.PruneReport>(COMMANDS.pruneWorktrees, { request });
+
+// Logs
+export const listLogSources = (site: string | null = null) => call<T.LogSource[]>(COMMANDS.listLogSources, { site });
+export const tailLog = (request: T.LogTailRequest) => call<T.LogLines>(COMMANDS.tailLog, { request });
+export const readLogFrom = (source: string, offset: number) => call<T.LogLines>(COMMANDS.readLogFrom, { source, offset });
+
+// Settings
+export const getSettings = () => call<T.Settings>(COMMANDS.getSettings);
+export const listServiceKinds = () => call<T.ServiceKindInfo[]>(COMMANDS.listServiceKinds);
+export const updateSettings = (settings: T.Settings) => call<T.Settings>(COMMANDS.updateSettings, { settings });
+
+// Diagnostics and shims
+export const runDoctor = () => call<T.DoctorReport>(COMMANDS.runDoctor);
+export const shimStatus = () => call<T.ShimStatus>(COMMANDS.shimStatus);
+export const installShims = () => call<T.ShimStatus>(COMMANDS.installShims);

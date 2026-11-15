@@ -1,0 +1,7 @@
+# Stile rustfmt del workspace (solo opzioni stabili).
+# Il codice usa righe lunghe e costrutti compatti: questi valori riproducono lo stile esistente
+# con il diff minimo. L'edizione di stile segue `edition` del workspace (2024).
+max_width = 190
+use_small_heuristics = "Max"
+# Non riordina gli import: l'ordine esistente resta com'e' (evita un diff di soli spostamenti).
+reorder_imports = false
