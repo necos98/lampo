@@ -32,6 +32,8 @@ fn every_subcommand_renders_help() {
         &["project", "deactivate"],
         &["project", "set-php"],
         &["project", "set"],
+        &["project", "rename"],
+        &["project", "remove"],
         &["worktree"],
         &["worktree", "up"],
         &["worktree", "down"],

@@ -3,6 +3,7 @@
 use lampo_application::control::ControlRequest;
 use lampo_application::dto::*;
 use lampo_application::AppResult;
+use serde::Serialize;
 
 use super::{Cmd, validation};
 use crate::cli::{ProjectCommand, ProjectCreateArgs, ProjectNewArgs, ProjectSetArgs, StarterKitArg};
@@ -43,8 +44,53 @@ pub async fn run(c: &Cmd<'_>, command: ProjectCommand) -> AppResult<i32> {
             let project: ProjectDto = c.app(ControlRequest::ProjectPatch(patch_request(project_id, *args)?)).await?;
             c.io.emit(&project, render::project);
         }
+        ProjectCommand::Rename { name, id } => {
+            let project_id = c.project_id(id.as_ref())?;
+            let project: ProjectDto = c.app(ControlRequest::ProjectPatch(ProjectPatchRequest { project_id, name: Some(name), ..Default::default() })).await?;
+            c.io.emit(&project, render::project);
+        }
+        ProjectCommand::Remove { id, yes } => remove(c, id, yes).await?,
     }
     Ok(0)
+}
+
+/// `--json` result of `project remove`: what was unregistered and what was kept.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRemovedDto {
+    pub project_id: String,
+    pub name: String,
+    /// Kept on disk, untouched.
+    pub root: String,
+    /// Kept in MySQL (never dropped).
+    pub database_name: Option<String>,
+    pub was_active: bool,
+    /// Worktree environments unregistered with it (their folders are kept too).
+    pub worktree_environments: usize,
+}
+
+/// Reads the project (file-based: unknown id = exit 3 without starting the app), then removes it.
+async fn remove(c: &Cmd<'_>, id: Option<String>, yes: bool) -> AppResult<()> {
+    let project_id = c.project_id(id.as_ref())?;
+    if !yes {
+        return Err(validation(format!("refusing to remove project `{project_id}` without --yes (lampo never prompts; its folder and databases are kept)")));
+    }
+    let project = c.ctx.projects.get(&project_id)?;
+    let _: serde_json::Value = c.app(ControlRequest::ProjectDelete { project_id: project.id.clone() }).await?;
+    let removed = ProjectRemovedDto {
+        project_id: project.id,
+        name: project.name,
+        root: project.root,
+        database_name: project.database_name,
+        was_active: project.active,
+        worktree_environments: project.worktrees.len(),
+    };
+    c.io.emit(&removed, |r| {
+        let worktrees = if r.worktree_environments > 0 { format!(" with {} worktree environment(s)", r.worktree_environments) } else { String::new() };
+        let database = r.database_name.as_deref().map(|db| format!(" and database `{db}`")).unwrap_or_default();
+        format!("removed project {} ({}){worktrees} from Lampo; folder {}{database} kept", r.project_id, r.name, r.root)
+    });
+    Ok(())
 }
 
 /// `project set` flags → a [`ProjectPatchRequest`]. Values are validated by the app; only the
@@ -68,6 +114,9 @@ fn patch_request(project_id: String, args: ProjectSetArgs) -> AppResult<ProjectP
         database_name: args.database,
         public_dir: args.public_dir,
         apache_directives: args.apache_directives,
+        name: args.name,
+        addresses_add: args.address,
+        addresses_remove: args.no_address,
     })
 }
 

@@ -56,6 +56,18 @@ impl SiteAddress {
         Ok(vec![Self::hostname(Hostname::for_project(slug, tld)?)?, Self::localhost(slug)?])
     }
 
+    /// Parses the displayed form ([`fmt::Display`]): `shop.test` (hosts file), `shop.localhost`,
+    /// `127.0.0.1:8101`.
+    pub fn parse(text: &str) -> Result<Self, DomainError> {
+        let text = text.trim();
+        if let Some(port) = text.strip_prefix("127.0.0.1:") {
+            let port = port.parse::<u16>().map_err(|_| DomainError::InvalidAddresses(format!("`{text}`: the port must be a number from 1024 to 65535")))?;
+            return Self::loopback_port(port);
+        }
+        let host = Hostname::new(text)?;
+        if host.is_localhost() { Ok(Self::Localhost(host)) } else { Self::hostname(host) }
+    }
+
     pub fn needs_hosts_entry(&self) -> bool {
         matches!(self, Self::Hostname(_))
     }
@@ -181,6 +193,19 @@ mod tests {
         assert_eq!(json, r#"{"kind":"loopback-port","port":8101}"#);
         assert!(serde_json::from_str::<SiteAddress>(r#"{"kind":"localhost","host":"shop.test"}"#).is_err());
         assert!(serde_json::from_str::<SiteAddress>(r#"{"kind":"hostname","host":"shop.localhost"}"#).is_err());
+    }
+
+    #[test]
+    fn parse_round_trips_the_displayed_form() {
+        for text in ["shop.test", "api.shop.localhost", "127.0.0.1:8101"] {
+            assert_eq!(SiteAddress::parse(text).unwrap().to_string(), text);
+        }
+        assert!(SiteAddress::parse(" Shop.Test ").unwrap().needs_hosts_entry());
+        assert!(matches!(SiteAddress::parse("shop.localhost").unwrap(), SiteAddress::Localhost(_)));
+        assert_eq!(SiteAddress::parse("127.0.0.1:8101").unwrap().loopback(), Some(8101));
+        for bad in ["", "shop", "127.0.0.1:80", "127.0.0.1:x", "127.0.0.1:70000", "127.0.0.1", "http://shop.test"] {
+            assert!(SiteAddress::parse(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

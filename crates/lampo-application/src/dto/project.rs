@@ -194,7 +194,20 @@ pub struct ProjectPatchRequest {
     pub public_dir: Option<String>,
     /// Extra directives inside the project's `<VirtualHost>` (replaces them; `""` clears).
     pub apache_directives: Option<String>,
+    /// New display name (`lampo project rename`); the id, URLs and database stay.
+    pub name: Option<String>,
+    /// Addresses to add, in their displayed form: `shop.test` (hosts file: needs elevation),
+    /// `shop.localhost`, `127.0.0.1:8101`, or [`AUTO_LOOPBACK`] for a free dedicated port (a
+    /// no-op when the project already has one). Appended, so the primary address (the first)
+    /// stays unless it is removed.
+    pub addresses_add: Vec<String>,
+    /// Addresses to remove (same forms; [`AUTO_LOOPBACK`] = the dedicated port, whichever it
+    /// is). At least one address must remain.
+    pub addresses_remove: Vec<String>,
 }
+
+/// [`ProjectPatchRequest`] address meaning "a dedicated loopback port", whichever it is.
+pub const AUTO_LOOPBACK: &str = "loopback";
 
 impl ProjectPatchRequest {
     /// Whether the patch changes nothing.
@@ -212,6 +225,9 @@ impl ProjectPatchRequest {
             database_name,
             public_dir,
             apache_directives,
+            name,
+            addresses_add,
+            addresses_remove,
         } = self;
         extensions_add.is_empty()
             && extensions_remove.is_empty()
@@ -224,6 +240,9 @@ impl ProjectPatchRequest {
             && database_name.is_none()
             && public_dir.is_none()
             && apache_directives.is_none()
+            && name.is_none()
+            && addresses_add.is_empty()
+            && addresses_remove.is_empty()
     }
 }
 

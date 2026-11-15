@@ -544,3 +544,122 @@ async fn patch_rejects_bad_requests_without_saving_anything() {
     assert_eq!(dto.environment.addons, ["xdebug"]);
     assert_eq!(w.events.all().len(), events, "no save, no ProjectsChanged");
 }
+
+// --- display name, addresses and removal from the CLI ----------------------------------------
+
+fn addresses_of(dto: &ProjectDto) -> Vec<String> {
+    dto.addresses.iter().map(|a| crate::mapping::address_from_dto(a).unwrap().to_string()).collect()
+}
+
+fn addresses(id: &str, add: &[&str], remove: &[&str]) -> ProjectPatchRequest {
+    ProjectPatchRequest { addresses_add: add.iter().map(|a| a.to_string()).collect(), addresses_remove: remove.iter().map(|a| a.to_string()).collect(), ..patch(id) }
+}
+
+fn one_address(w: &World, id: &str, address: &str) {
+    w.update_project(id, |p| p.set_addresses(vec![lampo_domain::address::SiteAddress::parse(address).unwrap()]).unwrap());
+}
+
+#[tokio::test]
+async fn patch_renames_and_appends_addresses_keeping_the_primary_one() {
+    let w = World::with_basics();
+    w.project("shop", r"C:\sites\shop", true);
+    w.hosts_in_sync();
+    // A GUI edit saved meanwhile: the rename must not revert it.
+    w.update_project("shop", |p| p.environment.public_dir = lampo_domain::project::PublicDir::new("public").unwrap());
+
+    let dto = w.patch_project().execute(ProjectPatchRequest { name: Some("  Shop Legacy ".into()), ..patch("shop") }, &cli()).await.unwrap();
+    assert_eq!((dto.id.as_str(), dto.name.as_str(), dto.environment.public_dir.as_str()), ("shop", "Shop Legacy", "public"));
+    assert_eq!(dto.database_name.as_deref(), Some("shop"), "the database name follows the id, not the display name");
+
+    // `.localhost` names and loopback ports need no elevation.
+    let dto = w.patch_project().execute(addresses("shop", &["api.shop.localhost", "loopback"], &[]), &cli()).await.unwrap();
+    assert_eq!(addresses_of(&dto), ["shop.test", "shop.localhost", "api.shop.localhost", "127.0.0.1:8100"]);
+    assert_eq!(dto.url, "http://shop.test", "the first address stays primary");
+    let vhost = w.web.last().unwrap().vhosts.into_iter().find(|v| v.site.to_string() == "shop").unwrap();
+    assert_eq!(vhost.loopback_port, Some(8100), "Apache regenerated");
+    assert!(vhost.server_names.iter().any(|h| h.as_str() == "api.shop.localhost"));
+    assert_eq!(w.hosts.writes.load(Ordering::SeqCst), 0);
+
+    // Adding what is there (`loopback` with a port already assigned) is a no-op: no save.
+    let events = w.events.all().len();
+    let dto = w.patch_project().execute(addresses("shop", &["loopback", "shop.localhost"], &[]), &cli()).await.unwrap();
+    assert_eq!(addresses_of(&dto).len(), 4);
+    assert_eq!(w.events.all().len(), events);
+
+    // A hosts-file name needs elevation: refused before saving, then applied with it.
+    let before = w.projects.list().unwrap();
+    let err = w.patch_project().execute(addresses("shop", &[], &["shop.test"]), &cli()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::ElevationRequired);
+    assert!(err.message.contains("`shop.test`") && err.message.contains("--allow-elevation") && err.message.contains("nothing was changed"), "{}", err.message);
+    assert_eq!(w.projects.list().unwrap(), before, "nothing saved");
+    let dto = w.patch_project().execute(addresses("shop", &["shop.dev"], &["shop.test"]), &crate::context::CallContext::cli(true)).await.unwrap();
+    assert_eq!(addresses_of(&dto), ["shop.localhost", "api.shop.localhost", "127.0.0.1:8100", "shop.dev"]);
+    assert_eq!(dto.url, "http://shop.localhost", "removing the primary address promotes the next one");
+    let names: Vec<String> = w.hosts.block.lock().unwrap().clone().unwrap().entries().map(|e| e.hostname.to_string()).collect();
+    assert!(names.contains(&"shop.dev".to_string()) && !names.contains(&"shop.test".to_string()), "{names:?}");
+
+    // Removing the dedicated port by keyword, and a name.
+    let dto = w.patch_project().execute(addresses("shop", &[], &["loopback", "api.shop.localhost"]), &cli()).await.unwrap();
+    assert_eq!(addresses_of(&dto), ["shop.localhost", "shop.dev"]);
+}
+
+#[tokio::test]
+async fn address_patches_are_validated_against_the_project_and_other_sites() {
+    let w = World::with_basics();
+    w.project("shop", r"C:\sites\shop", false);
+    w.project("blog", r"C:\sites\blog", false);
+    one_address(&w, "shop", "shop.localhost");
+    w.update_project("blog", |p| {
+        let mut list = p.addresses.clone();
+        list.push(lampo_domain::address::SiteAddress::parse("127.0.0.1:8200").unwrap());
+        p.set_addresses(list).unwrap();
+    });
+    w.hosts_in_sync();
+    let before = w.projects.list().unwrap();
+    let sync = Arc::new(CountingSync::default());
+    let patcher = w.patch_project_with(sync.clone());
+
+    for (request, code) in [
+        (addresses("shop", &[], &["shop.localhost"]), ErrorCode::Validation),
+        (addresses("shop", &["x.localhost"], &["shop.localhost", "x.localhost"]), ErrorCode::Validation),
+        (addresses("shop", &["loopback"], &["loopback"]), ErrorCode::Validation),
+        (addresses("shop", &["127.0.0.1:9000", "127.0.0.1:9001"], &[]), ErrorCode::Validation),
+        (addresses("shop", &["127.0.0.1:80"], &[]), ErrorCode::Validation),
+        (addresses("shop", &["shop"], &[]), ErrorCode::Validation),
+        (addresses("shop", &["http://shop.test"], &[]), ErrorCode::Validation),
+        (addresses("shop", &["127.0.0.1:8200"], &[]), ErrorCode::Conflict),
+        (addresses("shop", &["blog.test"], &[]), ErrorCode::Conflict),
+        (addresses("shop", &["blog.localhost"], &[]), ErrorCode::Conflict),
+        (ProjectPatchRequest { name: Some("  ".into()), ..patch("shop") }, ErrorCode::Validation),
+    ] {
+        let shown = format!("{request:?}");
+        // With elevation granted, so the rule itself is what fails.
+        assert_eq!(patcher.execute(request, &gui()).await.unwrap_err().code, code, "{shown}");
+    }
+    let err = patcher.execute(addresses("ghost", &["x.localhost"], &[]), &cli()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::NotFound);
+    assert_eq!(w.projects.list().unwrap(), before, "nothing saved");
+    assert_eq!(sync.calls.load(Ordering::SeqCst), 0, "nothing synced");
+}
+
+#[tokio::test]
+async fn delete_from_the_cli_needs_elevation_only_for_hosts_file_names() {
+    let w = World::with_basics();
+    w.project("shop", r"C:\sites\shop", true);
+    w.project("api", r"C:\sites\api", true);
+    one_address(&w, "api", "api.localhost");
+    w.hosts_in_sync();
+    let delete = DeleteProject::new(w.projects.clone(), w.worktrees.clone(), w.env.clone(), w.events.clone());
+
+    let err = delete.execute("shop", &cli()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::ElevationRequired);
+    assert!(err.message.contains("`shop.test`") && err.message.contains("nothing was removed"), "{}", err.message);
+    assert_eq!(w.projects.list().unwrap().len(), 2, "still registered: a retry with --allow-elevation finds it");
+
+    // An active project without hosts-file names goes without elevation; Apache stops serving it.
+    delete.execute("api", &cli()).await.unwrap();
+    assert!(w.web.last().unwrap().vhosts.iter().all(|v| v.site.to_string() != "api"));
+    delete.execute("shop", &crate::context::CallContext::cli(true)).await.unwrap();
+    assert!(w.projects.list().unwrap().is_empty());
+    assert!(w.hosts.block.lock().unwrap().as_ref().unwrap().is_empty(), "hosts entries removed");
+}

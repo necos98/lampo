@@ -341,10 +341,14 @@ mod tests {
             extensions_add: vec!["intl".into()],
             ini_set: [("memory_limit".to_string(), "512M".to_string())].into(),
             services_add: vec![ServiceUseDto { kind: "mysql".into(), version: Some("5.7".into()) }],
+            name: Some("Shop Legacy".into()),
+            addresses_add: vec!["loopback".into()],
+            addresses_remove: vec!["shop.test".into()],
             ..Default::default()
         });
         let json = serde_json::to_value(&request).unwrap();
         assert_eq!(json["type"], "project-patch");
+        assert_eq!((&json["params"]["name"], &json["params"]["addressesAdd"][0], &json["params"]["addressesRemove"][0]), (&"Shop Legacy".into(), &"loopback".into(), &"shop.test".into()));
         assert_eq!(json["params"]["extensionsAdd"][0], "intl");
         assert_eq!(json["params"]["iniSet"]["memory_limit"], "512M");
         assert_eq!(json["params"]["servicesAdd"][0]["version"], "5.7");
