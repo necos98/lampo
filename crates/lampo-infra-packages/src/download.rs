@@ -5,9 +5,11 @@
 //! * A sidecar `<destination>.part.json` remembers the URL and validator (`ETag`/`Last-Modified`)
 //!   of the partial file. A later attempt resumes with `Range` + `If-Range`, so a file that changed
 //!   on the server is downloaded again from scratch instead of being spliced.
-//! * Transient failures (connection errors, 408/429/5xx) are retried with exponential backoff,
-//!   honouring `Retry-After`; a 403 is retried once with a generic browser-like user agent;
-//!   404/410 moves on to the official fallback locations of [`crate::mirrors`].
+//! * Transient failures (connection errors, 408/429/5xx, a stale range answered with 416, a
+//!   partial response for another range, a body shorter than announced) are retried with
+//!   exponential backoff, honouring `Retry-After`; a 403 is retried once with a generic
+//!   browser-like user agent; 404/410 moves on to the official fallback locations of
+//!   [`crate::mirrors`].
 //! * Cancellation deletes the partial file. Other failures keep it so the next attempt resumes.
 //! * The SHA-256 is computed while the body is streamed; a resumed download reads the bytes
 //!   already on disk once, at the start of the attempt.
@@ -32,6 +34,11 @@ use tokio::io::AsyncWriteExt;
 use crate::checksum::IncrementalSha256;
 use crate::http::{FALLBACK_USER_AGENT, is_retryable};
 use crate::mirrors::{self, UrlFallback};
+
+/// Appended to the destination's name for the file being downloaded.
+pub(crate) const PART_SUFFIX: &str = ".part";
+/// Appended to the destination's name for the resume metadata of the partial file.
+pub(crate) const PART_META_SUFFIX: &str = ".part.json";
 
 /// Retry/backoff knobs (tests shorten them).
 #[derive(Debug, Clone, Copy)]
@@ -68,8 +75,8 @@ impl HttpDownloader {
     /// Downloads `url` (any scheme the client accepts: tests use a local `http://` server),
     /// refusing a body larger than `max_bytes`.
     pub async fn download_str(&self, url: &str, destination: &Path, max_bytes: Option<u64>, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<DownloadedFile> {
-        let part = sibling(destination, ".part");
-        let meta = sibling(destination, ".part.json");
+        let part = sibling(destination, PART_SUFFIX);
+        let meta = sibling(destination, PART_META_SUFFIX);
         if let Some(dir) = destination.parent().filter(|d| !d.as_os_str().is_empty()) {
             tokio::fs::create_dir_all(dir).await.map_err(|e| PortError::io(format!("creating {}", dir.display()), e))?;
         }
@@ -148,6 +155,7 @@ impl HttpDownloader {
                     // Stale partial file: start over.
                     remove_partial(target).await;
                     last_error = format!("{url}: HTTP {status}");
+                    self.pause(&mut backoff, None, cancel).await?;
                     continue;
                 }
                 s if is_retryable(s) => {
@@ -167,6 +175,7 @@ impl HttpDownloader {
                     // A range we did not ask for (or a mismatching one): discard and retry cleanly.
                     remove_partial(target).await;
                     last_error = format!("{url}: unexpected partial response");
+                    self.pause(&mut backoff, None, cancel).await?;
                     continue;
                 }
                 _ => 0,
@@ -189,6 +198,7 @@ impl HttpDownloader {
                         if written != total {
                             last_error = format!("{url}: received {written} of {total} bytes");
                             hashed = Some(digest);
+                            self.pause(&mut backoff, None, cancel).await?;
                             continue;
                         }
                     }
@@ -231,7 +241,7 @@ impl PackageDownloader for HttpDownloader {
     }
 
     async fn discard(&self, destination: &Path) -> PortResult<()> {
-        for file in [destination.to_path_buf(), sibling(destination, ".part"), sibling(destination, ".part.json")] {
+        for file in [destination.to_path_buf(), sibling(destination, PART_SUFFIX), sibling(destination, PART_META_SUFFIX)] {
             match tokio::fs::remove_file(&file).await {
                 Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(PortError::io(format!("deleting {}", file.display()), e)),
                 _ => {}
@@ -448,8 +458,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("a.zip");
         let url = server.url("/a.zip");
-        std::fs::write(sibling(&dest, ".part"), &data[..4000]).unwrap();
-        std::fs::write(sibling(&dest, ".part.json"), serde_json::to_vec(&PartMeta { url: url.clone(), validator: Some("\"v1\"".into()) }).unwrap()).unwrap();
+        std::fs::write(sibling(&dest, PART_SUFFIX), &data[..4000]).unwrap();
+        std::fs::write(sibling(&dest, PART_META_SUFFIX), serde_json::to_vec(&PartMeta { url: url.clone(), validator: Some("\"v1\"".into()) }).unwrap()).unwrap();
         let downloaded = downloader().download_str(&url, &dest, None, &lampo_domain::ports::NullProgressSink, &CancelFlag::new()).await.unwrap();
         assert_eq!(downloaded.sha256, sha256_of(&data));
     }
@@ -519,7 +529,7 @@ mod tests {
         let downloaded = downloader().download_str(&server.url("/a.zip"), &dest, None, &rec, &CancelFlag::new()).await.unwrap();
         assert_eq!(downloaded, DownloadedFile { bytes: data.len() as u64, sha256: sha256_of(&data) }, "hashed while streamed");
         assert_eq!(std::fs::read(&dest).unwrap(), data);
-        assert!(!sibling(&dest, ".part").exists());
+        assert!(!sibling(&dest, PART_SUFFIX).exists());
         let last = rec.0.lock().unwrap().last().cloned().unwrap();
         assert_eq!((last.stage, last.done, last.total), (ProgressStage::Downloading, data.len() as u64, Some(data.len() as u64)));
         assert_eq!(last.subject.as_deref(), Some("a.zip"));
@@ -546,12 +556,12 @@ mod tests {
         let dest = dir.path().join("a.zip");
         let url = server.url("/a.zip");
         // Simulate an interrupted earlier attempt.
-        std::fs::write(sibling(&dest, ".part"), &data[..4000]).unwrap();
-        std::fs::write(sibling(&dest, ".part.json"), serde_json::to_vec(&PartMeta { url: url.clone(), validator: Some("\"v1\"".into()) }).unwrap()).unwrap();
+        std::fs::write(sibling(&dest, PART_SUFFIX), &data[..4000]).unwrap();
+        std::fs::write(sibling(&dest, PART_META_SUFFIX), serde_json::to_vec(&PartMeta { url: url.clone(), validator: Some("\"v1\"".into()) }).unwrap()).unwrap();
         downloader().download_str(&url, &dest, None, &lampo_domain::ports::NullProgressSink, &CancelFlag::new()).await.unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), data);
         assert_eq!(ranges.lock().unwrap()[0], (Some("bytes=4000-".into()), Some("\"v1\"".into())));
-        assert!(!sibling(&dest, ".part.json").exists());
+        assert!(!sibling(&dest, PART_META_SUFFIX).exists());
     }
 
     #[tokio::test]
@@ -565,8 +575,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("a.zip");
         let url = server.url("/a.zip");
-        std::fs::write(sibling(&dest, ".part"), b"garbage-from-another-version").unwrap();
-        std::fs::write(sibling(&dest, ".part.json"), serde_json::to_vec(&PartMeta { url: url.clone(), validator: Some("x".into()) }).unwrap()).unwrap();
+        std::fs::write(sibling(&dest, PART_SUFFIX), b"garbage-from-another-version").unwrap();
+        std::fs::write(sibling(&dest, PART_META_SUFFIX), serde_json::to_vec(&PartMeta { url: url.clone(), validator: Some("x".into()) }).unwrap()).unwrap();
         downloader().download_str(&url, &dest, None, &lampo_domain::ports::NullProgressSink, &CancelFlag::new()).await.unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), data);
     }
@@ -607,6 +617,34 @@ mod tests {
         let err = downloader().download_str(&server.url("/f.bin"), &dest, None, &lampo_domain::ports::NullProgressSink, &CancelFlag::new()).await.unwrap_err();
         assert!(matches!(err, PortError::Network(m) if m.contains("404")));
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    /// A 416 (stale range) and a 206 for a range never asked for are retried like any transient
+    /// failure: after a growing pause, never in a tight loop against the server.
+    #[tokio::test]
+    async fn range_failures_back_off_before_retrying() {
+        for status in [416, 206] {
+            let calls = std::sync::Arc::new(AtomicUsize::new(0));
+            let server = TestServer::start({
+                let calls = calls.clone();
+                move |_req| {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    Reply::status(status)
+                }
+            })
+            .await;
+            let dir = tempfile::tempdir().unwrap();
+            let policy = RetryPolicy { attempts: 3, initial_backoff: Duration::from_millis(100), max_backoff: Duration::from_millis(400) };
+            let started = Instant::now();
+            let err = HttpDownloader::new(reqwest::Client::new())
+                .with_retry_policy(policy)
+                .download_str(&server.url("/f"), &dir.path().join("f"), None, &lampo_domain::ports::NullProgressSink, &CancelFlag::new())
+                .await
+                .unwrap_err();
+            assert!(matches!(err, PortError::Network(ref m) if m.contains("3 attempts")), "{status}: {err:?}");
+            assert_eq!(calls.load(Ordering::SeqCst), 3, "{status}");
+            assert!(started.elapsed() >= Duration::from_millis(100 + 200), "{status}: waited only {:?}", started.elapsed());
+        }
     }
 
     #[tokio::test]

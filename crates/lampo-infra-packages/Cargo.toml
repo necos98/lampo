@@ -1,6 +1,6 @@
 ﻿[package]
 name = "lampo-infra-packages"
-description = "Lampo package adapters: embedded/live catalogs, HTTP downloader, SHA-256, zip extraction, installed registry, VC++ runtime detection."
+description = "Lampo package adapters: embedded/live catalogs, HTTP downloader, SHA-256, zip extraction, installed registry, slot locks and leftover sweep, VC++ runtime detection."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 lampo-domain = { workspace = true }
+lampo-infra-fs = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -24,6 +25,8 @@ tracing = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 winreg = { workspace = true }
+# Process liveness (leftovers of crashed installs) and the cross-process slot lock.
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

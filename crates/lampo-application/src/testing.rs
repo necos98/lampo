@@ -29,7 +29,7 @@ use lampo_domain::settings::Settings;
 use lampo_domain::shim::ShimIndex;
 use lampo_domain::site::WorktreeSlug;
 use lampo_domain::vc_runtime::{InstalledVcRuntime, VcRedistributable};
-use lampo_domain::version::PackageVersion;
+use lampo_domain::version::{PackageVersion, VersionSeries};
 use lampo_domain::web::{PhpIniSpec, WebServerConfig};
 use lampo_domain::worktree::WorktreeEnvironment;
 use lampo_domain::{PortError, PortResult};
@@ -595,7 +595,12 @@ impl PackageCatalogSource for FakeSource {
     }
 }
 
-/// Reports two progress chunks; cancels itself between them when `cancel_midway` is set.
+/// How long a `slow` fake download waits between its two chunks: long enough for a concurrent
+/// task to run meanwhile.
+const SLOW_DOWNLOAD_PAUSE: Duration = Duration::from_millis(50);
+
+/// Reports two progress chunks; cancels itself between them when `cancel_midway` is set, and
+/// yields for [`SLOW_DOWNLOAD_PAUSE`] between them when `slow` is set.
 /// The "downloaded" file hashes to `digest` (that of every `catalog_entry` by default).
 pub struct FakeDownloader {
     pub downloads: Mutex<Vec<PathBuf>>,
@@ -603,11 +608,24 @@ pub struct FakeDownloader {
     pub limits: Mutex<Vec<Option<u64>>>,
     pub discarded: Mutex<Vec<PathBuf>>,
     pub cancel_midway: AtomicBool,
+    pub slow: AtomicBool,
     pub digest: Mutex<Sha256Digest>,
+    /// Downloads running right now, and the most that ever ran at once.
+    pub running: AtomicUsize,
+    pub peak_running: AtomicUsize,
 }
 impl Default for FakeDownloader {
     fn default() -> Self {
-        Self { downloads: Mutex::default(), limits: Mutex::default(), discarded: Mutex::default(), cancel_midway: AtomicBool::default(), digest: Mutex::new(digest(7)) }
+        Self {
+            downloads: Mutex::default(),
+            limits: Mutex::default(),
+            discarded: Mutex::default(),
+            cancel_midway: AtomicBool::default(),
+            slow: AtomicBool::default(),
+            digest: Mutex::new(digest(7)),
+            running: AtomicUsize::default(),
+            peak_running: AtomicUsize::default(),
+        }
     }
 }
 #[async_trait]
@@ -619,6 +637,12 @@ impl PackageDownloader for FakeDownloader {
         if self.cancel_midway.load(Ordering::SeqCst) {
             cancel.cancel();
         }
+        if self.slow.load(Ordering::SeqCst) {
+            let running = self.running.fetch_add(1, Ordering::SeqCst) + 1;
+            self.peak_running.fetch_max(running, Ordering::SeqCst);
+            tokio::time::sleep(SLOW_DOWNLOAD_PAUSE).await;
+            self.running.fetch_sub(1, Ordering::SeqCst);
+        }
         cancel.check()?;
         progress.report(Progress::new(ProgressStage::Downloading, 1000, Some(1000)));
         Ok(DownloadedFile { bytes: 1000, sha256: *lock(&self.digest) })
@@ -629,30 +653,68 @@ impl PackageDownloader for FakeDownloader {
     }
 }
 
-/// Records extractions (archive, destination) and single-file placements (file, destination, name).
+/// Records extractions (archive, destination) and single-file placements (file, destination,
+/// name), and what became of each replacement. Every replacement claims a previous version kept
+/// aside at `<destination>.previous`.
 #[derive(Default)]
 pub struct FakeExtractor {
     pub extracted: Mutex<Vec<(PathBuf, PathBuf)>>,
     pub placed: Mutex<Vec<(PathBuf, PathBuf, String)>>,
+    pub committed: Mutex<Vec<SlotReplacement>>,
+    pub rolled_back: Mutex<Vec<SlotReplacement>>,
+}
+impl FakeExtractor {
+    fn replacement(destination: &Path) -> SlotReplacement {
+        SlotReplacement { destination: destination.to_path_buf(), previous: Some(destination.with_extension("previous")) }
+    }
 }
 #[async_trait]
 impl ArchiveExtractor for FakeExtractor {
-    async fn extract_zip(&self, archive: &Path, destination: &Path, _strip: Option<&str>, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
+    async fn extract_zip(&self, archive: &Path, destination: &Path, _strip: Option<&str>, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<SlotReplacement> {
         cancel.check()?;
         progress.report(Progress::new(ProgressStage::Extracting, 1, Some(1)));
         lock(&self.extracted).push((archive.to_path_buf(), destination.to_path_buf()));
-        Ok(())
+        Ok(Self::replacement(destination))
     }
-    async fn place_file(&self, file: &Path, destination: &Path, file_name: &str, cancel: &CancelFlag) -> PortResult<()> {
+    async fn place_file(&self, file: &Path, destination: &Path, file_name: &str, cancel: &CancelFlag) -> PortResult<SlotReplacement> {
         cancel.check()?;
         lock(&self.placed).push((file.to_path_buf(), destination.to_path_buf(), file_name.to_string()));
+        Ok(Self::replacement(destination))
+    }
+    async fn commit(&self, replacement: SlotReplacement) {
+        lock(&self.committed).push(replacement);
+    }
+    async fn roll_back(&self, replacement: SlotReplacement) -> PortResult<()> {
+        lock(&self.rolled_back).push(replacement);
         Ok(())
     }
 }
 
+/// A package slot: kind, series, PHP minor.
+type SlotKey = (PackageKind, VersionSeries, Option<PhpMinor>);
+
+/// One async mutex per slot, like the real lock within a process.
+#[derive(Default)]
+pub struct MemSlotLock(Mutex<BTreeMap<SlotKey, Arc<tokio::sync::Mutex<()>>>>);
+#[async_trait]
+impl PackageSlotLock for MemSlotLock {
+    async fn acquire(&self, id: &PackageId, cancel: &CancelFlag) -> PortResult<SlotGuard> {
+        cancel.check()?;
+        let slot = lock(&self.0).entry((id.kind.clone(), id.series(), id.php)).or_default().clone();
+        Ok(SlotGuard::new(slot.lock_owned().await))
+    }
+}
+
+/// Records each call; fails with an IO error when `fails` is set.
 pub struct FakeHook {
     pub kind: PackageKind,
     pub calls: Mutex<Vec<PackageId>>,
+    pub fails: AtomicBool,
+}
+impl FakeHook {
+    pub fn new(kind: PackageKind) -> Self {
+        Self { kind, calls: Mutex::default(), fails: AtomicBool::default() }
+    }
 }
 #[async_trait]
 impl PackageInstallHook for FakeHook {
@@ -661,6 +723,9 @@ impl PackageInstallHook for FakeHook {
     }
     async fn after_install(&self, package: &InstalledPackage) -> PortResult<()> {
         lock(&self.calls).push(package.id.clone());
+        if self.fails.load(Ordering::SeqCst) {
+            return Err(PortError::io("seeding php.ini", "access denied"));
+        }
         Ok(())
     }
 }

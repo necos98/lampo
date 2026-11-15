@@ -45,7 +45,10 @@ pub use system::{Clock, Timer};
 pub use agents::{AgentPluginFiles, ClaudeCodeCli};
 pub use control::{AppLauncher, ControlChannelClient, ControlChannelServer, ControlFrameSink, ControlRequestHandler};
 pub use events::{EventPublisher, NullEventPublisher, NullProgressSink, ProgressSink};
-pub use packages::{ArchiveExtractor, InstalledPackageRegistry, PackageCatalogSource, PackageDownloader, PackageInstallHook, PhpExtensionScanner, VcRuntimeDetector};
+pub use packages::{
+    ArchiveExtractor, InstalledPackageRegistry, PackageCatalogSource, PackageDownloader, PackageInstallHook, PackageLeftoverSweeper, PackageSlotLock, PhpExtensionScanner, SlotGuard,
+    SlotReplacement, VcRuntimeDetector,
+};
 pub use services::{
     ChildId, CommandOutput, CommandRunner, CommandSpec, DatabaseAdmin, LogFileReader, MysqlEndpoint, PipedCommand, PipedCommandRunner, PortAvailability, PortProbe, ProcessObserver,
     ProcessSupervisor, ServiceRunner, SpawnedChild, StreamCompression, StreamingCommandRunner,

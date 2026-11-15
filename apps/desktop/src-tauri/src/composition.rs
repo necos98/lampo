@@ -66,6 +66,8 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     // Live sources first (on duplicate ids the first source wins), the embedded catalog last.
     let sources: Vec<Arc<dyn PackageCatalogSource>> = packages::catalog::default_sources(http.clone(), &paths);
     let installed: Arc<dyn InstalledPackageRegistry> = Arc::new(packages::FsInstalledPackageRegistry::new(paths.clone()));
+    // One slot lock for the whole app: installs and the startup leftover sweep share it.
+    let package_slots = Arc::new(packages::FsPackageSlotLock::new(&paths));
     let vc: Arc<dyn VcRuntimeDetector> = Arc::new(packages::RegistryVcRuntimeDetector);
 
     // --- services ---
@@ -157,6 +159,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         downloader: Arc::new(packages::HttpDownloader::new(http)),
         extractor: Arc::new(packages::ZipExtractor),
         installed: installed.clone(),
+        slots: package_slots.clone(),
         hooks: packages::hooks::all(),
         vc: vc.clone(),
         settings: settings_writer.clone(),
@@ -318,7 +321,9 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         })),
         shims: shims.clone(),
         claude_code: claude_code.clone(),
-        startup: Arc::new(Startup::new(env, settings, shims, app_location).with_claude_code(claude_code)),
+        startup: Arc::new(
+            Startup::new(env, settings, shims, app_location).with_claude_code(claude_code).with_package_sweeper(Arc::new(packages::FsLeftoverSweeper::new(&paths, package_slots))),
+        ),
         shutdown,
     };
 

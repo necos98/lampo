@@ -24,6 +24,7 @@ struct Kit {
     downloader: Arc<FakeDownloader>,
     extractor: Arc<FakeExtractor>,
     hook: Arc<FakeHook>,
+    slots: Arc<MemSlotLock>,
     vc: Arc<FakeVc>,
     sync: Arc<CountingSync>,
 }
@@ -57,7 +58,8 @@ impl Kit {
             live,
             downloader: Arc::new(FakeDownloader::default()),
             extractor: Arc::new(FakeExtractor::default()),
-            hook: Arc::new(FakeHook { kind: PackageKind::PHP, calls: Mutex::default() }),
+            hook: Arc::new(FakeHook::new(PackageKind::PHP)),
+            slots: Arc::new(MemSlotLock::default()),
             vc: Arc::new(FakeVc::modern()),
             sync: Arc::new(CountingSync::default()),
         }
@@ -73,6 +75,7 @@ impl Kit {
             downloader: self.downloader.clone(),
             extractor: self.extractor.clone(),
             installed: self.w.installed.clone(),
+            slots: self.slots.clone(),
             hooks: vec![self.hook.clone()],
             vc: self.vc.clone(),
             settings: self.w.settings_writer(),
@@ -126,6 +129,9 @@ async fn install_runs_the_whole_pipeline_and_adopts_the_first_php_as_default() {
     assert_eq!(k.extractor.extracted.lock().unwrap()[0].1, std::path::PathBuf::from("C:\\lampo\\packages\\php-8.3.15"));
     assert_eq!(k.hook.calls.lock().unwrap().len(), 1, "the PHP hook ran");
     assert!(k.w.installed.has(&PackageKind::PHP, "8.3.15"));
+    let committed: Vec<_> = k.extractor.committed.lock().unwrap().iter().map(|r| r.destination.clone()).collect();
+    assert_eq!(committed, [std::path::PathBuf::from("C:\\lampo\\packages\\php-8.3.15")], "the previous version is deleted once installed");
+    assert!(k.extractor.rolled_back.lock().unwrap().is_empty());
     assert_eq!(k.w.settings.load().unwrap().default_php, Some(php("8.3")));
     assert!(k.w.events.all().contains(&DomainEvent::PackagesChanged));
     assert_eq!(k.sync.calls.load(Ordering::SeqCst), 1, "the shim index / config follow the new PHP");
@@ -217,6 +223,63 @@ async fn a_missing_vc_runtime_is_reported_before_downloading() {
 }
 
 #[tokio::test]
+async fn concurrent_installs_of_one_package_download_it_once() {
+    let k = Kit::new(World::new());
+    k.downloader.slow.store(true, Ordering::SeqCst);
+    let install = k.install();
+    let (ctx, cancel) = (gui(), CancelFlag::new());
+    let run = || install.execute(request("php", Some("8.3.15"), None), &ctx, &lampo_domain::ports::NullProgressSink, &cancel);
+    let (first, second) = tokio::join!(run(), run());
+    assert_eq!(first.unwrap().id, second.unwrap().id);
+    assert_eq!(k.downloader.peak_running.load(Ordering::SeqCst), 1);
+    assert_eq!(k.downloader.downloads.lock().unwrap().len(), 1, "the second request waits for the first and finds the package installed");
+    assert_eq!(k.extractor.extracted.lock().unwrap().len(), 1, "one extraction into the slot");
+}
+
+#[tokio::test]
+async fn installs_into_different_slots_run_side_by_side() {
+    let k = Kit::new(World::new());
+    k.downloader.slow.store(true, Ordering::SeqCst);
+    let install = k.install();
+    let (ctx, cancel) = (gui(), CancelFlag::new());
+    let run = |kind: &'static str, series: &'static str| install.execute(request(kind, None, Some(series)), &ctx, &lampo_domain::ports::NullProgressSink, &cancel);
+    let (php, mysql) = tokio::join!(run("php", "8.3"), run("mysql", "8.4"));
+    php.unwrap();
+    mysql.unwrap();
+    assert_eq!(k.downloader.peak_running.load(Ordering::SeqCst), 2, "the two downloads overlapped");
+}
+
+/// A failing post-install hook must not cost the version installed before: the slot gets it
+/// back, nothing new is recorded and the previous copy is not deleted.
+#[tokio::test]
+async fn a_failing_hook_restores_the_previous_version() {
+    let k = Kit::new(World::new());
+    let previous = k.w.installed.add(PackageKind::PHP, "8.3.14", None);
+    k.hook.fails.store(true, Ordering::SeqCst);
+    let err = k.install().execute(request("php", Some("8.3.15"), None), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Io, "{err:?}");
+    let rolled_back = k.extractor.rolled_back.lock().unwrap().clone();
+    assert_eq!(rolled_back.iter().map(|r| r.destination.clone()).collect::<Vec<_>>(), [std::path::PathBuf::from("C:\\lampo\\packages\\php-8.3.15")]);
+    assert!(k.extractor.committed.lock().unwrap().is_empty(), "the previous version is kept");
+    assert_eq!(k.w.installed.list().unwrap().iter().map(|p| p.id.clone()).collect::<Vec<_>>(), [previous.id], "only the previous version is recorded");
+    assert!(k.w.installed.removed.lock().unwrap().is_empty(), "no record is removed: the failed one was never written");
+    assert!(!k.w.events.all().contains(&DomainEvent::PackagesChanged));
+}
+
+/// The slot lock is released on failure: a retry is not blocked by the failed attempt.
+#[tokio::test]
+async fn a_retry_after_a_failed_install_proceeds() {
+    let k = Kit::new(World::new());
+    k.hook.fails.store(true, Ordering::SeqCst);
+    let install = k.install();
+    install.execute(request("php", Some("8.3.15"), None), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap_err();
+    k.hook.fails.store(false, Ordering::SeqCst);
+    install.execute(request("php", Some("8.3.15"), None), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap();
+    assert!(k.w.installed.has(&PackageKind::PHP, "8.3.15"));
+    assert_eq!(k.extractor.committed.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn unverifiable_or_corrupt_downloads_are_refused() {
     let k = Kit::new(World::new());
     k.source.entries.lock().unwrap().iter_mut().find(|e| e.id.kind == PackageKind::APACHE).unwrap().sha256 = None;
@@ -230,7 +293,7 @@ async fn unverifiable_or_corrupt_downloads_are_refused() {
     assert!(k.extractor.extracted.lock().unwrap().is_empty(), "nothing extracted");
     assert_eq!(k.downloader.discarded.lock().unwrap().len(), 1, "the corrupt download is not kept for resume");
     assert!(k.w.installed.list().unwrap().is_empty(), "nothing recorded");
-    assert_eq!(k.w.installed.removed.lock().unwrap().len(), 1, "partial files cleaned up");
+    assert!(k.extractor.rolled_back.lock().unwrap().is_empty() && k.extractor.committed.lock().unwrap().is_empty(), "the slot was never touched");
 }
 
 #[tokio::test]
@@ -522,6 +585,29 @@ async fn startup_waits_for_first_run_and_shutdown_stops_everything() {
 
     Shutdown::new(w.runners(), w.services.clone(), w.settings.clone()).run().await.unwrap();
     assert_eq!(w.mysql.calls().last().unwrap(), "stop:mysql-8.4");
+}
+
+/// Records, at each sweep, how many calls the MySQL runner had received.
+struct SweepProbe {
+    mysql: Arc<FakeRunner>,
+    seen: Mutex<Vec<usize>>,
+}
+#[async_trait::async_trait]
+impl lampo_domain::ports::PackageLeftoverSweeper for SweepProbe {
+    async fn sweep(&self) {
+        self.seen.lock().unwrap().push(self.mysql.calls().len());
+    }
+}
+
+/// A slot a crash left mid-update must be repaired before a service starts from it.
+#[tokio::test]
+async fn startup_sweeps_package_leftovers_before_starting_services() {
+    let w = World::with_basics();
+    w.hosts_in_sync();
+    let probe = Arc::new(SweepProbe { mysql: w.mysql.clone(), seen: Mutex::default() });
+    Startup::new(w.env.clone(), w.settings.clone(), w.shim_setup(), Arc::new(FakeAppLocation::default())).with_package_sweeper(probe.clone()).run().await.unwrap();
+    assert_eq!(*probe.seen.lock().unwrap(), [0], "one sweep, before MySQL was touched");
+    assert_eq!(w.mysql.calls(), ["prepare:mysql-8.4", "start:mysql-8.4"]);
 }
 
 /// After an app update the shim copies are the old `lampo-shim.exe`: startup refreshes them,

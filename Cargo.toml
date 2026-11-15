@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/lampo-domain",
     "crates/lampo-application",
+    "crates/lampo-infra-fs",
     "crates/lampo-infra-store",
     "crates/lampo-infra-packages",
     "crates/lampo-infra-web",
@@ -22,6 +23,7 @@ publish = false
 # Workspace crates
 lampo-domain = { path = "crates/lampo-domain" }
 lampo-application = { path = "crates/lampo-application" }
+lampo-infra-fs = { path = "crates/lampo-infra-fs" }
 lampo-infra-store = { path = "crates/lampo-infra-store" }
 lampo-infra-packages = { path = "crates/lampo-infra-packages" }
 lampo-infra-web = { path = "crates/lampo-infra-web" }

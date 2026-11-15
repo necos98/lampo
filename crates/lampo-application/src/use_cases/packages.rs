@@ -6,8 +6,8 @@ use lampo_domain::package::{CatalogEntry, InstalledPackage, MergedCatalog, Packa
 use lampo_domain::paths::LampoPaths;
 use lampo_domain::php::PhpMinor;
 use lampo_domain::ports::{
-    ArchiveExtractor, EventPublisher, InstalledPackageRegistry, PackageCatalogSource, PackageDownloader, PackageInstallHook, PhpExtensionScanner, ProgressSink, ProjectRepository,
-    SettingsRepository, VcRuntimeDetector, WorktreeRepository,
+    ArchiveExtractor, EventPublisher, InstalledPackageRegistry, PackageCatalogSource, PackageDownloader, PackageInstallHook, PackageSlotLock, PhpExtensionScanner, ProgressSink,
+    ProjectRepository, SettingsRepository, SlotReplacement, VcRuntimeDetector, WorktreeRepository,
 };
 use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
 use lampo_domain::vc_runtime::InstalledVcRuntime;
@@ -254,6 +254,8 @@ pub struct InstallPackageDeps {
     pub downloader: Arc<dyn PackageDownloader>,
     pub extractor: Arc<dyn ArchiveExtractor>,
     pub installed: Arc<dyn InstalledPackageRegistry>,
+    /// Held for a whole install, so two installs into one slot run one after the other.
+    pub slots: Arc<dyn PackageSlotLock>,
     /// Post-install hooks; the one whose `kind()` matches runs.
     pub hooks: Vec<Arc<dyn PackageInstallHook>>,
     pub vc: Arc<dyn VcRuntimeDetector>,
@@ -324,8 +326,16 @@ impl InstallPackage {
 
     /// Download into the downloads dir (hashed while streamed, refused when larger than the
     /// catalog announces), verify, then place the files into the install dir: a corrupt or
-    /// oversized download never touches the package currently installed there.
-    async fn fetch_files(&self, entry: &CatalogEntry, expected: &Sha256Digest, install_dir: &std::path::Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<()> {
+    /// oversized download never touches the package currently installed there. The previous
+    /// contents of the install dir stay aside in the returned replacement.
+    async fn fetch_files(
+        &self,
+        entry: &CatalogEntry,
+        expected: &Sha256Digest,
+        install_dir: &std::path::Path,
+        progress: &dyn ProgressSink,
+        cancel: &CancelFlag,
+    ) -> AppResult<SlotReplacement> {
         let d = &self.deps;
         let file = d.paths.downloads_dir().join(format!("{}-{}", entry.id.key(), entry.url.file_name()));
         cancel.check()?;
@@ -339,12 +349,26 @@ impl InstallPackage {
         }
         progress.report(Progress::new(ProgressStage::Verifying, 1, Some(1)).with_subject(entry.id.key()));
         cancel.check()?;
-        match &entry.payload {
+        let replacement = match &entry.payload {
             PackagePayload::Zip { strip_prefix } => d.extractor.extract_zip(&file, install_dir, strip_prefix.as_deref(), progress, cancel).await?,
             PackagePayload::SingleFile { file_name } => d.extractor.place_file(&file, install_dir, file_name, cancel).await?,
-        }
+        };
         // Not needed once placed (a single file was moved: only its resume metadata may remain).
         self.discard(&file).await;
+        Ok(replacement)
+    }
+
+    /// The kind's post-install hook, then the record: what makes the placed files an installed
+    /// package. Runs while the previous version is still kept aside.
+    async fn configure(&self, package: &InstalledPackage, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<()> {
+        let d = &self.deps;
+        cancel.check()?;
+        progress.report(Progress::new(ProgressStage::Configuring, 0, Some(1)).with_subject(package.id.key()));
+        if let Some(hook) = d.hooks.iter().find(|h| h.kind() == package.id.kind) {
+            hook.after_install(package).await?;
+        }
+        d.installed.record(package)?;
+        progress.report(Progress::new(ProgressStage::Configuring, 1, Some(1)).with_subject(package.id.key()));
         Ok(())
     }
 
@@ -383,7 +407,11 @@ impl InstallPackage {
     /// and pinned checksums disagree (`ChecksumMismatch`), and builds
     /// whose VC++ runtime is missing (`PackageMissing`, `details.downloadUrl`). Already installed
     /// → returned as is. Sets `default_php` when installing the first PHP (best effort). Publishes
-    /// `PackagesChanged`. A failure after the files were placed removes them again.
+    /// `PackagesChanged`. A failure after the files were placed (hook, record) puts the
+    /// previous version of the slot back, or removes the new files if there was none.
+    ///
+    /// Installs into the same slot (kind + series + PHP minor) run one at a time, across the GUI
+    /// and the CLI: a second request waits for the first, then finds the package installed.
     ///
     /// The final environment sync is best effort: its failure is logged, not returned (the
     /// package *is* installed; `lampo up` reports the environment problem).
@@ -394,6 +422,7 @@ impl InstallPackage {
         let progress = &SubjectProgress { inner: progress, subject: request.kind.clone() };
         progress.report(Progress::new(ProgressStage::Resolving, 0, None));
         let (entry, catalog) = self.resolve(&request).await?;
+        let slot = d.slots.acquire(&entry.id, cancel).await?;
         if let Some(existing) = d.installed.list()?.into_iter().find(|p| p.id == entry.id) {
             // Settings may have been reset while packages stayed: still adopt it as the default.
             self.adopt_default_php(&existing.id).await;
@@ -412,24 +441,15 @@ impl InstallPackage {
 
         let install_dir = d.installed.install_dir(&entry.id);
         let package = InstalledPackage::new(entry.id.clone(), install_dir.clone(), entry.vc_runtime);
-        let placed = async {
-            self.fetch_files(&entry, &expected, &install_dir, progress, cancel).await?;
-            cancel.check()?;
-            progress.report(Progress::new(ProgressStage::Configuring, 0, Some(1)).with_subject(entry.id.key()));
-            if let Some(hook) = d.hooks.iter().find(|h| h.kind() == entry.id.kind) {
-                hook.after_install(&package).await?;
-            }
-            d.installed.record(&package)?;
-            progress.report(Progress::new(ProgressStage::Configuring, 1, Some(1)).with_subject(entry.id.key()));
-            AppResult::Ok(())
-        }
-        .await;
-        if let Err(e) = placed {
-            if let Err(cleanup) = d.installed.remove(&entry.id) {
-                tracing::debug!("cleanup of {} after a failed install: {cleanup}", entry.id);
+        let replacement = self.fetch_files(&entry, &expected, &install_dir, progress, cancel).await?;
+        if let Err(e) = self.configure(&package, progress, cancel).await {
+            if let Err(rollback) = d.extractor.roll_back(replacement).await {
+                tracing::error!("restoring {} after a failed install of {} failed: {rollback}", install_dir.display(), entry.id);
             }
             return Err(e);
         }
+        d.extractor.commit(replacement).await;
+        drop(slot);
 
         self.adopt_default_php(&entry.id).await;
         d.events.publish(DomainEvent::PackagesChanged);

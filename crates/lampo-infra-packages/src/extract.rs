@@ -18,12 +18,12 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use lampo_domain::ports::{ArchiveExtractor, ProgressSink};
+use lampo_domain::ports::{ArchiveExtractor, ProgressSink, SlotReplacement};
 use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
 use lampo_domain::{PortError, PortResult};
 
 use crate::entry_name::{collision_key, safe_relative_path};
-use crate::slot::{place_file_blocking, prepare_staging, replace_dir};
+use crate::slot::{self, place_file_blocking, prepare_staging, replace_dir};
 
 /// How many times its own size an archive may expand to. Package zips expand 2-4x (PHP 30 MB →
 /// ~100 MB, MySQL 350 MB → ~1.3 GB), while zip bombs reach ratios of 1000x and more.
@@ -41,13 +41,14 @@ pub(crate) fn expansion_limit(archive_len: u64) -> u64 {
 }
 
 /// Extracts into `<destination>.staging-*` then renames (no half-installed packages); rejects
-/// unsafe entries and zip bombs. Places single-file payloads the same way.
+/// unsafe entries and zip bombs. Places single-file payloads the same way. The previous contents
+/// of the slot stay aside until the replacement is committed or rolled back.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ZipExtractor;
 
 #[async_trait]
 impl ArchiveExtractor for ZipExtractor {
-    async fn extract_zip(&self, archive: &Path, destination: &Path, strip_prefix: Option<&str>, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
+    async fn extract_zip(&self, archive: &Path, destination: &Path, strip_prefix: Option<&str>, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<SlotReplacement> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Progress>();
         let archive = archive.to_path_buf();
         let destination = destination.to_path_buf();
@@ -61,19 +62,29 @@ impl ArchiveExtractor for ZipExtractor {
         job.await.map_err(|e| PortError::io("extracting an archive", e))?
     }
 
-    async fn place_file(&self, file: &Path, destination: &Path, file_name: &str, cancel: &CancelFlag) -> PortResult<()> {
+    async fn place_file(&self, file: &Path, destination: &Path, file_name: &str, cancel: &CancelFlag) -> PortResult<SlotReplacement> {
         let (file, destination, file_name, cancel) = (file.to_path_buf(), destination.to_path_buf(), file_name.to_string(), cancel.clone());
         tokio::task::spawn_blocking(move || place_file_blocking(&file, &destination, &file_name, &cancel)).await.map_err(|e| PortError::io("placing a package file", e))?
+    }
+
+    async fn commit(&self, replacement: SlotReplacement) {
+        if let Err(e) = tokio::task::spawn_blocking(move || slot::commit(&replacement)).await {
+            tracing::warn!(error = %e, "deleting the previous version of a package was interrupted; it will be removed later");
+        }
+    }
+
+    async fn roll_back(&self, replacement: SlotReplacement) -> PortResult<()> {
+        tokio::task::spawn_blocking(move || slot::roll_back(&replacement)).await.map_err(|e| PortError::io("restoring the previous version of a package", e))?
     }
 }
 
 /// Synchronous extraction with the same guarantees (also used by tests).
-pub fn extract_blocking(archive: &Path, destination: &Path, strip_prefix: Option<&str>, report: &dyn Fn(Progress), cancel: &CancelFlag) -> PortResult<()> {
+pub fn extract_blocking(archive: &Path, destination: &Path, strip_prefix: Option<&str>, report: &dyn Fn(Progress), cancel: &CancelFlag) -> PortResult<SlotReplacement> {
     extract_with_limit(archive, destination, strip_prefix, expansion_limit, report, cancel)
 }
 
 /// [`extract_blocking`] with the expansion limit computed by `limit` from the archive length.
-fn extract_with_limit(archive: &Path, destination: &Path, strip_prefix: Option<&str>, limit: fn(u64) -> u64, report: &dyn Fn(Progress), cancel: &CancelFlag) -> PortResult<()> {
+fn extract_with_limit(archive: &Path, destination: &Path, strip_prefix: Option<&str>, limit: fn(u64) -> u64, report: &dyn Fn(Progress), cancel: &CancelFlag) -> PortResult<SlotReplacement> {
     let staging = prepare_staging(destination)?;
     let result = extract_into(archive, &staging, strip_prefix, limit, report, cancel).and_then(|()| {
         cancel.check()?;
@@ -209,8 +220,9 @@ pub(crate) mod tests {
         zip.finish().unwrap();
     }
 
+    /// Extracts and commits, as a successful install does.
     fn run(archive: &Path, dest: &Path, prefix: Option<&str>) -> PortResult<()> {
-        extract_blocking(archive, dest, prefix, &|_| {}, &CancelFlag::new())
+        extract_blocking(archive, dest, prefix, &|_| {}, &CancelFlag::new()).map(|replacement| slot::commit(&replacement))
     }
 
     /// Expects `entries` to be refused as invalid data, with nothing left next to the destination.
@@ -285,7 +297,7 @@ pub(crate) mod tests {
         let err = extract_with_limit(&archive, &dest, None, |_| 1000, &|_| {}, &CancelFlag::new()).unwrap_err();
         assert!(matches!(&err, PortError::InvalidData { message, .. } if message.contains("1200 bytes")), "{err:?}");
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1, "nothing extracted");
-        extract_with_limit(&archive, &dest, None, |_| 1200, &|_| {}, &CancelFlag::new()).unwrap();
+        slot::commit(&extract_with_limit(&archive, &dest, None, |_| 1200, &|_| {}, &CancelFlag::new()).unwrap());
     }
 
     #[test]
@@ -339,17 +351,37 @@ pub(crate) mod tests {
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
+    #[cfg(windows)]
     #[test]
     fn leftovers_of_a_crash_are_cleaned() {
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("redis-8.10");
-        fs::create_dir_all(dir.path().join("redis-8.10.staging-1-2")).unwrap();
-        fs::create_dir_all(dir.path().join("redis-8.10.old-1-2")).unwrap();
+        fs::create_dir_all(&dest).unwrap();
+        let gone = crate::pid::exited_process_id();
+        let (staging, old) = (dir.path().join(format!("redis-8.10.staging-{gone}-2")), dir.path().join(format!("redis-8.10.old-{gone}-2")));
+        fs::create_dir_all(&staging).unwrap();
+        fs::create_dir_all(&old).unwrap();
         let archive = dir.path().join("a.zip");
         make_zip(&archive, &[("redis-server.exe", Some(b"x"))]);
         run(&archive, &dest, None).unwrap();
-        assert!(!dir.path().join("redis-8.10.staging-1-2").exists());
-        assert!(!dir.path().join("redis-8.10.old-1-2").exists());
+        assert!(!staging.exists());
+        assert!(!old.exists());
+    }
+
+    #[test]
+    fn a_rolled_back_extraction_restores_the_previous_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("php-8.3");
+        let v1 = dir.path().join("v1.zip");
+        make_zip(&v1, &[("php.exe", Some(b"8.3.14"))]);
+        run(&v1, &dest, None).unwrap();
+        let v2 = dir.path().join("v2.zip");
+        make_zip(&v2, &[("php.exe", Some(b"8.3.15"))]);
+        let replacement = extract_blocking(&v2, &dest, None, &|_| {}, &CancelFlag::new()).unwrap();
+        assert_eq!(fs::read(dest.join("php.exe")).unwrap(), b"8.3.15");
+        slot::roll_back(&replacement).unwrap();
+        assert_eq!(fs::read(dest.join("php.exe")).unwrap(), b"8.3.14");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 3, "only the two archives and the slot");
     }
 
     #[tokio::test]
@@ -366,7 +398,8 @@ pub(crate) mod tests {
         let archive = dir.path().join("a.zip");
         make_zip(&archive, &[("x/a.txt", Some(b"hello")), ("x/b.txt", Some(b"world!"))]);
         let rec = Rec::default();
-        ZipExtractor.extract_zip(&archive, &dir.path().join("out"), Some("x"), &rec, &CancelFlag::new()).await.unwrap();
+        let replacement = ZipExtractor.extract_zip(&archive, &dir.path().join("out"), Some("x"), &rec, &CancelFlag::new()).await.unwrap();
+        ZipExtractor.commit(replacement).await;
         let last = rec.0.lock().unwrap().last().cloned().unwrap();
         assert_eq!((last.stage, last.done, last.total), (ProgressStage::Extracting, 11, Some(11)));
     }
@@ -377,7 +410,9 @@ pub(crate) mod tests {
         let file = dir.path().join("download.phar");
         fs::write(&file, b"phar").unwrap();
         let slot = dir.path().join("composer-2.8");
-        ZipExtractor.place_file(&file, &slot, "composer.phar", &CancelFlag::new()).await.unwrap();
+        let replacement = ZipExtractor.place_file(&file, &slot, "composer.phar", &CancelFlag::new()).await.unwrap();
         assert_eq!(fs::read(slot.join("composer.phar")).unwrap(), b"phar");
+        ZipExtractor.roll_back(replacement).await.unwrap();
+        assert!(!slot.exists(), "rolling back a first install leaves the slot empty");
     }
 }

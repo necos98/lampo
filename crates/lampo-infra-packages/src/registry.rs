@@ -25,6 +25,10 @@
 //! the per-project `generated\php\<site>\php.ini`) therefore stay valid across patch updates;
 //! nothing per-project lives inside a package directory.
 //!
+//! `installed.toml` is written atomically and durably. A record that does not validate is
+//! skipped (logged); a file that no longer parses is kept as `installed.toml.corrupt-<unix ms>`
+//! and rebuilt from the slot directories, with versions recorded as unknown (`8.3-unknown`).
+//!
 //! Consumers must use [`InstalledPackage::install_dir`] (or [`InstalledPackageRegistry::install_dir`])
 //! rather than computing paths, as the slot name intentionally differs from `PackageId::key()`.
 
@@ -38,15 +42,23 @@ use lampo_domain::ports::InstalledPackageRegistry;
 use lampo_domain::vc_runtime::VcRuntime;
 use lampo_domain::version::PackageVersion;
 use lampo_domain::{PortError, PortResult};
+use lampo_infra_fs::{corrupt_backup_path, write_atomic};
 use serde::{Deserialize, Serialize};
 
-use crate::slot::{clean_leftovers, unique_sibling};
+use crate::leftovers::{self, Leftover};
+use crate::recovery;
+
+/// Separator before the PHP minor in the slot name of an add-on (`xdebug-3.5-php8.3`).
+pub(crate) const PHP_MINOR_SEPARATOR: &str = "-php";
+
+/// First line of `installed.toml`.
+const FILE_HEADER: &str = "# Managed by Lampo. Packages installed under this directory.\n";
 
 /// The directory name of the slot `id` belongs to (`php-8.3`, `xdebug-3.5-php8.3`).
 pub fn slot_key(id: &PackageId) -> String {
     let series = id.series();
     match id.php {
-        Some(php) => format!("{}-{series}-php{php}", id.kind),
+        Some(php) => format!("{}-{series}{PHP_MINOR_SEPARATOR}{php}", id.kind),
         None => format!("{}-{series}", id.kind),
     }
 }
@@ -71,26 +83,44 @@ impl FsInstalledPackageRegistry {
         self.paths.installed_packages_file()
     }
 
+    /// The records of `installed.toml` (none if it does not exist). A file that does not parse
+    /// is replaced by one rebuilt from the slot directories (see [`Self::recover`]).
     fn load(&self) -> PortResult<Vec<Record>> {
         let file = self.file();
-        let text = match std::fs::read_to_string(&file) {
-            Ok(t) => t,
+        let bytes = match std::fs::read(&file) {
+            Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(e) => return Err(PortError::io(format!("reading {}", file.display()), e)),
         };
-        let parsed: RegistryFile = toml::from_str(&text).map_err(|e| PortError::invalid_data(file.display().to_string(), e))?;
-        Ok(parsed.package)
+        match parse(&bytes) {
+            Ok(records) => Ok(records),
+            Err(reason) => self.recover(&file, &reason),
+        }
+    }
+
+    /// Keeps a copy of the unparsable `file` as `installed.toml.corrupt-<unix ms>` and rebuilds
+    /// the records from the slot directories (versions unknown, see [`crate::recovery`]). The
+    /// rebuilt file is saved only once the copy exists; until then the records are only returned.
+    fn recover(&self, file: &Path, reason: &str) -> PortResult<Vec<Record>> {
+        let packages_dir = self.paths.packages_dir();
+        let records = recovery::records_from_slots(&packages_dir).map_err(|e| PortError::io(format!("listing {}", packages_dir.display()), e))?;
+        let backup = corrupt_backup_path(file);
+        match std::fs::copy(file, &backup) {
+            Ok(_) => {
+                tracing::warn!(file = %file.display(), backup = %backup.display(), reason, packages = records.len(), "installed.toml did not load: kept a copy and rebuilt it from the package folders");
+                if let Err(e) = self.save(records.clone()) {
+                    tracing::warn!(error = %e, "cannot save the rebuilt installed.toml; it is rebuilt again next time");
+                }
+            }
+            Err(e) => tracing::warn!(file = %file.display(), reason, error = %e, "installed.toml did not load and cannot be backed up: left untouched, packages listed from their folders"),
+        }
+        Ok(records)
     }
 
     fn save(&self, mut records: Vec<Record>) -> PortResult<()> {
         records.sort_by(|a, b| (&a.kind, &a.version, &a.php).cmp(&(&b.kind, &b.version, &b.php)));
-        let file = self.file();
-        let dir = self.paths.packages_dir();
-        std::fs::create_dir_all(&dir).map_err(|e| PortError::io(format!("creating {}", dir.display()), e))?;
         let text = toml::to_string(&RegistryFile { package: records }).map_err(|e| PortError::io("serialising installed.toml", e))?;
-        let tmp = file.with_extension("toml.tmp");
-        std::fs::write(&tmp, format!("# Managed by Lampo. Packages installed under this directory.\n{text}")).map_err(|e| PortError::io(format!("writing {}", tmp.display()), e))?;
-        std::fs::rename(&tmp, &file).map_err(|e| PortError::io(format!("replacing {}", file.display()), e))
+        write_atomic(&self.file(), format!("{FILE_HEADER}{text}").as_bytes())
     }
 
     fn to_installed(&self, record: &Record) -> PortResult<InstalledPackage> {
@@ -106,12 +136,18 @@ impl FsInstalledPackageRegistry {
 }
 
 impl InstalledPackageRegistry for FsInstalledPackageRegistry {
-    /// Recorded packages whose directory still exists.
+    /// Recorded packages whose directory still exists. Invalid records are skipped (logged).
     fn list(&self) -> PortResult<Vec<InstalledPackage>> {
         let _guard = self.lock.lock().unwrap_or_else(|p| p.into_inner());
         let mut out = Vec::new();
         for record in self.load()? {
-            let package = self.to_installed(&record)?;
+            let package = match self.to_installed(&record) {
+                Ok(package) => package,
+                Err(e) => {
+                    tracing::warn!(dir = %record.dir, error = %e, "skipping an invalid record of installed.toml");
+                    continue;
+                }
+            };
             if package.install_dir.is_dir() {
                 out.push(package);
             } else {
@@ -160,7 +196,7 @@ impl InstalledPackageRegistry for FsInstalledPackageRegistry {
         let record = target.ok_or_else(|| PortError::not_found("package", id.to_string()))?;
         let dir = self.paths.packages_dir().join(&record.dir);
         // Move aside first: if a running service holds files, this fails and nothing changes.
-        let trash = unique_sibling(&dir, "trash");
+        let trash = leftovers::sibling(&dir, Leftover::Removed);
         if dir.exists() {
             std::fs::rename(&dir, &trash).map_err(|e| PortError::io(format!("removing {} (is a service using it? stop it and retry)", dir.display()), e))?;
         }
@@ -168,7 +204,7 @@ impl InstalledPackageRegistry for FsInstalledPackageRegistry {
         if let Err(e) = remove_tree(&trash) {
             tracing::warn!(dir = %trash.display(), error = %e, "could not delete removed package files; they will be cleaned up later");
         }
-        clean_leftovers(&dir);
+        leftovers::discard(&dir);
         Ok(())
     }
 }
@@ -184,6 +220,13 @@ fn is_plain_dir_name(name: &str) -> bool {
     !name.is_empty() && name != "." && name != ".." && !name.contains(['/', '\\', ':'])
 }
 
+/// The records of the bytes of `installed.toml`, or why they do not parse.
+fn parse(bytes: &[u8]) -> Result<Vec<Record>, String> {
+    let text = std::str::from_utf8(bytes).map_err(|e| format!("not valid UTF-8: {e}"))?;
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    toml::from_str::<RegistryFile>(text).map(|file| file.package).map_err(|e| e.to_string())
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct RegistryFile {
     #[serde(default)]
@@ -191,16 +234,16 @@ struct RegistryFile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Record {
-    kind: String,
-    version: String,
+pub(crate) struct Record {
+    pub(crate) kind: String,
+    pub(crate) version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    php: Option<String>,
+    pub(crate) php: Option<String>,
     /// Directory name under `packages\` (relative, so `LAMPO_HOME` moves keep working).
-    dir: String,
+    pub(crate) dir: String,
     /// Visual C++ toolset of the build (`vs17`), when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    vc_runtime: Option<VcRuntime>,
+    pub(crate) vc_runtime: Option<VcRuntime>,
 }
 
 #[cfg(test)]
@@ -284,6 +327,19 @@ mod tests {
         assert_eq!(std::fs::read_dir(p.install_dir.parent().unwrap()).unwrap().count(), 1, "only installed.toml remains");
     }
 
+    /// An uninstall empties the slot on purpose: a previous copy a crashed update left must not
+    /// come back in its place.
+    #[cfg(windows)]
+    #[test]
+    fn remove_never_resurrects_a_previous_copy() {
+        let (_d, reg) = registry();
+        let p = install(&reg, &id(PackageKind::MYSQL, "8.4.13", None));
+        let stale = p.install_dir.with_file_name(format!("mysql-8.4.old-{}-1", crate::pid::exited_process_id()));
+        std::fs::create_dir_all(&stale).unwrap();
+        reg.remove(&p.id).unwrap();
+        assert!(!p.install_dir.exists() && !stale.exists());
+    }
+
     #[test]
     fn missing_directories_are_ignored() {
         let (_d, reg) = registry();
@@ -297,6 +353,64 @@ mod tests {
         let (d, reg) = registry();
         let p = InstalledPackage::new(id(PackageKind::PHP, "8.3.1", None), d.path().join("elsewhere"), None);
         assert!(reg.record(&p).is_err());
+    }
+
+    fn corrupt_backups(reg: &FsInstalledPackageRegistry) -> Vec<String> {
+        std::fs::read_dir(reg.paths.packages_dir())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("installed.toml.corrupt-"))
+            .map(|p| std::fs::read_to_string(p).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn an_invalid_record_is_skipped_and_the_others_still_listed() {
+        let (_d, reg) = registry();
+        install(&reg, &id(PackageKind::PHP, "8.3.15", None));
+        let text = std::fs::read_to_string(reg.file()).unwrap();
+        std::fs::write(reg.file(), format!("{text}\n[[package]]\nkind = \"php\"\nversion = \"not a version\"\ndir = \"php-9.9\"\n")).unwrap();
+        let versions: Vec<String> = reg.list().unwrap().iter().map(|p| p.id.version.to_string()).collect();
+        assert_eq!(versions, ["8.3.15"]);
+        assert!(corrupt_backups(&reg).is_empty(), "a readable file is not rebuilt");
+    }
+
+    #[test]
+    fn an_unreadable_registry_is_backed_up_and_rebuilt_from_the_slots() {
+        let (_d, reg) = registry();
+        install(&reg, &id(PackageKind::PHP, "8.3.15", None));
+        install(&reg, &id(PackageKind::XDEBUG, "3.5.3", Some("8.3")));
+        std::fs::create_dir_all(reg.paths.packages_dir().join("php-8.3.old-12-34")).unwrap();
+        std::fs::write(reg.file(), "garbage [[[").unwrap();
+
+        let mut list: Vec<(String, String, Option<String>)> =
+            reg.list().unwrap().into_iter().map(|p| (p.id.kind.to_string(), p.id.version.to_string(), p.id.php.map(|m| m.to_string()))).collect();
+        list.sort();
+        assert_eq!(list, [("php".into(), "8.3-unknown".into(), None), ("xdebug".into(), "3.5-unknown".into(), Some("8.3".into()))]);
+        assert_eq!(corrupt_backups(&reg), ["garbage [[["], "the unreadable file is kept");
+        assert!(std::fs::read_to_string(reg.file()).unwrap().contains("dir = \"php-8.3\""), "the rebuilt registry is saved");
+
+        // A later install of the series records the real version over the unknown one.
+        install(&reg, &id(PackageKind::PHP, "8.3.16", None));
+        let php: Vec<String> = reg.list().unwrap().iter().filter(|p| p.id.kind == PackageKind::PHP).map(|p| p.id.version.to_string()).collect();
+        assert_eq!(php, ["8.3.16"]);
+        assert_eq!(corrupt_backups(&reg).len(), 1);
+    }
+
+    #[test]
+    fn a_registry_that_is_not_utf8_is_rebuilt_too() {
+        let (_d, reg) = registry();
+        install(&reg, &id(PackageKind::REDIS, "8.10.3", None));
+        std::fs::write(reg.file(), [0xff, 0xfe, 0x00]).unwrap();
+        assert_eq!(reg.list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn saving_leaves_no_temp_file() {
+        let (_d, reg) = registry();
+        install(&reg, &id(PackageKind::MAILPIT, "1.33.0", None));
+        let names: Vec<String> = std::fs::read_dir(reg.paths.packages_dir()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names.len(), 2, "installed.toml and the slot: {names:?}");
     }
 
     #[test]

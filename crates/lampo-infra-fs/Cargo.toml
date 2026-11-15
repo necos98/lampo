@@ -1,0 +1,15 @@
+[package]
+name = "lampo-infra-fs"
+description = "Lampo filesystem primitives shared by the infrastructure adapters: durable atomic file writes and backup names of unreadable files."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+lampo-domain = { workspace = true }
+tempfile = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

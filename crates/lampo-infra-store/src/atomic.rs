@@ -5,50 +5,18 @@
 //! present on disk that this version does not know (written by a newer Lampo) are carried over
 //! instead of being dropped.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-use lampo_domain::ports::Clock;
 use lampo_domain::{PortError, PortResult};
+pub use lampo_infra_fs::write_atomic;
+use lampo_infra_fs::{TEMP_PREFIX, corrupt_backup_path};
 use toml::{Table, Value};
-
-use crate::clock::SystemClock;
 
 /// Current schema number written into every TOML file. 2: services are data
 /// (`environment.services`, `settings.services`); schema-1 files are migrated on read.
 pub const SCHEMA_VERSION: i64 = 2;
 /// Key of the schema header.
 pub const SCHEMA_KEY: &str = "schema";
-
-/// Prefix/suffix of temp files, so listings can never mistake them for data files.
-const TEMP_PREFIX: &str = ".lampo-";
-const TEMP_SUFFIX: &str = ".tmp";
-
-/// Writes `contents` to `path` atomically, creating parent directories. A concurrent reader sees
-/// either the old or the new file, never a partial one; a crash leaves the old file intact.
-pub fn write_atomic(path: &Path, contents: &[u8]) -> PortResult<()> {
-    let context = || format!("writing {}", path.display());
-    let parent = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    std::fs::create_dir_all(parent).map_err(|e| PortError::io(context(), e))?;
-    let mut tmp = tempfile::Builder::new().prefix(TEMP_PREFIX).suffix(TEMP_SUFFIX).tempfile_in(parent).map_err(|e| PortError::io(context(), e))?;
-    tmp.write_all(contents).map_err(|e| PortError::io(context(), e))?;
-    tmp.as_file().sync_all().map_err(|e| PortError::io(context(), e))?;
-    // Replacing can transiently fail on Windows while a reader or antivirus holds the target.
-    let mut pending = tmp;
-    let mut attempt = 0;
-    loop {
-        match pending.persist(path) {
-            Ok(_) => return Ok(()),
-            Err(e) if attempt < 40 => {
-                attempt += 1;
-                pending = e.file;
-                std::thread::sleep(Duration::from_millis(5 * attempt.min(10)));
-            }
-            Err(e) => return Err(PortError::io(context(), e.error)),
-        }
-    }
-}
 
 /// Reads and parses a TOML file as a raw table; `Ok(None)` if it does not exist.
 pub fn read_table(path: &Path) -> PortResult<Option<Table>> {
@@ -132,14 +100,9 @@ fn inspect_existing<T: serde::Serialize + serde::de::DeserializeOwned>(path: &Pa
     Ok(Existing::Loadable { raw, known })
 }
 
-/// Marker between a file name and the timestamp of its backup copy (`shop.toml.corrupt-…`).
-/// The copy no longer ends in `.toml`, so listings never read it back as data.
-const CORRUPT_BACKUP_MARKER: &str = ".corrupt-";
-
 /// Copies `path` next to itself as `<name>.corrupt-<unix ms>`.
 fn back_up_corrupt(path: &Path) -> PortResult<()> {
-    let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let backup = path.with_file_name(format!("{file_name}{CORRUPT_BACKUP_MARKER}{}", SystemClock.now_unix_ms()));
+    let backup = corrupt_backup_path(path);
     std::fs::copy(path, &backup).map_err(|e| PortError::io(format!("backing up the unreadable {} to {}", path.display(), backup.display()), e))?;
     tracing::warn!("{} did not load: kept a copy as {} before replacing it", path.display(), backup.display());
     Ok(())
@@ -226,6 +189,7 @@ pub fn read_all_toml<T: serde::de::DeserializeOwned>(dir: &Path) -> PortResult<V
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lampo_infra_fs::CORRUPT_BACKUP_MARKER;
     use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -239,16 +203,6 @@ mod tests {
     #[derive(Debug, Serialize, Deserialize, PartialEq, Default)]
     struct Inner {
         a: u8,
-    }
-
-    #[test]
-    fn atomic_write_replaces_and_leaves_no_temp_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("sub").join("f.txt");
-        write_atomic(&file, b"one").unwrap();
-        write_atomic(&file, b"two").unwrap();
-        assert_eq!(std::fs::read(&file).unwrap(), b"two");
-        assert_eq!(std::fs::read_dir(file.parent().unwrap()).unwrap().count(), 1);
     }
 
     #[test]

@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use lampo_domain::package::{PackageKind, latest};
 use lampo_domain::php::PhpMinor;
-use lampo_domain::ports::{AppLocationRecorder, InstalledPackageRegistry, PackageCatalogSource, ProgressSink, ServiceRunner, SettingsRepository};
+use lampo_domain::ports::{AppLocationRecorder, InstalledPackageRegistry, PackageCatalogSource, PackageLeftoverSweeper, ProgressSink, ServiceRunner, SettingsRepository};
 use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
 use lampo_domain::service::ServiceState;
 use lampo_domain::settings::Settings;
@@ -22,7 +22,8 @@ use crate::dto::{FirstRunItemDto, FirstRunStatusDto, InstallPackageRequest};
 use crate::error::{AppError, AppResult};
 
 /// App start: record where the app is (for the CLI copy in the shim dir), refresh the shims
-/// and the CLI copy left behind by an app update, regenerate files and bring
+/// and the CLI copy left behind by an app update, repair what interrupted package installs left
+/// (before any service starts from a package), regenerate files and bring
 /// services to the plan (always-on MySQL included). Runs with `ElevationPolicy::Deny` — a
 /// pending hosts change is surfaced in the GUI instead of prompting at boot.
 pub struct Startup {
@@ -31,16 +32,24 @@ pub struct Startup {
     shims: Arc<ShimSetup>,
     app_location: Arc<dyn AppLocationRecorder>,
     claude_code: Option<Arc<ClaudeCodeSetup>>,
+    package_sweeper: Option<Arc<dyn PackageLeftoverSweeper>>,
 }
 
 impl Startup {
     pub fn new(env: Arc<dyn EnvironmentSync>, settings: Arc<dyn SettingsRepository>, shims: Arc<ShimSetup>, app_location: Arc<dyn AppLocationRecorder>) -> Self {
-        Self { env, settings, shims, app_location, claude_code: None }
+        Self { env, settings, shims, app_location, claude_code: None, package_sweeper: None }
     }
 
     /// Also updates an outdated Claude Code plugin (only one the user installed before).
     pub fn with_claude_code(mut self, claude_code: Arc<ClaudeCodeSetup>) -> Self {
         self.claude_code = Some(claude_code);
+        self
+    }
+
+    /// Also restores package slots a crash left mid-update and deletes stale leftovers of
+    /// package operations, before the services start.
+    pub fn with_package_sweeper(mut self, sweeper: Arc<dyn PackageLeftoverSweeper>) -> Self {
+        self.package_sweeper = Some(sweeper);
         self
     }
 
@@ -57,6 +66,9 @@ impl Startup {
             Ok(true) => tracing::info!("shims refreshed to the current lampo-shim.exe"),
             Ok(false) => {}
             Err(e) => tracing::warn!("refreshing the shims failed: {e}"),
+        }
+        if let Some(sweeper) = &self.package_sweeper {
+            sweeper.sweep().await;
         }
         let integrations = async {
             if let Some(claude_code) = &self.claude_code {

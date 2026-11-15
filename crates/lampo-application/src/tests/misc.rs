@@ -353,6 +353,7 @@ fn dispatcher(w: &World, quit: Arc<std::sync::atomic::AtomicBool>, gate: Arc<Shu
         downloader: Arc::new(FakeDownloader::default()),
         extractor: Arc::new(FakeExtractor::default()),
         installed: w.installed.clone(),
+        slots: Arc::new(MemSlotLock::default()),
         hooks: vec![],
         vc: Arc::new(FakeVc::modern()),
         settings: w.settings_writer(),

@@ -28,7 +28,7 @@ async fn all_entries(paths: &LampoPaths) -> Vec<CatalogEntry> {
     merged.entries
 }
 
-/// The install pipeline as the application runs it: download (hashed) → verify → extract/place → hook → record.
+/// The install pipeline as the application runs it: download (hashed) → verify → extract/place → hook → record → commit.
 async fn install(entry: &CatalogEntry, registry: &FsInstalledPackageRegistry, downloads: &Path) -> InstalledPackage {
     let client = lampo_infra_packages::http::build_client().unwrap();
     let downloader = HttpDownloader::new(client);
@@ -39,18 +39,20 @@ async fn install(entry: &CatalogEntry, registry: &FsInstalledPackageRegistry, do
     println!("downloaded {} ({} bytes)", entry.url, downloaded.bytes);
     verify_checksum(entry.url.file_name(), entry.sha256.as_ref().expect("pinned"), &downloaded.sha256).unwrap();
     let dir = registry.install_dir(&entry.id);
-    match &entry.payload {
+    let replacement = match &entry.payload {
         PackagePayload::Zip { strip_prefix } => {
-            ZipExtractor.extract_zip(&file, &dir, strip_prefix.as_deref(), &NullProgressSink, &cancel).await.unwrap();
+            let replacement = ZipExtractor.extract_zip(&file, &dir, strip_prefix.as_deref(), &NullProgressSink, &cancel).await.unwrap();
             std::fs::remove_file(&file).unwrap();
+            replacement
         }
         PackagePayload::SingleFile { file_name } => ZipExtractor.place_file(&file, &dir, file_name, &cancel).await.unwrap(),
-    }
+    };
     let package = InstalledPackage::new(entry.id.clone(), dir, entry.vc_runtime);
     for hook in hooks::all().iter().filter(|h| h.kind() == entry.id.kind) {
         hook.after_install(&package).await.unwrap();
     }
     registry.record(&package).unwrap();
+    ZipExtractor.commit(replacement).await;
     package
 }
 
