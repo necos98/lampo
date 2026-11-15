@@ -139,6 +139,16 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         paths: paths.clone(),
         env: env.clone(),
     }));
+    // Every settings save (GUI page, `lampo settings set`, default PHP adoption, first-run
+    // wizard) goes through this writer: the allocator lock plus the port and default-PHP checks.
+    let settings_writer = SettingsWriter {
+        repo: settings.clone(),
+        allocator: allocator.clone(),
+        port_probe: port_probe.clone(),
+        installed: installed.clone(),
+        events: events.clone(),
+        services: service_catalog.clone(),
+    };
     let install_package = Arc::new(InstallPackage::new(InstallPackageDeps {
         sources: sources.clone(),
         downloader: Arc::new(packages::HttpDownloader::new(http)),
@@ -146,7 +156,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         installed: installed.clone(),
         hooks: packages::hooks::all(),
         vc: vc.clone(),
-        settings: settings.clone(),
+        settings: settings_writer.clone(),
         paths: paths.clone(),
         env: env.clone(),
         events: events.clone(),
@@ -184,15 +194,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     // CLI-only (`lampo project set`, via the control pipe): the GUI edits the full project.
     let patch_project = Arc::new(PatchProjectEnvironment::new(project_writer.clone(), installed.clone(), php_extensions.clone()));
     // CLI-only (`lampo settings set`, via the control pipe): the GUI saves the full settings.
-    let patch_settings = Arc::new(PatchSettings::new(PatchSettingsDeps {
-        settings: settings.clone(),
-        allocator: allocator.clone(),
-        port_probe: port_probe.clone(),
-        installed: installed.clone(),
-        env: env.clone(),
-        events: events.clone(),
-        services: service_catalog.clone(),
-    }));
+    let patch_settings = Arc::new(PatchSettings::new(settings_writer.clone(), env.clone()));
     let worktree_up = Arc::new(WorktreeUp::new(WorktreeUpDeps {
         projects: projects.clone(),
         worktrees: worktrees.clone(),
@@ -278,7 +280,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         install_package: install_package.clone(),
         uninstall_package,
         first_run: Arc::new(FirstRunSetup::new(FirstRunDeps {
-            settings: settings.clone(),
+            settings: settings_writer.clone(),
             sources,
             installed: installed.clone(),
             install: install_package,
@@ -293,7 +295,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         worktree_down,
         prune_worktrees,
         logs: Arc::new(LogQueries::new(Arc::new(services::FileLogReader), projects.clone(), settings.clone(), service_catalog.clone(), paths.clone())),
-        settings: Arc::new(SettingsService::new(settings.clone(), env.clone(), events.clone(), service_catalog.clone())),
+        settings: Arc::new(SettingsService::new(settings_writer, env.clone())),
         doctor: Arc::new(Doctor::new(DoctorDeps {
             projects,
             worktrees,

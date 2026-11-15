@@ -17,6 +17,7 @@ use super::environment::{EnvironmentSync, GeneratedFilesWriter};
 use super::requirements::{requirements, used_by};
 use super::resolution::SiteResolver;
 use super::service_catalog::ServiceCatalog;
+use super::settings_writer::SettingsWriter;
 use crate::context::CallContext;
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -256,7 +257,8 @@ pub struct InstallPackageDeps {
     /// Post-install hooks; the one whose `kind()` matches runs.
     pub hooks: Vec<Arc<dyn PackageInstallHook>>,
     pub vc: Arc<dyn VcRuntimeDetector>,
-    pub settings: Arc<dyn SettingsRepository>,
+    /// Adopts the first PHP installed as the default PHP.
+    pub settings: SettingsWriter,
     pub paths: LampoPaths,
     pub env: Arc<dyn EnvironmentSync>,
     pub events: Arc<dyn EventPublisher>,
@@ -353,26 +355,34 @@ impl InstallPackage {
         }
     }
 
-    /// The first PHP installed becomes the default PHP of the CLI shims.
-    fn adopt_default_php(&self, id: &PackageId) -> AppResult<()> {
+    /// The first PHP installed becomes the default PHP of the CLI shims (a guarded settings save).
+    /// Best effort: the package is installed either way, so a failure is only logged (the
+    /// default PHP can still be chosen in the settings).
+    async fn adopt_default_php(&self, id: &PackageId) {
         if id.kind != PackageKind::PHP {
-            return Ok(());
+            return;
         }
-        let mut settings = self.deps.settings.load()?;
-        if settings.default_php.is_some() {
-            return Ok(());
+        let adopted = self
+            .deps
+            .settings
+            .modify(|current| {
+                let mut next = current.clone();
+                if next.default_php.is_none() {
+                    next.default_php = Some(PhpMinor::try_from(id.series())?);
+                }
+                Ok(next)
+            })
+            .await;
+        if let Err(e) = adopted {
+            tracing::warn!("making {id} the default PHP failed: {}", e.message);
         }
-        settings.default_php = Some(PhpMinor::try_from(id.series())?);
-        self.deps.settings.save(&settings)?;
-        self.deps.events.publish(DomainEvent::SettingsChanged);
-        Ok(())
     }
 
     /// Long-running: the caller runs it as a task (see `crate::tasks`) and passes a progress
     /// sink (GUI events or control-pipe frames). Refuses entries without a checksum or whose live
     /// and pinned checksums disagree (`ChecksumMismatch`), and builds
     /// whose VC++ runtime is missing (`PackageMissing`, `details.downloadUrl`). Already installed
-    /// → returned as is. Sets `default_php` when installing the first PHP. Publishes
+    /// → returned as is. Sets `default_php` when installing the first PHP (best effort). Publishes
     /// `PackagesChanged`. A failure after the files were placed removes them again.
     ///
     /// The final environment sync is best effort: its failure is logged, not returned (the
@@ -386,7 +396,7 @@ impl InstallPackage {
         let (entry, catalog) = self.resolve(&request).await?;
         if let Some(existing) = d.installed.list()?.into_iter().find(|p| p.id == entry.id) {
             // Settings may have been reset while packages stayed: still adopt it as the default.
-            self.adopt_default_php(&existing.id)?;
+            self.adopt_default_php(&existing.id).await;
             return Ok(InstalledPackageDto {
                 id: package_id_to_dto(&existing.id),
                 path: existing.install_dir.display().to_string(),
@@ -421,7 +431,7 @@ impl InstallPackage {
             return Err(e);
         }
 
-        self.adopt_default_php(&entry.id)?;
+        self.adopt_default_php(&entry.id).await;
         d.events.publish(DomainEvent::PackagesChanged);
         if let Err(e) = d.env.sync(ctx).await {
             tracing::warn!("environment sync after installing {} failed: {}", entry.id, e.message);

@@ -103,13 +103,18 @@ to review, and `tls` is reset.
 
 Likewise the GUI saves the whole settings (`SettingsService::update`) while `lampo settings set`
 sends a patch (`PatchSettings`, control request `settings-patch`): Apache's port, service
-instance ports, the default PHP and the loopback range, applied to the stored settings under
-the allocator lock (so its check against the sites' loopback ports cannot interleave with a
-project save). New ports must be free (`PortInUse`) unless a Lampo service holds them (a swap);
-then the sync restarts running services on their new port. The reply lists the changes, the
-sync report and notes (stopped services, sites whose `.env` mentions the old port). TLD and
-close-to-tray stay GUI-only; service instances cannot be added or removed by either front-end.
-`lampo settings get` reads the file in-process.
+instance ports, the default PHP and the loopback range, applied to the stored settings. Both,
+like the first PHP installed becoming the default and the first-run wizard's completion, save
+through one `SettingsWriter`: under the allocator lock (so its check against the sites' loopback
+ports cannot interleave with a project save), with the same checks. A port may not be a site's
+loopback port (`Conflict`); new ports must be free (`PortInUse`) unless a Lampo service holds
+them (a swap); a new default PHP must be installed (`PackageMissing`). Then the sync restarts
+running services on their new port. The patch reply lists the changes, the sync report and
+notes (stopped services, sites whose `.env` mentions the old port). TLD and close-to-tray stay
+GUI-only; service instances cannot be added or removed by either front-end (a GUI save that
+lists other instances than the stored ones is refused with `Validation`). Adopting the default
+PHP is best effort: its failure is logged and never fails the install. `lampo settings get`
+reads the file in-process.
 
 Creating a project that uses MySQL also creates its database (name derived from the project id) on
 its instance, starting it on demand; an existing database is kept, and a failure never fails

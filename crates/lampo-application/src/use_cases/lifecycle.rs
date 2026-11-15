@@ -6,6 +6,7 @@ use lampo_domain::php::PhpMinor;
 use lampo_domain::ports::{AppLocationRecorder, InstalledPackageRegistry, PackageCatalogSource, ProgressSink, ServiceRunner, SettingsRepository};
 use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
 use lampo_domain::service::ServiceState;
+use lampo_domain::settings::Settings;
 use lampo_domain::version::VersionSeries;
 
 use super::environment::EnvironmentSync;
@@ -13,6 +14,7 @@ use super::generation::runner_for;
 use super::service_catalog::ServiceCatalog;
 use super::packages::{InstallPackage, fetch_catalog};
 use super::claude_code::ClaudeCodeSetup;
+use super::settings_writer::SettingsWriter;
 use super::shims::ShimSetup;
 use super::support::{COMPOSER_LTS_SERIES, installed_php_minors, newest_of};
 use crate::context::{CallContext, ElevationPolicy, Origin};
@@ -150,7 +152,7 @@ impl Item {
 /// First-run wizard: Apache + mod_fcgid, latest PHP, MySQL default series, Composer (stable and
 /// 2.2 LTS when needed), then shims, then `first_run_completed = true`.
 pub struct FirstRunSetup {
-    settings: Arc<dyn SettingsRepository>,
+    settings: SettingsWriter,
     sources: Vec<Arc<dyn PackageCatalogSource>>,
     installed: Arc<dyn InstalledPackageRegistry>,
     install: Arc<InstallPackage>,
@@ -160,7 +162,8 @@ pub struct FirstRunSetup {
 }
 
 pub struct FirstRunDeps {
-    pub settings: Arc<dyn SettingsRepository>,
+    /// Records the wizard's completion.
+    pub settings: SettingsWriter,
     pub sources: Vec<Arc<dyn PackageCatalogSource>>,
     pub installed: Arc<dyn InstalledPackageRegistry>,
     pub install: Arc<InstallPackage>,
@@ -231,11 +234,7 @@ impl FirstRunSetup {
         }
         cancel.check()?;
         self.shims.install()?;
-        let mut settings = self.settings.load()?;
-        if !settings.first_run_completed {
-            settings.first_run_completed = true;
-            self.settings.save(&settings)?;
-        }
+        self.settings.modify(|current| Ok(Settings { first_run_completed: true, ..current.clone() })).await?;
         self.env.sync(ctx).await?;
         self.status()
     }

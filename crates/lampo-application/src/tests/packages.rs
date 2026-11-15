@@ -9,9 +9,10 @@ use lampo_domain::ports::{InstalledPackageRegistry, PackageCatalogSource, Projec
 use lampo_domain::progress::{CancelFlag, ProgressStage};
 use lampo_domain::vc_runtime::VcRuntime;
 
+use super::allocation::after_a_locked_commit;
 use super::{cli, gui};
 use crate::dto::*;
-use crate::error::ErrorCode;
+use crate::error::{AppResult, ErrorCode};
 use crate::mapping::package_id_to_dto;
 use crate::testing::*;
 use crate::use_cases::*;
@@ -74,7 +75,7 @@ impl Kit {
             installed: self.w.installed.clone(),
             hooks: vec![self.hook.clone()],
             vc: self.vc.clone(),
-            settings: self.w.settings.clone(),
+            settings: self.w.settings_writer(),
             paths: self.w.paths.clone(),
             env: self.sync.clone(),
             events: self.w.events.clone(),
@@ -83,7 +84,7 @@ impl Kit {
 
     fn first_run(&self, shims: Arc<ShimSetup>) -> FirstRunSetup {
         FirstRunSetup::new(FirstRunDeps {
-            settings: self.w.settings.clone(),
+            settings: self.w.settings_writer(),
             sources: self.sources(),
             installed: self.w.installed.clone(),
             install: self.install(),
@@ -145,6 +146,64 @@ async fn install_runs_the_whole_pipeline_and_adopts_the_first_php_as_default() {
     k.w.settings.save(&settings).unwrap();
     k.install().execute(request("php", Some("8.4.3"), None), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap();
     assert_eq!(k.w.settings.load().unwrap().default_php, Some(php("8.4")));
+}
+
+/// A settings save made by another commit under the allocator lock: Apache moves to 8080.
+fn apache_moved_to_8080(w: &World) -> impl FnOnce(&SiteSnapshot) -> AppResult<()> + Send + 'static {
+    let repo = w.settings.clone();
+    move |snap| {
+        let mut next = snap.settings.clone();
+        next.apache_port = 8080;
+        Ok(repo.save(&next)?)
+    }
+}
+
+/// Adopting the first PHP as the default is best effort: a failed settings save does not fail an
+/// installation that is already complete (still recorded, announced and synced).
+#[tokio::test]
+async fn a_failed_default_php_adoption_does_not_fail_the_install() {
+    let k = Kit::new(World::new());
+    k.w.settings.fail_saves(true);
+    let dto = k.install().execute(request("php", None, Some("8.3")), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap();
+    assert_eq!(dto.id.version, "8.3.15");
+    assert!(k.w.installed.has(&PackageKind::PHP, "8.3.15"));
+    assert!(k.w.events.all().contains(&DomainEvent::PackagesChanged));
+    assert_eq!(k.sync.calls.load(Ordering::SeqCst), 1, "synced after the failed adoption");
+    assert_eq!(k.w.settings.load().unwrap().default_php, None);
+
+    // Already installed: the adoption is retried, and its failure is still not the install's.
+    let again = k.install().execute(request("php", Some("8.3.15"), None), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap();
+    assert_eq!(again.id, dto.id);
+}
+
+/// The default-PHP adoption saves under the allocator lock, built on the settings stored then: a
+/// concurrent save is kept, not reverted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn the_default_php_adoption_waits_for_the_allocator_lock() {
+    let k = Kit::new(World::new());
+    let install = k.install();
+    let op = async move { install.execute(request("php", None, Some("8.3")), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await };
+    after_a_locked_commit(&k.w, apache_moved_to_8080(&k.w), op).await.unwrap();
+    let stored = k.w.settings.load().unwrap();
+    assert_eq!((stored.apache_port, stored.default_php), (8080, Some(php("8.3"))));
+}
+
+/// The wizard records its completion under the allocator lock (here it has nothing left to
+/// install, so that save is the only one that needs the lock).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn first_run_completion_waits_for_the_allocator_lock() {
+    let k = Kit::new(World::new());
+    for (kind, version) in [(PackageKind::APACHE, "2.4.62"), (PackageKind::MOD_FCGID, "2.3.10"), (PackageKind::PHP, "8.4.3"), (PackageKind::MYSQL, "8.4.3"), (PackageKind::COMPOSER, "2.8.4")]
+    {
+        k.w.installed.add(kind, version, None);
+    }
+    let setup = k.first_run(k.w.shim_setup());
+    let op = async move { setup.run(&cli(), &RecordingProgress::default(), &CancelFlag::new()).await };
+    let status = after_a_locked_commit(&k.w, apache_moved_to_8080(&k.w), op).await.unwrap();
+    assert!(status.completed);
+    let stored = k.w.settings.load().unwrap();
+    assert!(stored.first_run_completed);
+    assert_eq!(stored.apache_port, 8080, "the concurrent save is kept");
 }
 
 #[tokio::test]

@@ -101,13 +101,22 @@ impl WorktreeRepository for MemWorktrees {
     }
 }
 
+/// The stored settings; saves fail (a locked or read-only file) while the flag is set.
 #[derive(Default)]
-pub struct MemSettings(pub Mutex<Settings>);
+pub struct MemSettings(pub Mutex<Settings>, pub AtomicBool);
+impl MemSettings {
+    pub fn fail_saves(&self, fail: bool) {
+        self.1.store(fail, Ordering::SeqCst);
+    }
+}
 impl SettingsRepository for MemSettings {
     fn load(&self) -> PortResult<Settings> {
         Ok(lock(&self.0).clone())
     }
     fn save(&self, settings: &Settings) -> PortResult<()> {
+        if self.1.load(Ordering::SeqCst) {
+            return Err(PortError::io("writing settings.json", "the file is locked by another process"));
+        }
         *lock(&self.0) = settings.clone();
         Ok(())
     }
@@ -1001,17 +1010,27 @@ impl World {
         self.patch_project_with(self.env.clone())
     }
 
-    /// `lampo settings set`, sharing this world's allocator and syncing through `env`.
-    pub fn patch_settings(&self) -> PatchSettings {
-        PatchSettings::new(PatchSettingsDeps {
-            settings: self.settings.clone(),
+    /// The guarded settings save every settings-mutating use case takes, sharing this world's
+    /// allocator.
+    pub fn settings_writer(&self) -> SettingsWriter {
+        SettingsWriter {
+            repo: self.settings.clone(),
             allocator: self.allocator.clone(),
             port_probe: self.ports.clone(),
             installed: self.installed.clone(),
-            env: self.env.clone(),
             events: self.events.clone(),
             services: self.services.clone(),
-        })
+        }
+    }
+
+    /// `lampo settings set`, syncing through `env`.
+    pub fn patch_settings(&self) -> PatchSettings {
+        PatchSettings::new(self.settings_writer(), self.env.clone())
+    }
+
+    /// The GUI settings page, syncing through `env`.
+    pub fn settings_service(&self) -> SettingsService {
+        SettingsService::new(self.settings_writer(), self.env.clone())
     }
 
     pub fn resolver(&self) -> Arc<SiteResolver> {

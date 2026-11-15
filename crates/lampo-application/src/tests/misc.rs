@@ -249,7 +249,7 @@ async fn service_queries_and_manual_control() {
 async fn settings_update_validates_saves_and_syncs() {
     let w = World::with_basics();
     w.hosts_in_sync();
-    let service = SettingsService::new(w.settings.clone(), w.env.clone(), w.events.clone(), w.services.clone());
+    let service = w.settings_service();
     let mut dto = service.get().unwrap();
     dto.services[2].port = 3306;
     assert_eq!(service.update(dto.clone(), &gui()).await.unwrap_err().code, ErrorCode::Conflict);
@@ -354,7 +354,7 @@ fn dispatcher(w: &World, quit: Arc<std::sync::atomic::AtomicBool>, gate: Arc<Shu
         installed: w.installed.clone(),
         hooks: vec![],
         vc: Arc::new(FakeVc::modern()),
-        settings: w.settings.clone(),
+        settings: w.settings_writer(),
         paths: w.paths.clone(),
         env: w.env.clone(),
         events: w.events.clone(),

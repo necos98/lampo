@@ -1,47 +1,44 @@
 use std::sync::Arc;
 
-use lampo_domain::ports::{EventPublisher, SettingsRepository};
+use lampo_domain::ports::SettingsRepository;
 
 use super::environment::EnvironmentSync;
+use super::service_catalog::ServiceCatalog;
+use super::settings_writer::SettingsWriter;
 use crate::context::CallContext;
 use crate::dto::{ServiceKindDto, SettingsDto};
 use crate::error::AppResult;
 use crate::mapping::{service_kinds_to_dto, settings_from_dto, settings_to_dto};
-use super::service_catalog::ServiceCatalog;
-use lampo_domain::events::DomainEvent;
 
+/// The GUI settings page: reads and saves the whole [`SettingsDto`].
 pub struct SettingsService {
-    repo: Arc<dyn SettingsRepository>,
+    writer: SettingsWriter,
     env: Arc<dyn EnvironmentSync>,
-    events: Arc<dyn EventPublisher>,
-    services: Arc<ServiceCatalog>,
 }
 
 impl SettingsService {
-    pub fn new(repo: Arc<dyn SettingsRepository>, env: Arc<dyn EnvironmentSync>, events: Arc<dyn EventPublisher>, services: Arc<ServiceCatalog>) -> Self {
-        Self { repo, env, events, services }
+    pub fn new(writer: SettingsWriter, env: Arc<dyn EnvironmentSync>) -> Self {
+        Self { writer, env }
     }
 
     pub fn get(&self) -> AppResult<SettingsDto> {
-        Ok(settings_to_dto(&self.repo.load()?, &self.services))
+        Ok(settings_to_dto(&self.writer.load()?, &self.writer.services))
     }
 
     /// The service kinds a project may use, with their configured versions.
     pub fn service_kinds(&self) -> AppResult<Vec<ServiceKindDto>> {
-        Ok(service_kinds_to_dto(&self.services, &self.repo.load()?))
+        Ok(service_kinds_to_dto(&self.writer.services, &self.writer.load()?))
     }
 
-    /// Validates (`settings_from_dto`), saves, publishes `SettingsChanged`, syncs (ports/TLD
-    /// changes regenerate config and may move services).
+    /// Converts and validates against the stored settings (`settings_from_dto`: the service
+    /// instances cannot be added or removed here), then saves through [`SettingsWriter::modify`]
+    /// with the same checks as `lampo settings set` (`Conflict` for a site's loopback port,
+    /// `PortInUse`, `PackageMissing` for a default PHP that is not installed). Then syncs
+    /// (ports/TLD changes regenerate config and may move services).
     pub async fn update(&self, settings: SettingsDto, ctx: &CallContext) -> AppResult<SettingsDto> {
-        let current = self.repo.load()?;
-        let next = settings_from_dto(&settings, &current)?;
-        if next != current {
-            self.repo.save(&next)?;
-            self.events.publish(DomainEvent::SettingsChanged);
-        }
+        let commit = self.writer.modify(|current| Ok(settings_from_dto(&settings, current)?)).await?;
         self.env.sync(ctx).await?;
-        Ok(settings_to_dto(&next, &self.services))
+        Ok(settings_to_dto(&commit.after, &self.writer.services))
     }
 }
 

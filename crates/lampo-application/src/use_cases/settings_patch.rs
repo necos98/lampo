@@ -1,53 +1,38 @@
 //! Partial edits of the global settings (`lampo settings set`): Apache's port, service instance
 //! ports and web UI ports (Mailpit), the default PHP and the loopback port range.
 //!
-//! The patch is applied to the *stored* settings under the allocator lock
-//! ([`LoopbackPortAllocator::reserve`]), so it never reverts a concurrent edit the way a
-//! read-modify-write of the whole [`SettingsDto`] from another process would, and its check
-//! against the sites' dedicated loopback ports cannot interleave with a project save or a port
-//! allocation (which check the other direction under the same lock). Then it syncs like a GUI
-//! save: running services whose port changed are restarted.
+//! The patch is applied to the *stored* settings through [`SettingsWriter::modify`] (under the
+//! allocator lock, with its port and default-PHP checks), so it never reverts a concurrent edit
+//! the way a read-modify-write of the whole [`SettingsDto`] from another process would. Then it
+//! syncs like a GUI save: running services whose port changed are restarted.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-use lampo_domain::DomainError;
-use lampo_domain::events::DomainEvent;
 use lampo_domain::php::PhpMinor;
-use lampo_domain::PortError;
-use lampo_domain::ports::{EventPublisher, InstalledPackageRegistry, PortAvailability, PortProbe, SettingsRepository};
 use lampo_domain::project::Project;
 use lampo_domain::service::{ServiceId, ServiceKind};
 use lampo_domain::settings::Settings;
 use lampo_domain::worktree::{PortRange, WorktreeEnvironment};
 
-use super::allocation::LoopbackPortAllocator;
 use super::environment::EnvironmentSync;
 use super::service_catalog::ServiceCatalog;
-use super::support::{php_package, validation};
+use super::settings_writer::{SettingsCommit, SettingsWriter, changed_ports};
+use super::support::validation;
 use crate::context::CallContext;
 use crate::dto::*;
-use crate::error::{AppError, AppResult, ErrorCode};
+use crate::error::{AppError, AppResult};
 use crate::mapping::settings_to_dto;
-
-pub struct PatchSettingsDeps {
-    pub settings: Arc<dyn SettingsRepository>,
-    pub allocator: Arc<LoopbackPortAllocator>,
-    pub port_probe: Arc<dyn PortProbe>,
-    pub installed: Arc<dyn InstalledPackageRegistry>,
-    pub env: Arc<dyn EnvironmentSync>,
-    pub events: Arc<dyn EventPublisher>,
-    pub services: Arc<ServiceCatalog>,
-}
 
 /// Applies a [`SettingsPatchRequest`].
 pub struct PatchSettings {
-    deps: PatchSettingsDeps,
+    writer: SettingsWriter,
+    env: Arc<dyn EnvironmentSync>,
 }
 
 impl PatchSettings {
-    pub fn new(deps: PatchSettingsDeps) -> Self {
-        Self { deps }
+    pub fn new(writer: SettingsWriter, env: Arc<dyn EnvironmentSync>) -> Self {
+        Self { writer, env }
     }
 
     /// `Validation` for an empty patch, a malformed or unconfigured service id, Apache given as
@@ -60,53 +45,16 @@ impl PatchSettings {
         if request.is_empty() {
             return Err(validation("nothing to change: give at least one setting"));
         }
-        let patch = Patch::parse(&request, &self.deps.services)?;
-        let installed = match patch.default_php {
-            Some(_) => self.deps.installed.list()?,
-            None => Vec::new(),
-        };
-        let (before, after, projects, worktrees) = self
-            .deps
-            .allocator
-            .reserve(|snap| {
-                let current = snap.settings.clone();
-                let next = patch.apply(&current)?;
-                if let Some(php) = patch.default_php.filter(|p| Some(*p) != current.default_php) {
-                    if php_package(&installed, php).is_none() {
-                        return Err(AppError::new(ErrorCode::PackageMissing, format!("PHP {php} is not installed: run `lampo package install php {php}` first")));
-                    }
-                }
-                let changed = changed_ports(&current, &next, &self.deps.services);
-                check_loopback_ports(&changed, &snap.projects, &snap.worktrees)?;
-                self.check_free(&changed, &current)?;
-                if next != current {
-                    self.deps.settings.save(&next)?;
-                    self.deps.events.publish(DomainEvent::SettingsChanged);
-                }
-                Ok((current, next, snap.projects.clone(), snap.worktrees.clone()))
-            })
-            .await?;
-        let changes = describe_changes(&before, &after, &self.deps.services);
+        let services = &self.writer.services;
+        let patch = Patch::parse(&request, services)?;
+        let SettingsCommit { before, after, projects, worktrees } = self.writer.modify(|current| patch.apply(current)).await?;
+        let changes = describe_changes(&before, &after, services);
         let sync = match changes.is_empty() {
             true => SyncReportDto::default(),
-            false => self.deps.env.sync(ctx).await.map_err(|e| AppError { message: format!("the settings were saved, but applying them failed: {}", e.message), ..e })?,
+            false => self.env.sync(ctx).await.map_err(|e| AppError { message: format!("the settings were saved, but applying them failed: {}", e.message), ..e })?,
         };
-        let notes = notes(&before, &after, &projects, &worktrees, &sync, &self.deps.services);
-        Ok(SettingsPatchResultDto { settings: settings_to_dto(&after, &self.deps.services), changes, sync, notes })
-    }
-
-    /// New ports must be free on the OS, unless a Lampo service holds them now (a swap between
-    /// instances: the sync moves them).
-    fn check_free(&self, changed: &[PortChange], current: &Settings) -> AppResult<()> {
-        for c in changed {
-            if current.service_on_port(c.port).is_some() {
-                continue;
-            }
-            if let PortAvailability::InUse { owner } = self.deps.port_probe.check(c.port)? {
-                return Err(PortError::PortInUse { port: c.port, owner }.into());
-            }
-        }
-        Ok(())
+        let notes = notes(&before, &after, &projects, &worktrees, &sync, services);
+        Ok(SettingsPatchResultDto { settings: settings_to_dto(&after, services), changes, sync, notes })
     }
 }
 
@@ -180,57 +128,6 @@ impl Patch {
         next.validate()?;
         Ok(next)
     }
-}
-
-/// One port that differs between two settings: a service's main port, or its web UI port.
-struct PortChange {
-    id: ServiceId,
-    ui: bool,
-    port: u16,
-}
-
-impl PortChange {
-    /// `apache.port`, `mysql-8.4.port`, `mailpit.ui-port`.
-    fn setting(&self) -> String {
-        format!("{}.{}", self.id, if self.ui { "ui-port" } else { "port" })
-    }
-
-    fn previous(&self, before: &Settings, catalog: &ServiceCatalog) -> Option<u16> {
-        match self.ui {
-            false => before.service_port(&self.id),
-            true => catalog.ui_port(&self.id, before),
-        }
-    }
-}
-
-/// Every port (Apache's, services', web UIs') that differs between `before` and `after`, with
-/// its new value. A web UI port is compared by its effective value (configured, else default).
-fn changed_ports(before: &Settings, after: &Settings, catalog: &ServiceCatalog) -> Vec<PortChange> {
-    let mut out = Vec::new();
-    if before.apache_port != after.apache_port {
-        out.push(PortChange { id: ServiceId::apache(), ui: false, port: after.apache_port });
-    }
-    for s in &after.services {
-        if before.service_port(&s.service) != Some(s.port) {
-            out.push(PortChange { id: s.service.clone(), ui: false, port: s.port });
-        }
-        if let Some(ui) = catalog.ui_port(&s.service, after).filter(|ui| catalog.ui_port(&s.service, before) != Some(*ui)) {
-            out.push(PortChange { id: s.service.clone(), ui: true, port: ui });
-        }
-    }
-    out
-}
-
-/// A service port may not be a site's dedicated loopback port (Apache listens there for it).
-fn check_loopback_ports(changed: &[PortChange], projects: &[Project], worktrees: &[WorktreeEnvironment]) -> AppResult<()> {
-    for port in changed.iter().map(|c| c.port) {
-        let project = projects.iter().find(|p| p.addresses.iter().any(|a| a.loopback() == Some(port))).map(|p| p.id.to_string());
-        let site = project.or_else(|| worktrees.iter().find(|w| w.loopback_port == port).map(|w| w.site_id().to_string()));
-        if let Some(site) = site {
-            return Err(DomainError::LoopbackPortTaken { port, service: format!("site `{site}`") }.into());
-        }
-    }
-    Ok(())
 }
 
 fn describe_changes(before: &Settings, after: &Settings, catalog: &ServiceCatalog) -> Vec<SettingChangeDto> {

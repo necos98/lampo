@@ -9,7 +9,7 @@ use lampo_domain::mysql::DatabaseConnection;
 use lampo_domain::package::{PackageId, PackageKind};
 use lampo_domain::php::{ExtensionName, PhpMinor, php_ini_overrides};
 use lampo_domain::project::{ApacheDirectives, ProjectEnvironment, PublicDir, TlsMode};
-use lampo_domain::service::ServiceKind;
+use lampo_domain::service::{ServiceId, ServiceKind};
 use lampo_domain::settings::{MailConnection, ServiceInstanceSettings, Settings};
 use lampo_domain::version::{PackageVersion, VersionSeries};
 use lampo_domain::worktree::{DatabaseMode, PortRange};
@@ -114,23 +114,44 @@ pub fn settings_to_dto(s: &Settings, catalog: &ServiceCatalog) -> SettingsDto {
     }
 }
 
-/// Validates and converts; `first_run_completed` is taken from `current` (not user-editable).
+/// Validates and converts. Not user-editable, so taken from `current`: `first_run_completed` and
+/// which service instances exist (see [`service_instances_from_dto`]).
 pub fn settings_from_dto(dto: &SettingsDto, current: &Settings) -> Result<Settings, DomainError> {
     let s = Settings {
         default_php: dto.default_php_version.as_deref().map(PhpMinor::parse).transpose()?,
         tld: Tld::new(&dto.tld)?,
         apache_port: dto.apache_port,
-        services: dto
-            .services
-            .iter()
-            .map(|i| Ok(ServiceInstanceSettings { service: i.service.trim().parse()?, port: i.port, always_on: i.always_on, ui_port: i.ui_port }))
-            .collect::<Result<_, DomainError>>()?,
+        services: service_instances_from_dto(&dto.services, &current.services)?,
         loopback_ports: PortRange::new(dto.loopback_port_range.start, dto.loopback_port_range.end)?,
         close_to_tray: dto.close_to_tray,
         first_run_completed: current.first_run_completed,
     };
     s.validate()?;
     Ok(s)
+}
+
+/// The edited port, always-on flag and web UI port of each instance of `current`, in its order.
+/// The DTO must list exactly the configured instances: one added, missing (an outdated form
+/// would otherwise drop a MySQL instance projects use) or given twice is refused.
+fn service_instances_from_dto(dtos: &[ServiceInstanceDto], current: &[ServiceInstanceSettings]) -> Result<Vec<ServiceInstanceSettings>, DomainError> {
+    let mut edited: Vec<(ServiceId, &ServiceInstanceDto)> = Vec::with_capacity(dtos.len());
+    for dto in dtos {
+        let id: ServiceId = dto.service.trim().parse()?;
+        if edited.iter().any(|(other, _)| other == &id) {
+            return Err(DomainError::InvalidSettings(format!("the service instance {id} is given twice")));
+        }
+        if !current.iter().any(|c| c.service == id) {
+            return Err(DomainError::InvalidSettings(format!("{id} is not a configured service instance: instances cannot be added here")));
+        }
+        edited.push((id, dto));
+    }
+    current
+        .iter()
+        .map(|c| match edited.iter().find(|(id, _)| id == &c.service) {
+            Some((_, dto)) => Ok(ServiceInstanceSettings { service: c.service.clone(), port: dto.port, always_on: dto.always_on, ui_port: dto.ui_port }),
+            None => Err(DomainError::InvalidSettings(format!("the service instance {} is missing: configured instances cannot be removed here", c.service))),
+        })
+        .collect()
 }
 
 /// The registered kinds a project may use (Apache, the web tier, excluded), with the configured

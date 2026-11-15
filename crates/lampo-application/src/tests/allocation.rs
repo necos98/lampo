@@ -3,6 +3,7 @@
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::time::Duration;
 
 use lampo_domain::address::SiteAddress;
 use lampo_domain::ports::{ProjectRepository, WorktreeRepository};
@@ -12,6 +13,7 @@ use lampo_domain::worktree::{DatabaseMode, WorktreeEnvironment};
 
 use super::cli;
 use crate::dto::*;
+use crate::error::AppResult;
 use crate::testing::*;
 use crate::use_cases::*;
 
@@ -107,4 +109,36 @@ async fn project_create_and_worktree_up_racing_get_distinct_ports() {
         t.await.unwrap().unwrap();
     }
     assert_eq!(assert_distinct_ports(&w).len(), 12);
+}
+
+/// How long a save that needs the allocator lock must still be pending while another commit
+/// holds it. A save that skips the lock finishes long before (the fakes are in memory).
+const LOCK_WAIT: Duration = Duration::from_millis(100);
+
+/// Holds the allocator lock in another commit, starts `op`, checks that `op` is still waiting
+/// for the lock, then runs `locked_edit` (the other commit's save, under the lock) and releases
+/// the lock. Returns what `op` returns once it ran after `locked_edit`.
+pub(super) async fn after_a_locked_commit<T: Send + 'static>(
+    w: &World,
+    locked_edit: impl FnOnce(&SiteSnapshot) -> AppResult<()> + Send + 'static,
+    op: impl Future<Output = T> + Send + 'static,
+) -> T {
+    let (held, is_held) = tokio::sync::oneshot::channel();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let allocator = w.allocator.clone();
+    let holder = tokio::spawn(async move {
+        allocator
+            .reserve(move |snap| {
+                held.send(()).expect("the test waits for the lock to be held");
+                released.recv().expect("the test releases the lock");
+                locked_edit(snap)
+            })
+            .await
+    });
+    is_held.await.unwrap();
+    let mut op = tokio::spawn(op);
+    assert!(tokio::time::timeout(LOCK_WAIT, &mut op).await.is_err(), "the save must wait for the allocator lock");
+    release.send(()).unwrap();
+    holder.await.unwrap().unwrap();
+    op.await.unwrap()
 }

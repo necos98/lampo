@@ -1,17 +1,20 @@
-//! `PatchSettings` (`lampo settings set`): partial, atomic edits of the global settings.
+//! Settings saves: `PatchSettings` (`lampo settings set`, partial, atomic edits) and the GUI
+//! page's full save (`SettingsService::update`), with the same lock and checks.
 
 use std::collections::BTreeMap;
 
 use lampo_domain::address::SiteAddress;
 use lampo_domain::events::DomainEvent;
 use lampo_domain::mysql::MysqlSeries;
-use lampo_domain::ports::SettingsRepository;
+use lampo_domain::ports::{ProjectRepository, SettingsRepository};
 use lampo_domain::service::{ServiceId, ServiceState};
 
-use super::cli;
+use super::allocation::after_a_locked_commit;
+use super::{cli, gui};
 use crate::dto::*;
 use crate::error::ErrorCode;
 use crate::testing::*;
+use crate::use_cases::SiteSnapshot;
 
 fn ports(pairs: &[(&str, u16)]) -> BTreeMap<String, u16> {
     pairs.iter().map(|(id, port)| (id.to_string(), *port)).collect()
@@ -125,4 +128,115 @@ async fn a_new_port_must_be_free_unless_a_lampo_service_holds_it() {
     assert_eq!(result.changes.len(), 2);
     let stored = w.settings.load().unwrap();
     assert_eq!((stored.mysql_port(MysqlSeries::DEFAULT), stored.mysql_port(MysqlSeries::LEGACY_5_7)), (Some(3307), Some(3306)));
+}
+
+// --- GUI save (`SettingsService::update`): same lock and checks as `lampo settings set` --------
+
+/// Shop holds the dedicated loopback port 8101.
+fn with_loopback_site() -> World {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", false);
+    w.update_project("shop", |p| p.addresses.push(SiteAddress::LoopbackPort(8101)));
+    w.hosts_in_sync();
+    w
+}
+
+fn instance<'a>(dto: &'a mut SettingsDto, id: &str) -> &'a mut ServiceInstanceDto {
+    dto.services.iter_mut().find(|s| s.service == id).unwrap()
+}
+
+/// The save is refused with `code` (and a message containing `needle`); nothing is saved.
+async fn assert_gui_save_refused(w: &World, dto: SettingsDto, code: ErrorCode, needle: &str) -> crate::error::AppError {
+    let original = w.settings.load().unwrap();
+    let e = w.settings_service().update(dto, &gui()).await.unwrap_err();
+    assert_eq!(e.code, code, "{e:?}");
+    assert!(e.message.contains(needle), "{}", e.message);
+    assert_eq!(w.settings.load().unwrap(), original, "nothing saved");
+    assert!(!w.events.all().contains(&DomainEvent::SettingsChanged));
+    e
+}
+
+#[tokio::test]
+async fn gui_save_refuses_a_sites_loopback_port() {
+    let w = with_loopback_site();
+    let mut dto = w.settings_service().get().unwrap();
+    instance(&mut dto, "redis").port = 8101;
+    assert_gui_save_refused(&w, dto, ErrorCode::Conflict, "site `shop`").await;
+}
+
+#[tokio::test]
+async fn gui_save_refuses_a_port_another_program_listens_on() {
+    let w = World::with_basics();
+    w.ports.busy(8080, "skype.exe (pid 42)");
+    let mut dto = w.settings_service().get().unwrap();
+    dto.apache_port = 8080;
+    let e = assert_gui_save_refused(&w, dto, ErrorCode::PortInUse, "8080").await;
+    assert_eq!(e.details.unwrap()["owner"], "skype.exe (pid 42)");
+}
+
+#[tokio::test]
+async fn gui_save_refuses_a_default_php_that_is_not_installed() {
+    let w = World::with_basics();
+    let mut dto = w.settings_service().get().unwrap();
+    dto.default_php_version = Some("8.2".into());
+    assert_gui_save_refused(&w, dto, ErrorCode::PackageMissing, "lampo package install php 8.2").await;
+
+    // An unchanged default PHP is not re-checked (it may have been uninstalled meanwhile).
+    w.settings.0.lock().unwrap().default_php = Some(php("8.2"));
+    let mut dto = w.settings_service().get().unwrap();
+    dto.close_to_tray = !dto.close_to_tray;
+    let saved = w.settings_service().update(dto, &gui()).await.unwrap();
+    assert_eq!(saved.default_php_version.as_deref(), Some("8.2"));
+}
+
+#[tokio::test]
+async fn gui_save_cannot_add_or_remove_service_instances() {
+    let w = World::with_basics();
+    let current = w.settings_service().get().unwrap();
+
+    let mut outdated = current.clone();
+    outdated.services.retain(|s| s.service != "mysql-5.7");
+    assert_gui_save_refused(&w, outdated, ErrorCode::Validation, "mysql-5.7 is missing").await;
+
+    let mut added = current.clone();
+    let mut extra = added.services[0].clone();
+    (extra.service, extra.port) = ("mysql-8.0".into(), 3310);
+    added.services.push(extra);
+    assert_gui_save_refused(&w, added, ErrorCode::Validation, "mysql-8.0 is not a configured service instance").await;
+
+    let mut twice = current.clone();
+    let mut duplicate = twice.services[2].clone();
+    duplicate.port = 6380;
+    twice.services.push(duplicate);
+    assert_gui_save_refused(&w, twice, ErrorCode::Validation, "redis is given twice").await;
+
+    // The instances may come in any order: the stored order is kept.
+    let mut reordered = current.clone();
+    reordered.services.reverse();
+    instance(&mut reordered, "redis").port = 6380;
+    let saved = w.settings_service().update(reordered, &gui()).await.unwrap();
+    let ids: Vec<&str> = saved.services.iter().map(|s| s.service.as_str()).collect();
+    assert_eq!(ids, current.services.iter().map(|s| s.service.as_str()).collect::<Vec<_>>());
+    assert_eq!(w.settings.load().unwrap().service_port(&redis_id()), Some(6380));
+}
+
+/// The GUI save takes the allocator lock, so a project saved meanwhile under the lock is part of
+/// its checks: the port the GUI wanted is now that site's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn gui_save_waits_for_the_allocator_lock() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", false);
+    w.hosts_in_sync();
+    let service = w.settings_service();
+    let mut dto = service.get().unwrap();
+    instance(&mut dto, "redis").port = 8101;
+    let projects = w.projects.clone();
+    let take_8101 = move |snap: &SiteSnapshot| {
+        let mut shop = snap.projects[0].clone();
+        shop.addresses.push(SiteAddress::LoopbackPort(8101));
+        Ok(projects.save(&shop)?)
+    };
+    let saved = after_a_locked_commit(&w, take_8101, async move { service.update(dto, &gui()).await }).await;
+    assert_eq!(saved.unwrap_err().code, ErrorCode::Conflict);
+    assert_eq!(w.settings.load().unwrap().service_port(&redis_id()), Some(6379));
 }
