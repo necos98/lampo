@@ -76,6 +76,7 @@ pub struct CliContext {
     pub app: Arc<dyn AppGateway>,
     pub runner: Arc<dyn ProgramRunner>,
     pub interrupt: Arc<dyn Interrupt>,
+    pub settings: Arc<dyn SettingsReader>,
 }
 
 #[cfg(test)]

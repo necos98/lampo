@@ -558,6 +558,33 @@ pub fn session_context(ctx: &AgentContextDto, live: Option<&[ServiceStatusDto]>)
     out
 }
 
+pub fn settings(s: &SettingsDto) -> String {
+    let mut rows = vec![row(["SETTING", "VALUE"])];
+    rows.push(vec!["default PHP".into(), s.default_php_version.clone().unwrap_or_else(|| "none".into())]);
+    rows.push(vec!["TLD".into(), s.tld.clone()]);
+    rows.push(vec!["apache port".into(), s.apache_port.to_string()]);
+    for i in &s.services {
+        let mode = if i.always_on { "always on" } else { "on demand" };
+        rows.push(vec![format!("{} port", i.service), format!("{} ({}, {mode})", i.port, i.label)]);
+    }
+    rows.push(vec!["loopback port range".into(), format!("{}-{}", s.loopback_port_range.start, s.loopback_port_range.end)]);
+    rows.push(vec!["close to tray".into(), yes_no(s.close_to_tray).into()]);
+    table(&rows)
+}
+
+pub fn settings_patch(r: &SettingsPatchResultDto) -> String {
+    if r.changes.is_empty() {
+        return "Nothing changed: the settings already have these values.".into();
+    }
+    let mut lines: Vec<String> = r.changes.iter().map(|c| format!("{}: {} -> {}", c.setting, c.from, c.to)).collect();
+    let sync = sync_report(&r.sync);
+    if sync != "Nothing to do." {
+        lines.push(sync);
+    }
+    lines.extend(r.notes.iter().map(|n| format!("note: {n}")));
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

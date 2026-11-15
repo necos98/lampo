@@ -111,8 +111,12 @@ Get-Process -Id (Get-NetTCPConnection -LocalPort 80 -State Listen).OwningProcess
 Typical owners: Laragon, XAMPP or WAMP (their Apache/MySQL), IIS (`W3SVC`), Docker Desktop
 containers publishing the port, a Windows MySQL service (`MySQL80`), Herd's nginx. Tell the
 user what you found and ASK before stopping anything that is not Lampo; it is their software.
-Alternatives: stop the other program from its own UI, or change Lampo's port in the app
-("Impostazioni" > "Porte"); then `lampo up`.
+Alternatives: stop the other program from its own UI, or, with the user's yes, move Lampo's
+service to a free port: `lampo settings` shows the ports, then for example
+`lampo settings set --apache-port 8080`, `lampo settings set --mysql-port 8.4=3310` or
+`lampo settings set --redis-port 6380` (a port taken by another program or Lampo site is
+refused, exit 5). Then `lampo up`, and update `DB_PORT` / `REDIS_PORT` / `APP_URL` in the
+`.env` files of the sites the output lists.
 
 ### MySQL does not start
 

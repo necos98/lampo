@@ -135,8 +135,12 @@ would need the backed-up `.env` to work again.
 Lampo's Apache needs port 80 and MySQL 8.4 port 3306 (by default); the old stack usually holds
 the same ports. Check with `lampo doctor` (`ports`) and `lampo status`. Then, with the user's
 yes, stop the old services from their own tool (the reference names it): stopping is
-reversible, deleting is not done. Alternatively the user changes Lampo's ports in the app
-("Impostazioni" > "Porte"). Then:
+reversible, deleting is not done. Alternatively, if the user prefers to keep the old stack
+running, move Lampo's services instead, again only after the user's yes (it changes the ports
+of every Lampo project): `lampo settings` shows the current ports, and for example
+`lampo settings set --apache-port 8080 --mysql-port 8.4=3310` moves them (checked for
+conflicts first; running services restart on the new ports). Use the new MySQL port in the
+project's `.env` (`DB_PORT`). Then:
 
 ```powershell
 lampo up

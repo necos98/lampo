@@ -69,6 +69,8 @@ pub fn build() -> AppResult<CliContext> {
         Arc::new(AppCheck),
     ];
 
+    let settings = Arc::new(SettingsQuery::new(settings_repo.clone(), services.clone()));
+
     Ok(CliContext {
         env: CliEnv::from_process(),
         sites: resolver.clone(),
@@ -113,6 +115,7 @@ pub fn build() -> AppResult<CliContext> {
         app,
         runner: Arc::new(SystemRunner),
         interrupt: Arc::new(CtrlC),
+        settings,
     })
 }
 

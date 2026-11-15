@@ -89,6 +89,7 @@ You MAY, without asking:
 - run any read-only `lampo` command (`agent context`, `status`, `project list`, `project info`,
   `project detect`, `worktree list`, `logs`, `doctor`, `env`, `package list`, `db list`, `db export`, `shims status`);
 - start or restart services: `lampo up`, `lampo restart`;
+- read the global settings (ports, default PHP): `lampo settings`;
 - create databases (`lampo db create`) and worktree environments (`lampo worktree up` with any
   `--db` mode);
 - run `php`, `composer`, `php artisan`, `mysql`, `redis-cli` through the shims or `lampo exec`;
@@ -103,6 +104,8 @@ You MUST ASK the user first, and wait for a clear yes, before:
   (it writes into an existing database), `php artisan migrate:fresh` / `db:wipe` /
   `migrate:reset` on a database that is not a throwaway one;
 - using `--allow-elevation` (it opens a UAC prompt);
+- changing ports or other global settings with `lampo settings set` (Apache, MySQL, Redis
+  ports, default PHP, loopback range): they affect every project and restart running services;
 - changing the PHP version of a main project (`lampo project set-php`), or with
   `lampo project set` removing a service, switching its MySQL series, or changing its database
   name, public folder or Apache directives;
@@ -129,8 +132,13 @@ that is not Lampo (Laragon, XAMPP, Docker, IIS) without the user's explicit appr
   values, services, database name, public folder, Apache directives; see
   `lampo project set --help`). Only what you name changes; worktree environments follow the
   parent. Still only in the Lampo app (GUI in Italian): display name and addresses of a
-  project ("Progetti" > project), ports and MySQL instances ("Impostazioni"), deleting
+  project ("Progetti" > project), deleting
   projects, uninstalling packages.
+- Global settings: `lampo settings` shows them; with the user's yes,
+  `lampo settings set --apache-port 8080`, `--mysql-port 8.4=3310` or `--redis-port 6380`
+  moves a service (the port is checked first; running services restart on it). Then update
+  `DB_PORT` / `REDIS_PORT` / `APP_URL` in the `.env` files of the sites the output lists.
+  The configured MySQL series themselves cannot be added or removed, only their ports.
 
 ## 6. Load the specialised skill
 

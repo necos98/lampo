@@ -1,4 +1,8 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+
+use super::SyncReportDto;
 
 /// One configured service instance (`mysql-8.4`, `redis`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,4 +52,53 @@ pub struct ServiceKindDto {
     pub versions: Vec<String>,
     /// The version new projects get (first always-on instance), if any.
     pub default_version: Option<String>,
+}
+
+/// `lampo settings set` (control request `settings-patch`): only the fields given change,
+/// applied to the stored settings inside the app (never a whole [`SettingsDto`] from another
+/// process, so a concurrent GUI save is not reverted). Omitted fields default: a client sends
+/// only what it changes.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SettingsPatchRequest {
+    /// Apache's shared port.
+    pub apache_port: Option<u16>,
+    /// Ports of configured service instances, by service id (`mysql-8.4`, `redis`).
+    pub service_ports: BTreeMap<String, u16>,
+    /// PHP used by the shims outside any project (`8.4`); must be installed.
+    pub default_php_version: Option<String>,
+    /// Range new dedicated loopback ports (worktree environments) are taken from.
+    pub loopback_port_range: Option<PortRangeDto>,
+}
+
+impl SettingsPatchRequest {
+    pub fn is_empty(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+/// One changed setting: `setting` is `apache.port`, `<service>.port` (`mysql-8.4.port`),
+/// `default-php` or `loopback-port-range`; `from`/`to` are display values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingChangeDto {
+    pub setting: String,
+    pub from: String,
+    pub to: String,
+}
+
+/// Reply of a settings patch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsPatchResultDto {
+    /// The settings after the patch.
+    pub settings: SettingsDto,
+    /// What actually changed (empty: everything already had these values; nothing was synced).
+    pub changes: Vec<SettingChangeDto>,
+    /// The environment sync that applied the change (running services restarted on their new
+    /// port; empty when nothing changed).
+    pub sync: SyncReportDto,
+    /// Follow-ups for the caller: services not running (the port applies when they start),
+    /// projects whose `.env` / URLs mention the old port.
+    pub notes: Vec<String>,
 }

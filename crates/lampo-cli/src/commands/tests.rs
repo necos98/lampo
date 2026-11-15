@@ -728,3 +728,127 @@ fn project_set_needs_at_least_one_change() {
     assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "--no-ini", "memory_limit"]).is_ok());
     assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "--apache-directives", "-Indexes"]).is_ok());
 }
+
+// --- `settings` ---------------------------------------------------------------------------------
+
+fn sent_settings_patch(fake: &Fake) -> SettingsPatchRequest {
+    match fake.last_request().0 {
+        ControlRequest::SettingsPatch(r) => r,
+        other => panic!("wrong request: {other:?}"),
+    }
+}
+
+fn settings_patch_json() -> Value {
+    json!({
+        "settings": settings_json(),
+        "changes": [{"setting": "apache.port", "from": "80", "to": "8080"}, {"setting": "redis.port", "from": "6379", "to": "6380"}],
+        "sync": {"started": [], "stopped": [], "restarted": ["apache"], "hostsFileUpdated": false, "warnings": []},
+        "notes": ["Redis is not running: it listens on port 6380 when it next starts."]
+    })
+}
+
+#[tokio::test]
+async fn settings_get_is_read_locally_and_is_the_default_subcommand() {
+    let fake = Fake::new();
+    fake.app_running.store(false, Ordering::SeqCst);
+    for args in [&["settings", "--json", "--no-start"][..], &["settings", "get", "--json"]] {
+        let (code, out, err) = run_cli(&fake, args).await;
+        assert_eq!((code, err.as_str()), (0, ""), "{args:?}");
+        assert_eq!(parse(&out), settings_json());
+    }
+    assert_eq!(fake.ensure_calls.load(Ordering::SeqCst), 0);
+    assert!(fake.sent.lock().unwrap().is_empty());
+
+    let (_, out, _) = run_cli(&fake, &["settings"]).await;
+    for needle in [
+        "apache port          80",
+        "mysql-8.4 port       3306 (MySQL 8.4, always on)",
+        "redis port           6379 (Redis, on demand)",
+        "loopback port range  8100-8199",
+        "default PHP          8.4",
+    ] {
+        assert!(out.contains(needle), "missing {needle:?} in:\n{out}");
+    }
+}
+
+#[tokio::test]
+async fn settings_set_maps_every_flag_to_one_patch() {
+    let fake = Fake::new();
+    fake.reply(Ok(settings_patch_json()));
+    let args = [
+        "settings",
+        "set",
+        "--apache-port",
+        "8080",
+        "--mysql-port",
+        "8.4=3310,mysql-5.7=3311",
+        "--redis-port",
+        "6380",
+        "--port",
+        "Mailpit=1025",
+        "--default-php",
+        "8.3",
+        "--loopback-range",
+        "8100-8299",
+        "--json",
+    ];
+    let (code, out, _) = run_cli(&fake, &args).await;
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(parse(&out), settings_patch_json(), "the SettingsPatchResultDto");
+    let r = sent_settings_patch(&fake);
+    assert_eq!(r.apache_port, Some(8080));
+    assert_eq!(r.service_ports.into_iter().collect::<Vec<_>>(), [("mailpit".into(), 1025), ("mysql-5.7".into(), 3311), ("mysql-8.4".into(), 3310), ("redis".into(), 6380)]);
+    assert_eq!(r.default_php_version.as_deref(), Some("8.3"));
+    assert_eq!(r.loopback_port_range, Some(PortRangeDto { start: 8100, end: 8299 }));
+}
+
+#[tokio::test]
+async fn settings_set_human_output_lists_changes_restarts_and_notes() {
+    let fake = Fake::new();
+    fake.reply(Ok(settings_patch_json()));
+    let (code, out, _) = run_cli(&fake, &["settings", "set", "--apache-port", "8080", "--redis-port", "6380"]).await;
+    assert_eq!(code, 0);
+    for needle in ["apache.port: 80 -> 8080", "redis.port: 6379 -> 6380", "restarted: apache", "note: Redis is not running"] {
+        assert!(out.contains(needle), "missing {needle:?} in:\n{out}");
+    }
+    let r = sent_settings_patch(&fake);
+    assert!(r.default_php_version.is_none() && r.loopback_port_range.is_none(), "only what is named");
+
+    let mut unchanged = settings_patch_json();
+    unchanged["changes"] = json!([]);
+    fake.reply(Ok(unchanged));
+    let (_, out, _) = run_cli(&fake, &["settings", "set", "--apache-port", "80"]).await;
+    assert!(out.contains("Nothing changed"), "{out}");
+}
+
+#[tokio::test]
+async fn settings_set_errors_keep_their_exit_codes() {
+    let fake = Fake::new();
+    for args in [
+        &["settings", "set", "--mysql-port", "8.4", "--json"][..],
+        &["settings", "set", "--mysql-port", "8.4=0", "--json"],
+        &["settings", "set", "--redis-port", "6380", "--port", "redis=6381", "--json"],
+        &["settings", "set", "--loopback-range", "8100", "--json"],
+    ] {
+        let (code, out, _) = run_cli(&fake, args).await;
+        assert_eq!(code, 4, "{args:?}");
+        assert_eq!(parse(&out)["error"]["code"], "validation");
+    }
+    assert!(fake.sent.lock().unwrap().is_empty(), "nothing sent");
+
+    fake.reply(Err(AppError::new(ErrorCode::PortInUse, "port 8080 is in use by skype.exe").with_details(json!({"port": 8080, "owner": "skype.exe"}))));
+    let (code, out, _) = run_cli(&fake, &["settings", "set", "--apache-port", "8080", "--json"]).await;
+    assert_eq!(code, 5);
+    let doc = parse(&out);
+    assert_eq!((doc["error"]["code"].as_str(), doc["error"]["details"]["port"].as_u64()), (Some("port-in-use"), Some(8080)));
+    assert!(doc["error"]["hint"].as_str().unwrap().contains("lampo settings set"));
+}
+
+#[test]
+fn settings_set_needs_a_change_and_valid_ports() {
+    use clap::Parser;
+    assert!(crate::cli::Cli::try_parse_from(["lampo", "settings", "set"]).is_err());
+    assert!(crate::cli::Cli::try_parse_from(["lampo", "settings", "set", "--apache-port", "0"]).is_err());
+    assert!(crate::cli::Cli::try_parse_from(["lampo", "settings", "set", "--redis-port", "70000"]).is_err());
+    assert!(crate::cli::Cli::try_parse_from(["lampo", "settings", "set", "--default-php", "8.4"]).is_ok());
+}

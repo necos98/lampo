@@ -978,6 +978,19 @@ impl World {
         self.patch_project_with(self.env.clone())
     }
 
+    /// `lampo settings set`, sharing this world's allocator and syncing through `env`.
+    pub fn patch_settings(&self) -> PatchSettings {
+        PatchSettings::new(PatchSettingsDeps {
+            settings: self.settings.clone(),
+            allocator: self.allocator.clone(),
+            port_probe: self.ports.clone(),
+            installed: self.installed.clone(),
+            env: self.env.clone(),
+            events: self.events.clone(),
+            services: self.services.clone(),
+        })
+    }
+
     pub fn resolver(&self) -> Arc<SiteResolver> {
         Arc::new(SiteResolver::new(self.shim_index.clone(), ResolverChain::standard(self.git.clone())))
     }

@@ -121,6 +121,12 @@ pub enum Command {
     /// their folder to the user PATH.
     #[command(subcommand)]
     Shims(ShimsCommand),
+    /// Lampo's global settings: ports (Apache, MySQL instances, Redis), default PHP, loopback
+    /// port range. Without a subcommand: `settings get`.
+    Settings {
+        #[command(subcommand)]
+        command: Option<SettingsCommand>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -507,6 +513,55 @@ pub enum ShimsCommand {
     /// Install the shims and a copy of `lampo`, and add their folder to the user PATH (no
     /// elevation needed).
     Install,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum SettingsCommand {
+    /// Show the settings (read-only, works without the app). `--json`: the SettingsDto.
+    Get,
+    /// Change ports, the default PHP or the loopback port range
+    ///
+    /// Only what is named changes, in one atomic edit of the stored settings inside the app (no
+    /// lost update with the GUI). Ports are checked first: 1-65535, not used by another Lampo
+    /// service or by a site's dedicated loopback port (exit 5), not taken by another program
+    /// (exit 5, port-in-use). Running services whose port changed are restarted on the new one,
+    /// as after a GUI save; stopped ones use it when they next start. Projects' own files are
+    /// not edited: update DB_PORT / REDIS_PORT / APP_URL yourself (the output lists the sites).
+    /// MySQL instances (series) cannot be added or removed: only their ports change.
+    ///
+    /// Examples:
+    ///   lampo settings set --apache-port 8080
+    ///   lampo settings set --mysql-port 8.4=3310 --mysql-port 5.7=3311 --redis-port 6380
+    ///   lampo settings set --default-php 8.4 --json
+    ///   lampo settings set --loopback-range 8100-8299
+    #[command(verbatim_doc_comment)]
+    Set(SettingsSetArgs),
+}
+
+#[derive(Debug, Args)]
+#[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args(["apache_port", "mysql_port", "redis_port", "port", "default_php", "loopback_range"])))]
+pub struct SettingsSetArgs {
+    /// Apache's shared port (host-name URLs use it; loopback-port URLs keep their own port).
+    #[arg(long, value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
+    pub apache_port: Option<u16>,
+    /// Port of a configured MySQL instance: `SERIES=PORT` (`8.4=3310`); repeatable or
+    /// comma-separated.
+    #[arg(long, value_name = "SERIES=PORT", value_delimiter = ',')]
+    pub mysql_port: Vec<String>,
+    /// Redis port.
+    #[arg(long, value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
+    pub redis_port: Option<u16>,
+    /// Port of any configured service instance by id: `SERVICE=PORT` (`mysql-8.4=3310`,
+    /// `redis=6380`); repeatable or comma-separated.
+    #[arg(long, value_name = "SERVICE=PORT", value_delimiter = ',')]
+    pub port: Vec<String>,
+    /// PHP minor the shims use outside any project (`8.4`); must be installed.
+    #[arg(long, value_name = "MINOR")]
+    pub default_php: Option<String>,
+    /// Range new dedicated loopback ports (worktree environments) come from: `START-END`
+    /// (start >= 1024). Existing sites keep their ports.
+    #[arg(long, value_name = "START-END")]
+    pub loopback_range: Option<String>,
 }
 
 #[cfg(test)]

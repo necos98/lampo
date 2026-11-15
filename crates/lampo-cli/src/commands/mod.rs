@@ -8,6 +8,7 @@ mod diagnostics;
 mod packages;
 mod projects;
 mod services;
+mod settings;
 mod toolchain;
 mod worktrees;
 
@@ -105,6 +106,7 @@ pub async fn run(cli: Cli, ctx: &CliContext, io: &Io) -> AppResult<i32> {
         Command::Agent(AgentCommand::Context(a)) if a.hook => diagnostics::agent_context_hook(&cmd).await,
         Command::Agent(AgentCommand::Context(_)) => diagnostics::agent_context(&cmd),
         Command::Shims(c) => diagnostics::shims(&cmd, c),
+        Command::Settings { command } => settings::run(&cmd, command).await,
     }
 }
 
