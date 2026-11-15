@@ -2,8 +2,10 @@
 //! [`MysqlRunner::render_my_ini`]) and runs `mysqld --initialize-insecure` if the data dir is
 //! empty (into a temporary sibling directory renamed on success, so an interrupted
 //! initialisation never leaves a half-made data dir behind). `start` waits until the server
-//! answers the MySQL handshake on its port; `stop` asks for a clean InnoDB shutdown (the
-//! `MYSQLShutdown<pid>` event mysqld listens for on Windows, needing no credentials, then
+//! answers the MySQL handshake on its port, for as long as the error log keeps growing (InnoDB
+//! crash recovery and data dictionary upgrades can take minutes: the status then reads
+//! `starting` / `recovery`); `stop`, or a start that gives up, asks for a clean InnoDB shutdown
+//! (the `MYSQLShutdown<pid>` event mysqld listens for on Windows, needing no credentials, then
 //! `mysqladmin shutdown` as a fallback) before the supervisor's forced termination.
 
 use std::io::{Read, Seek, SeekFrom};
@@ -24,6 +26,12 @@ use crate::win::{owned, raw, wide};
 
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const MYSQLADMIN_TIMEOUT: Duration = Duration::from_secs(30);
+/// A start without a greeting and without new error log lines for this long is given up.
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
+/// Status message of a start past `STARTUP_TIMEOUT` that keeps logging (crash recovery, data
+/// dictionary upgrade).
+const SLOW_START_DETAIL: &str = "recovery";
+const STOP_GRACE: Duration = Duration::from_secs(60);
 
 fn series_of(service: &ServiceId) -> MysqlSeries {
     service.version().and_then(|v| MysqlSeries::try_from(v).ok()).unwrap_or(MysqlSeries::DEFAULT)
@@ -124,21 +132,34 @@ impl ServiceDriver for MysqlDriver {
     }
 
     fn startup_timeout(&self) -> Duration {
-        Duration::from_secs(120)
+        STARTUP_TIMEOUT
+    }
+
+    /// mysqld logs its crash recovery and data dictionary upgrade steps as it goes.
+    fn startup_progress(&self, launch: &ServiceLaunch) -> Option<u64> {
+        Some(file_len(&error_log(launch)))
+    }
+
+    fn slow_start_detail(&self) -> &'static str {
+        SLOW_START_DETAIL
     }
 
     fn stop_grace(&self) -> Duration {
-        Duration::from_secs(60)
+        STOP_GRACE
     }
 
     async fn probe(&self, launch: &ServiceLaunch) -> bool {
         mysql_greets(launch.port).await
     }
 
+    fn shutdown_addresses_the_process(&self) -> bool {
+        true
+    }
+
     async fn request_shutdown(&self, launch: &ServiceLaunch, pid: u32) {
-        // mysqld 8 on Windows: `pid` is a monitor process, the server is the port's listener.
-        let server = crate::win::tcp_listener_pid(launch.port).ok().flatten().filter(|&p| crate::win::is_same_or_descendant(p, pid));
-        if server.into_iter().chain([pid]).any(signal_shutdown_event) {
+        // mysqld 8 on Windows: `pid` may be a monitor process with the server as its child, and
+        // a server still recovering does not listen yet: the event is per process, not per port.
+        if crate::win::descendants(pid).into_iter().chain([pid]).any(signal_shutdown_event) {
             return;
         }
         let Ok(admin) = find_executable(&launch.install_dir, "mysqladmin.exe") else { return };

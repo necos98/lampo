@@ -241,7 +241,8 @@ claude plugin list --json                          (verify: exact id match)
 
 ## Process ownership and the CLI
 
-The desktop app is the single owner of service processes (all in one Windows Job Object). The
+The desktop app is the single owner of service processes (all in one Windows Job Object, each
+service's process tree in a nested job of its own, so a forced stop leaves no worker behind). The
 CLI runs read-only, file-based commands itself (status offline, project/worktree list,
 `project detect`, `package extensions`, `settings get`, logs,
 `env`, `exec`, `agent context`, `doctor`) and sends mutating ones to the app over a per-user

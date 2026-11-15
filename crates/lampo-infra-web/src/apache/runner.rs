@@ -10,24 +10,27 @@ use lampo_domain::service::{LogStream, ServiceId, ServiceKind, ServiceLaunch, Se
 use lampo_domain::{PortError, PortResult};
 
 use super::config::main_conf_path;
+use super::listen::ports_to_own;
 use super::signal::{HttpdSignal, HttpdSignals, NamedEventSignals};
 use super::validation::httpd_exe;
 use crate::fs_util::ensure_dir;
 
-/// How long to wait for a started httpd to accept connections.
+/// How long to wait for a started (or restarted) httpd to listen on every configured port.
 const START_TIMEOUT: Duration = Duration::from_secs(20);
+/// Interval between two readiness checks.
+const READY_POLL: Duration = Duration::from_millis(150);
 /// After a graceful shutdown request, how long before the supervisor kills the process tree.
 /// Measured with Apache Lounge 2.4 + mod_fcgid 2.3.10: with php-cgi processes alive, mod_fcgid
 /// waits ~8.5 s for them before terminating them itself, ~11 s in total.
 const STOP_GRACE: Duration = Duration::from_secs(20);
-/// A graceful restart re-reads the configuration; a fatal error makes the parent exit soon.
-const RESTART_SETTLE: Duration = Duration::from_millis(1500);
 /// Output lines kept to explain a failed start.
 const RECENT_LINES: usize = 30;
 
 /// Runs `httpd.exe -f <config_dir>\httpd.conf` in the foreground under the supervisor (no
 /// Windows service). Stop and restart are graceful through httpd's named events (see
-/// [`super::signal`]), with the supervisor's kill as fallback. Publishes status/log events.
+/// [`super::signal`]), with the supervisor's kill as fallback. Ready means every port of the
+/// live configuration's `Listen` directives is listened on by httpd's own process tree (not
+/// by another server that took a port). Publishes status/log events.
 pub struct ApacheRunner {
     supervisor: Arc<dyn ProcessSupervisor>,
     events: Arc<dyn EventPublisher>,
@@ -77,6 +80,7 @@ impl ApacheRunner {
             return Ok(());
         }
         let (program, conf) = check_installation(launch)?;
+        let ports = ports_to_own(&conf, launch.port)?;
         let generation = {
             let mut s = self.lock();
             s.generation += 1;
@@ -95,7 +99,7 @@ impl ApacheRunner {
             }
         };
         self.lock().child = Some(child);
-        match self.wait_until_ready(child.id, launch.port, START_TIMEOUT).await {
+        match self.wait_until_ready(child.id, launch.port, &ports).await {
             Ok(()) => {
                 self.set_status(ServiceState::Running, Some(child.pid), Some(launch.port), None);
                 Ok(())
@@ -109,26 +113,24 @@ impl ApacheRunner {
         }
     }
 
-    /// Polls the shared port until httpd accepts connections, failing early if it exits.
-    async fn wait_until_ready(&self, child: ChildId, port: u16, timeout: Duration) -> PortResult<()> {
-        let deadline = tokio::time::Instant::now() + timeout;
+    /// Polls until httpd's process tree listens on every port of `ports` (someone else's
+    /// server on one of them does not count), failing early if it exits.
+    async fn wait_until_ready(&self, child: ChildId, shared_port: u16, ports: &[u16]) -> PortResult<()> {
+        let deadline = tokio::time::Instant::now() + START_TIMEOUT;
         loop {
             if !self.supervisor.is_alive(child) {
-                return Err(self.start_failure(port));
+                return Err(self.start_failure(shared_port));
             }
-            let connect = tokio::net::TcpStream::connect(("127.0.0.1", port));
-            if let Ok(Ok(_)) = tokio::time::timeout(Duration::from_millis(500), connect).await {
-                // Someone else may own the port while httpd is about to fail to bind it.
-                tokio::time::sleep(Duration::from_millis(200)).await;
-                if self.supervisor.is_alive(child) {
-                    return Ok(());
-                }
-                return Err(self.start_failure(port));
+            let missing: Vec<u16> = ports.iter().copied().filter(|&port| !self.supervisor.owns_listener(child, port)).collect();
+            if missing.is_empty() {
+                return Ok(());
             }
             if tokio::time::Instant::now() >= deadline {
-                return Err(PortError::process("httpd", format!("Apache did not accept connections on port {port} within {}s", timeout.as_secs())));
+                let noun = if missing.len() == 1 { "port" } else { "ports" };
+                let missing = missing.iter().map(u16::to_string).collect::<Vec<_>>().join(", ");
+                return Err(PortError::process("httpd", format!("Apache did not listen on {noun} {missing} within {}s", START_TIMEOUT.as_secs())));
             }
-            tokio::time::sleep(Duration::from_millis(150)).await;
+            tokio::time::sleep(READY_POLL).await;
         }
     }
 
@@ -197,17 +199,19 @@ impl ServiceRunner for ApacheRunner {
     }
 
     /// Graceful restart (configuration re-read, in-flight requests complete, idle php-cgi
-    /// processes recycled). Falls back to stop + start if the signal cannot be delivered or
-    /// httpd dies while re-reading its configuration.
+    /// processes recycled), ready once httpd listens on every port of the new configuration.
+    /// Falls back to stop + start if the signal cannot be delivered or httpd dies or does not
+    /// listen while re-reading its configuration.
     async fn restart(&self, launch: &ServiceLaunch) -> PortResult<()> {
         let _serial = self.control.lock().await;
         let Some(child) = self.live_child() else {
             return self.start_inner(launch).await;
         };
+        let (_, conf) = check_installation(launch)?;
+        let ports = ports_to_own(&conf, launch.port)?;
         let same_port = self.lock().status.port == Some(launch.port);
         if same_port && self.signals.send(child.pid, HttpdSignal::Restart).is_ok() {
-            tokio::time::sleep(RESTART_SETTLE).await;
-            if self.wait_until_ready(child.id, launch.port, START_TIMEOUT).await.is_ok() {
+            if self.wait_until_ready(child.id, launch.port, &ports).await.is_ok() {
                 self.set_status(ServiceState::Running, Some(child.pid), Some(launch.port), None);
                 return Ok(());
             }
@@ -285,170 +289,4 @@ impl ProcessObserver for HttpdObserver {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-
-    use super::*;
-
-    #[derive(Default)]
-    struct FakeSupervisor {
-        alive: AtomicBool,
-        next: AtomicU64,
-        observers: Mutex<Vec<Arc<dyn ProcessObserver>>>,
-        specs: Mutex<Vec<CommandSpec>>,
-    }
-
-    #[async_trait]
-    impl ProcessSupervisor for FakeSupervisor {
-        async fn spawn(&self, spec: CommandSpec, observer: Arc<dyn ProcessObserver>) -> PortResult<SpawnedChild> {
-            self.specs.lock().unwrap().push(spec);
-            self.observers.lock().unwrap().push(observer);
-            self.alive.store(true, Ordering::SeqCst);
-            let n = self.next.fetch_add(1, Ordering::SeqCst);
-            Ok(SpawnedChild { id: ChildId(n), pid: 1000 + n as u32 })
-        }
-        async fn terminate(&self, _child: ChildId, _grace: Duration) -> PortResult<()> {
-            self.alive.store(false, Ordering::SeqCst);
-            Ok(())
-        }
-        fn is_alive(&self, _child: ChildId) -> bool {
-            self.alive.load(Ordering::SeqCst)
-        }
-    }
-
-    #[derive(Default)]
-    struct Events(Mutex<Vec<DomainEvent>>);
-    impl EventPublisher for Events {
-        fn publish(&self, event: DomainEvent) {
-            self.0.lock().unwrap().push(event);
-        }
-    }
-
-    #[derive(Default)]
-    struct Signals(Mutex<Vec<(u32, HttpdSignal)>>);
-    impl HttpdSignals for Signals {
-        fn send(&self, pid: u32, signal: HttpdSignal) -> std::io::Result<()> {
-            self.0.lock().unwrap().push((pid, signal));
-            Ok(())
-        }
-    }
-
-    struct Fixture {
-        _dir: tempfile::TempDir,
-        launch: ServiceLaunch,
-        _listener: std::net::TcpListener,
-        supervisor: Arc<FakeSupervisor>,
-        events: Arc<Events>,
-        signals: Arc<Signals>,
-        runner: ApacheRunner,
-    }
-
-    /// A fake Apache install and a real listener standing in for httpd's socket.
-    fn fixture() -> Fixture {
-        let dir = tempfile::tempdir().unwrap();
-        let install = dir.path().join("apache 2.4");
-        std::fs::create_dir_all(install.join("bin")).unwrap();
-        std::fs::write(install.join("bin").join("httpd.exe"), b"").unwrap();
-        let config_dir = dir.path().join("generated").join("apache");
-        std::fs::create_dir_all(&config_dir).unwrap();
-        std::fs::write(config_dir.join("httpd.conf"), b"").unwrap();
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        let launch = ServiceLaunch { service: ServiceId::apache(), install_dir: install, port, ui_port: None, config_dir, data_dir: None, log_dir: dir.path().join("logs") };
-        let supervisor = Arc::new(FakeSupervisor::default());
-        let events = Arc::new(Events::default());
-        let signals = Arc::new(Signals::default());
-        let runner = ApacheRunner::with_signals(supervisor.clone(), events.clone(), signals.clone());
-        Fixture { _dir: dir, launch, _listener: listener, supervisor, events, signals, runner }
-    }
-
-    #[tokio::test]
-    async fn start_runs_httpd_with_generated_config_and_reports_running() {
-        let f = fixture();
-        f.runner.prepare(&f.launch).await.unwrap();
-        f.runner.start(&f.launch).await.unwrap();
-        let spec = f.supervisor.specs.lock().unwrap()[0].clone();
-        assert!(spec.program.ends_with("bin/httpd.exe") || spec.program.ends_with(r"bin\httpd.exe"));
-        assert_eq!(spec.args[0], "-f");
-        assert!(spec.args[1].ends_with("httpd.conf"));
-        let status = f.runner.status(&ServiceId::apache());
-        assert_eq!(status.state, ServiceState::Running);
-        assert_eq!(status.pid, Some(1000));
-        assert!(f.launch.log_dir.is_dir());
-        // Starting twice is a no-op.
-        f.runner.start(&f.launch).await.unwrap();
-        assert_eq!(f.supervisor.specs.lock().unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn unexpected_exit_is_published_as_failed() {
-        let f = fixture();
-        f.runner.start(&f.launch).await.unwrap();
-        let observer = f.supervisor.observers.lock().unwrap()[0].clone();
-        observer.on_output(LogStream::Stderr, "AH00000: boom");
-        f.supervisor.alive.store(false, Ordering::SeqCst);
-        observer.on_exit(Some(1));
-        let status = f.runner.status(&ServiceId::apache());
-        assert_eq!(status.state, ServiceState::Failed);
-        assert!(status.message.unwrap().contains("boom"));
-        let events = f.events.0.lock().unwrap();
-        assert!(events.iter().any(|e| matches!(e, DomainEvent::ServiceLog { line, .. } if line == "AH00000: boom")));
-        assert!(matches!(events.last(), Some(DomainEvent::ServiceStatusChanged(s)) if s.state == ServiceState::Failed));
-    }
-
-    #[tokio::test]
-    async fn stop_is_graceful_then_supervised() {
-        let f = fixture();
-        f.runner.start(&f.launch).await.unwrap();
-        f.runner.stop(&ServiceId::apache()).await.unwrap();
-        assert_eq!(f.signals.0.lock().unwrap().as_slice(), &[(1000, HttpdSignal::Shutdown)]);
-        assert_eq!(f.runner.status(&ServiceId::apache()).state, ServiceState::Stopped);
-        // The exit callback of a requested stop does not turn into a failure.
-        f.supervisor.observers.lock().unwrap()[0].on_exit(Some(0));
-        assert_eq!(f.runner.status(&ServiceId::apache()).state, ServiceState::Stopped);
-    }
-
-    #[tokio::test]
-    async fn restart_signals_the_running_parent() {
-        let f = fixture();
-        f.runner.start(&f.launch).await.unwrap();
-        f.runner.restart(&f.launch).await.unwrap();
-        assert_eq!(f.signals.0.lock().unwrap().as_slice(), &[(1000, HttpdSignal::Restart)]);
-        assert_eq!(f.supervisor.specs.lock().unwrap().len(), 1, "no new process");
-        assert_eq!(f.runner.status(&ServiceId::apache()).state, ServiceState::Running);
-    }
-
-    #[tokio::test]
-    async fn missing_config_is_reported_before_spawning() {
-        let f = fixture();
-        std::fs::remove_file(f.launch.config_dir.join("httpd.conf")).unwrap();
-        let err = f.runner.start(&f.launch).await.unwrap_err();
-        assert!(matches!(err, PortError::NotFound { entity: "Apache configuration", .. }));
-        assert!(f.supervisor.specs.lock().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn bind_failure_maps_to_port_in_use() {
-        let f = fixture();
-        // A port nobody listens on, and an httpd that dies complaining about the bind.
-        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
-        let launch = ServiceLaunch { port: free, ..f.launch.clone() };
-        let sup = f.supervisor.clone();
-        let killer = tokio::spawn(async move {
-            loop {
-                let obs = sup.observers.lock().unwrap().first().cloned();
-                if let Some(o) = obs {
-                    o.on_output(LogStream::Stderr, "(OS 10048)Only one usage of each socket address is normally permitted.  : AH00072: make_sock: could not bind to address 127.0.0.1:80");
-                    sup.alive.store(false, Ordering::SeqCst);
-                    o.on_exit(Some(1));
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        });
-        let err = f.runner.start(&launch).await.unwrap_err();
-        killer.await.unwrap();
-        assert_eq!(err, PortError::PortInUse { port: free, owner: None });
-        assert_eq!(f.runner.status(&ServiceId::apache()).state, ServiceState::Failed);
-    }
-}
+mod tests;

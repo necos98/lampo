@@ -20,6 +20,7 @@
 //!
 //! Internal modules: `process` (process creation inside the job, IOCP stdio pipes),
 //! `service_host` (what every supervised runner shares; runners only describe their service),
+//! `startup_deadline` (when a slow but progressing start gives up),
 //! `win` (thin Win32 wrappers). Windows only.
 
 #[cfg(not(windows))]
@@ -37,6 +38,9 @@ pub mod ports;
 mod process;
 pub mod redis;
 mod service_host;
+#[cfg(test)]
+mod service_host_tests;
+mod startup_deadline;
 pub mod supervisor;
 pub mod timer;
 mod win;

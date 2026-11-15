@@ -20,18 +20,19 @@
 	const label = $derived(service.label || service.service);
 	const busy = $derived(services.busy[service.service] === true || service.state === 'starting' || service.state === 'stopping');
 	const running = $derived(service.state === 'running');
+	const stateLabel = $derived(service.state === 'starting' && service.message ? t.startingWith(service.message) : t.states[service.state]);
 	const failure = $derived(services.failures[service.service]);
 	const reason = $derived(service.required && service.requiredBy.length === 0 ? t.requiredBySystem : service.requiredBy.length ? t.requiredBy(service.requiredBy) : t.unused);
 </script>
 
 <li class="rounded-md border bg-card px-3 py-2.5">
 	<div class="grid grid-cols-[auto_minmax(0,1fr)_6rem_minmax(5rem,auto)_auto] items-center gap-x-4">
-		<StatusDot tone={tones[service.state]} label={t.states[service.state]} />
+		<StatusDot tone={tones[service.state]} label={stateLabel} />
 		<div class="min-w-0">
 			<p class="font-medium">{label}</p>
 			<p class="truncate text-xs text-muted-foreground">{reason}</p>
 		</div>
-		<span class="text-sm {service.state === 'failed' ? 'text-destructive' : 'text-muted-foreground'}">{t.states[service.state]}</span>
+		<span class="text-sm {service.state === 'failed' ? 'text-destructive' : 'text-muted-foreground'}">{stateLabel}</span>
 		<span class="font-mono text-xs text-muted-foreground">{service.port ? `:${service.port}` : ''}{service.uiPort ? ` · ui :${service.uiPort}` : ''}{service.pid ? ` · ${service.pid}` : ''}</span>
 		<div class="flex gap-1">
 			{#if service.uiUrl}

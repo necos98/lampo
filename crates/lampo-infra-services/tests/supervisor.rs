@@ -91,6 +91,62 @@ async fn terminate_waits_the_grace_period_then_kills() {
     sup.terminate(child.id, Duration::from_millis(10)).await.unwrap();
 }
 
+/// Waits for the pids of the `exe` children of `parent`.
+async fn wait_children(parent: u32, exe: &str) -> Vec<u32> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let found = children_named(parent, exe);
+        if !found.is_empty() {
+            return found;
+        }
+        assert!(Instant::now() < deadline, "no {exe} child of {parent} appeared");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn terminate_kills_the_whole_process_tree() {
+    let sup = JobObjectSupervisor::new();
+    let rec = Arc::new(Recorder::default());
+    // cmd → ping: like httpd → worker → php-cgi, the grandchild must not keep the port.
+    let child = sup.spawn(cmd("ping -n 60 127.0.0.1 >NUL"), rec.clone()).await.unwrap();
+    let grandchild = ProcHandle::open(wait_children(child.pid, "PING.EXE").await[0]);
+    sup.terminate(child.id, Duration::ZERO).await.unwrap();
+    assert_eq!(rec.wait_exit(Duration::from_secs(5)).await, None);
+    assert!(grandchild.exits_within(Duration::from_secs(5)), "grandchild survived the forced stop");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn leftovers_die_when_the_service_process_exits() {
+    let sup = JobObjectSupervisor::new();
+    let rec = Arc::new(Recorder::default());
+    // The parent exits on its own while a background grandchild would run for another minute.
+    let child = sup.spawn(cmd("start /b ping -n 60 127.0.0.1 >NUL & ping -n 3 127.0.0.1 >NUL & exit 4"), rec.clone()).await.unwrap();
+    let leftovers: Vec<ProcHandle> = wait_children(child.pid, "PING.EXE").await.into_iter().map(ProcHandle::open).collect();
+    assert_eq!(rec.wait_exit(Duration::from_secs(15)).await, Some(4));
+    for leftover in &leftovers {
+        assert!(leftover.exits_within(Duration::from_secs(5)), "a leftover of the exited service kept running");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn owns_listener_recognises_the_tree_and_nobody_else() {
+    let sup = JobObjectSupervisor::new();
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    // cmd → powershell: the listener is a grandchild, like mysqld under its monitor.
+    let listen = format!("$l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, {port}); $l.Start(); Start-Sleep -Seconds 60");
+    let child = sup.spawn(cmd(&format!("powershell.exe -NoProfile -NonInteractive -Command {listen}")), Arc::new(Recorder::default())).await.unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !sup.owns_listener(child.id, port) {
+        assert!(Instant::now() < deadline, "the grandchild's listener was never recognised");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let foreign = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    assert!(!sup.owns_listener(child.id, foreign.local_addr().unwrap().port()), "this test's own socket is not the child's");
+    sup.terminate(child.id, Duration::ZERO).await.unwrap();
+    assert!(!sup.owns_listener(child.id, port), "a gone child owns nothing");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn spawn_reports_missing_programs() {
     let sup = JobObjectSupervisor::new();

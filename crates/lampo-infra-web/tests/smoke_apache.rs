@@ -125,6 +125,12 @@ impl ProcessSupervisor for TokioSupervisor {
     fn is_alive(&self, child: ChildId) -> bool {
         self.children.lock().unwrap().contains_key(&child.0) && !self.exited.lock().unwrap().contains(&child.0)
     }
+
+    /// Stand-in: something accepts on the port while the child lives (the ports are free high
+    /// ones picked by this test, so it is httpd).
+    fn owns_listener(&self, child: ChildId, port: u16) -> bool {
+        self.is_alive(child) && TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_millis(200)).is_ok()
+    }
 }
 
 struct PrintEvents;

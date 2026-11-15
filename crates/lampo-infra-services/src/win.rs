@@ -1,7 +1,9 @@
 //! Thin, safe wrappers over the Win32 calls the adapters share: UTF-16 strings, the current
 //! user's SID, a "current user only" security descriptor, process-exit waits on the system
-//! thread pool, process names and the TCP listener table. No adapter logic lives here.
+//! thread pool, process names, process trees and job membership, and the TCP listener table. No
+//! adapter logic lives here.
 
+use std::collections::HashMap;
 use std::ffi::{OsStr, c_void};
 use std::io;
 use std::os::windows::ffi::OsStrExt;
@@ -16,10 +18,15 @@ use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6};
 use windows_sys::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT};
 use windows_sys::Win32::Security::{EqualSid, GetTokenInformation, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
+use windows_sys::Win32::System::JobObjects::IsProcessInJob;
 use windows_sys::Win32::System::Threading::{
-    GetCurrentProcess, GetExitCodeProcess, INFINITE, OpenProcessToken, RegisterWaitForSingleObject, UnregisterWaitEx, WT_EXECUTEONLYONCE, WaitForSingleObject,
+    GetCurrentProcess, GetExitCodeProcess, INFINITE, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION, RegisterWaitForSingleObject, UnregisterWaitEx, WT_EXECUTEONLYONCE,
+    WaitForSingleObject,
 };
 use windows_sys::Win32::System::Time::TzSpecificLocalTimeToSystemTime;
+
+/// Generations of descendants followed through a process snapshot (bounds pid-reuse cycles).
+const MAX_TREE_DEPTH: usize = 16;
 
 /// NUL-terminated UTF-16.
 pub(crate) fn wide(s: impl AsRef<OsStr>) -> Vec<u16> {
@@ -242,14 +249,11 @@ pub(crate) fn process_name(pid: u32) -> Option<String> {
     None
 }
 
-/// Whether `pid` is `ancestor` or one of its descendants (parent chain from one snapshot).
-pub(crate) fn is_same_or_descendant(pid: u32, ancestor: u32) -> bool {
-    if pid == ancestor {
-        return true;
-    }
-    let mut parents = std::collections::HashMap::new();
+/// `pid → parent pid` of every running process (one Toolhelp snapshot).
+fn parent_table() -> HashMap<u32, u32> {
+    let mut parents = HashMap::new();
     unsafe {
-        let Ok(snap) = owned(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)) else { return false };
+        let Ok(snap) = owned(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)) else { return parents };
         let mut entry: PROCESSENTRY32W = std::mem::zeroed();
         entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
         let mut ok = Process32FirstW(raw(&snap), &mut entry) != 0;
@@ -258,15 +262,34 @@ pub(crate) fn is_same_or_descendant(pid: u32, ancestor: u32) -> bool {
             ok = Process32NextW(raw(&snap), &mut entry) != 0;
         }
     }
-    let mut current = pid;
-    for _ in 0..16 {
-        match parents.get(&current) {
-            Some(&parent) if parent == ancestor => return true,
-            Some(&parent) if parent != 0 && parent != current => current = parent,
-            _ => return false,
+    parents
+}
+
+/// Running descendants of `ancestor` (children first, then grandchildren…), from one snapshot.
+/// `ancestor` must be alive (a handle held open), or a reused pid could adopt strangers.
+pub(crate) fn descendants(ancestor: u32) -> Vec<u32> {
+    let parents = parent_table();
+    let mut found: Vec<u32> = Vec::new();
+    let mut generation = vec![ancestor];
+    for _ in 0..MAX_TREE_DEPTH {
+        let next: Vec<u32> = parents.iter().filter(|&(pid, parent)| generation.contains(parent) && *pid != ancestor && !found.contains(pid)).map(|(&pid, _)| pid).collect();
+        if next.is_empty() {
+            break;
         }
+        found.extend_from_slice(&next);
+        generation = next;
     }
-    false
+    found
+}
+
+/// Whether process `pid` runs inside `job` (or a job nested in it). A process this user may not
+/// query, or one that is gone, is not in it.
+pub(crate) fn is_process_in_job(pid: u32, job: &OwnedHandle) -> bool {
+    // SAFETY: plain call; the returned handle is owned (and closed) below.
+    let Ok(process) = owned(unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) }) else { return false };
+    let mut inside = 0;
+    // SAFETY: valid process and job handles, valid out pointer.
+    unsafe { IsProcessInJob(raw(&process), raw(job), &mut inside) != 0 && inside != 0 }
 }
 
 /// `name.exe (pid 42)`, or `pid 42` when the process is gone.
@@ -352,5 +375,31 @@ mod tests {
         let system = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
         let file = std::fs::File::open(std::path::Path::new(&system).join(r"System32\kernel32.dll")).unwrap();
         assert!(!is_owned_by_current_user(file.as_raw_handle() as HANDLE).unwrap());
+    }
+
+    #[test]
+    fn descendants_include_grandchildren_but_not_the_ancestor() {
+        struct KillOnDrop(std::process::Child);
+        impl Drop for KillOnDrop {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        // cmd → cmd → ping: a grandchild two generations down.
+        let child = KillOnDrop(std::process::Command::new("cmd.exe").args(["/d", "/c", "cmd /d /c ping -n 30 127.0.0.1 >NUL"]).spawn().unwrap());
+        let me = std::process::id();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let found = loop {
+            let found = descendants(me);
+            if found.iter().any(|&pid| process_name(pid).is_some_and(|n| n.eq_ignore_ascii_case("PING.EXE"))) {
+                break found;
+            }
+            assert!(std::time::Instant::now() < deadline, "the grandchild never appeared: {found:?}");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        assert!(found.contains(&child.0.id()));
+        assert!(!found.contains(&me));
+        assert!(descendants(child.0.id()).len() >= 2, "both generations under the child");
     }
 }

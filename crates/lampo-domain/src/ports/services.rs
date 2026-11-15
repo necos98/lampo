@@ -48,13 +48,19 @@ pub trait ProcessObserver: Send + Sync {
 
 /// Long-running children, all assigned to one Windows Job Object
 /// (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) so nothing survives the app. No console windows.
+/// Each child is the root of a process tree (httpd → worker → php-cgi, mysqld's monitor →
+/// server): a kill takes the whole tree, and what the tree still runs when its root exits is
+/// killed too, so nothing keeps the service's ports.
 #[async_trait]
 pub trait ProcessSupervisor: Send + Sync {
     async fn spawn(&self, spec: CommandSpec, observer: Arc<dyn ProcessObserver>) -> PortResult<SpawnedChild>;
-    /// Asks the child to stop (if the program supports a graceful signal), waits up to `grace`,
-    /// then kills it. Ok if it already exited.
+    /// Waits up to `grace` for the child to exit (after the runner's own shutdown request),
+    /// then kills its whole process tree. Ok if it already exited.
     async fn terminate(&self, child: ChildId, grace: Duration) -> PortResult<()>;
     fn is_alive(&self, child: ChildId) -> bool;
+    /// Whether the TCP listener on `port` belongs to the child's process tree, i.e. the port
+    /// is served by this child and not by somebody else's server.
+    fn owns_listener(&self, child: ChildId, port: u16) -> bool;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

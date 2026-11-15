@@ -3,6 +3,11 @@
 //! (see [`crate::process`]); stdout/stderr are read line by line on the I/O completion port and
 //! forwarded to the observer (runners append them to the service's log file).
 //!
+//! Every supervised service also gets its own job, nested in the app's: killing a service
+//! (`TerminateJobObject`) takes its whole tree (httpd workers, php-cgi, mysqld under its
+//! monitor), and whatever the tree still runs when its root exits is killed as well, so no
+//! orphan keeps the service's ports for the next start.
+//!
 //! Exit detection uses a system thread-pool wait per child; nothing polls. Dropping the
 //! supervisor closes the job handle, which kills every child.
 //!
@@ -52,6 +57,8 @@ const PROGRESS_TICK: Duration = Duration::from_millis(250);
 struct ChildEntry {
     pid: u32,
     handle: Arc<OwnedHandle>,
+    /// The child's own job: its whole process tree.
+    tree: TreeJob,
     killed: AtomicBool,
     /// Becomes `true` after `on_exit` has been delivered.
     done: watch::Receiver<bool>,
@@ -95,6 +102,27 @@ fn create_job() -> std::io::Result<OwnedHandle> {
     // SAFETY: valid job handle and correctly sized struct.
     let ok = unsafe { SetInformationJobObject(raw(&job), JobObjectExtendedLimitInformation, (&info as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(), size_of_val(&info) as u32) };
     if ok == 0 { Err(std::io::Error::last_os_error()) } else { Ok(job) }
+}
+
+/// The job of one process tree (a service, a streaming run), nested in the app's job.
+/// Terminating it kills every process the tree started; dropping it does too.
+struct TreeJob(OwnedHandle);
+
+impl TreeJob {
+    fn new() -> PortResult<Self> {
+        create_job().map(Self).map_err(|e| PortError::process("job object", e))
+    }
+
+    fn kill(&self) {
+        // SAFETY: valid job handle; failure means the job is already empty.
+        unsafe { TerminateJobObject(raw(&self.0), 1) };
+    }
+}
+
+impl Drop for TreeJob {
+    fn drop(&mut self) {
+        self.kill();
+    }
 }
 
 fn program_name(program: &Path) -> String {
@@ -266,10 +294,11 @@ impl Drop for KillOnDrop {
 impl ProcessSupervisor for JobObjectSupervisor {
     async fn spawn(&self, spec: CommandSpec, observer: Arc<dyn ProcessObserver>) -> PortResult<SpawnedChild> {
         let job = self.job()?;
-        let p = process::spawn(&spec, &[job], Input::Null, Output::Pipe).map_err(|e| PortError::process(program_name(&spec.program), e))?;
+        let tree = TreeJob::new()?;
+        let p = process::spawn(&spec, &[job, &tree.0], Input::Null, Output::Pipe).map_err(|e| PortError::process(program_name(&spec.program), e))?;
         let id = ChildId(self.next_id.fetch_add(1, Ordering::Relaxed));
         let (done_tx, done_rx) = watch::channel(false);
-        let entry = Arc::new(ChildEntry { pid: p.pid, handle: p.handle.clone(), killed: AtomicBool::new(false), done: done_rx });
+        let entry = Arc::new(ChildEntry { pid: p.pid, handle: p.handle.clone(), tree, killed: AtomicBool::new(false), done: done_rx });
         if let Ok(mut table) = self.children.lock() {
             table.insert(id, entry.clone());
         }
@@ -283,6 +312,8 @@ impl ProcessSupervisor for JobObjectSupervisor {
         let children = self.children.clone();
         tokio::spawn(async move {
             exited(&entry.handle).await;
+            // The service is gone: what its tree still runs would only hold its ports and pipes.
+            entry.tree.kill();
             let aborts: Vec<_> = readers.iter().map(|r| r.abort_handle()).collect();
             let drain = async {
                 for r in readers {
@@ -311,8 +342,9 @@ impl ProcessSupervisor for JobObjectSupervisor {
         }
         if !win::has_exited(&entry.handle) {
             entry.killed.store(true, Ordering::SeqCst);
-            kill(&entry.handle);
         }
+        // The whole tree: a surviving worker would keep the service's port.
+        entry.tree.kill();
         match tokio::time::timeout(KILL_WAIT, done.wait_for(|d| *d)).await {
             Ok(_) => Ok(()),
             Err(_) => Err(PortError::process(format!("pid {}", entry.pid), "did not exit after being killed")),
@@ -321,6 +353,18 @@ impl ProcessSupervisor for JobObjectSupervisor {
 
     fn is_alive(&self, child: ChildId) -> bool {
         self.entry(child).is_some_and(|e| !win::has_exited(&e.handle))
+    }
+
+    fn owns_listener(&self, child: ChildId, port: u16) -> bool {
+        let Some(entry) = self.entry(child) else { return false };
+        match win::tcp_listener_pid(port) {
+            Ok(Some(pid)) => pid == entry.pid || win::is_process_in_job(pid, &entry.tree.0),
+            Ok(None) => false,
+            Err(e) => {
+                tracing::debug!(port, error = %e, "cannot read the TCP listener table");
+                false
+            }
+        }
     }
 }
 
@@ -504,23 +548,6 @@ impl PipedCommandRunner for JobObjectSupervisor {
 // Streaming commands: one nested job per run, so a cancel kills the whole process tree
 // ---------------------------------------------------------------------------------------------
 
-/// The job of one streaming run (nested in the app's job). Terminating it kills every process
-/// the command started; dropping it does too.
-struct TreeJob(OwnedHandle);
-
-impl TreeJob {
-    fn kill(&self) {
-        // SAFETY: valid job handle; failure means the job is already empty.
-        unsafe { TerminateJobObject(raw(&self.0), 1) };
-    }
-}
-
-impl Drop for TreeJob {
-    fn drop(&mut self) {
-        self.kill();
-    }
-}
-
 /// Reads to EOF and sends every non-empty line, split at `\n` *and* `\r` (progress counters
 /// such as git's `Receiving objects: 45%` are rewritten with `\r`) and at `MAX_LINE`.
 async fn send_lines(pipe: NamedPipeServer, stream: LogStream, tx: mpsc::UnboundedSender<(LogStream, String)>) {
@@ -559,7 +586,7 @@ impl StreamingCommandRunner for JobObjectSupervisor {
         let program = program_name(&spec.program);
         cancel.check()?;
         let outer = self.job()?;
-        let tree = TreeJob(create_job().map_err(|e| PortError::process("job object", e))?);
+        let tree = TreeJob::new()?;
         let p = process::spawn(&spec, &[outer, &tree.0], Input::Null, Output::Pipe).map_err(|e| PortError::process(&program, e))?;
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut readers = Vec::new();

@@ -1,6 +1,7 @@
 //! What every supervised service runner shares: the status table and its events, the observer
 //! that writes captured output to `<log_dir>\output.log`, and the start/stop sequence
-//! (port check → spawn via [`ProcessSupervisor`] → health check → running; graceful request →
+//! (port check → spawn via [`ProcessSupervisor`] → health check → running, the deadline pushed
+//! forward while a slow start keeps making progress; graceful request →
 //! `terminate`). A runner only describes its service through [`ServiceDriver`]: command line,
 //! readiness probe, shutdown request, failure diagnostics. Adding a service kind means adding a
 //! driver and a runner type; this module does not change.
@@ -18,13 +19,17 @@ use lampo_domain::ports::{ChildId, CommandSpec, EventPublisher, ProcessObserver,
 use lampo_domain::service::{LogStream, ServiceId, ServiceLaunch, ServiceState, ServiceStatus};
 use lampo_domain::{PortError, PortResult};
 use tokio::sync::watch;
+use tokio::time::Instant;
 
+use crate::startup_deadline::StartupDeadline;
 use crate::win;
 
 /// Rotated to `<name>.1` at start when bigger than this.
 pub(crate) const MAX_LOG_BYTES: u64 = 10 * 1024 * 1024;
 const RECENT_LINES: usize = 20;
 const READY_POLL: Duration = Duration::from_millis(250);
+/// Longest start, however long [`ServiceDriver::startup_progress`] keeps moving.
+pub(crate) const MAX_STARTUP: Duration = Duration::from_secs(60 * 60);
 
 /// How one kind of service is run and checked. Implemented by each runner's driver.
 #[async_trait]
@@ -32,7 +37,20 @@ pub(crate) trait ServiceDriver: Send + Sync {
     /// Short program name for messages (`mysqld`).
     fn program(&self) -> &'static str;
     fn command(&self, launch: &ServiceLaunch) -> PortResult<CommandSpec>;
+    /// How long a start may go without becoming ready (and, see [`Self::startup_progress`],
+    /// without making progress).
     fn startup_timeout(&self) -> Duration;
+    /// Evidence that a slow start is still working (MySQL: the error log size, which grows
+    /// during InnoDB crash recovery or a data dictionary upgrade). While the process is alive
+    /// and this keeps changing, the startup deadline moves to `startup_timeout` after the last
+    /// change (up to [`MAX_STARTUP`]). `None`: the deadline is fixed.
+    fn startup_progress(&self, _launch: &ServiceLaunch) -> Option<u64> {
+        None
+    }
+    /// The status message of a start running past `startup_timeout` (MySQL: `recovery`).
+    fn slow_start_detail(&self) -> &'static str {
+        "still starting"
+    }
     /// How long a graceful shutdown may take before the process is killed.
     fn stop_grace(&self) -> Duration;
     /// One readiness attempt: the service speaks its protocol on `launch.port`. Only called
@@ -40,6 +58,12 @@ pub(crate) trait ServiceDriver: Send + Sync {
     async fn probe(&self, launch: &ServiceLaunch) -> bool;
     /// Asks the process to shut down cleanly (best effort; `terminate` follows).
     async fn request_shutdown(&self, launch: &ServiceLaunch, pid: u32);
+    /// `request_shutdown` reaches the process by pid, not through `launch.port`: it is safe
+    /// before the service listens and can never hit another server on the port. Otherwise it is
+    /// only sent once the port's listener is the spawned process.
+    fn shutdown_addresses_the_process(&self) -> bool {
+        false
+    }
     /// Remembered before a start (e.g. the error log size) and passed to `failure_lines`.
     fn start_marker(&self, _launch: &ServiceLaunch) -> u64 {
         0
@@ -279,26 +303,47 @@ impl ServiceHost {
             inst.status.pid = Some(spawned.pid);
         });
 
-        let deadline = tokio::time::Instant::now() + driver.startup_timeout();
+        let mut deadline = StartupDeadline::new(Instant::now(), driver.startup_timeout(), MAX_STARTUP, driver.startup_progress(launch));
+        let mut slow = false;
         let reason = loop {
+            if self.stop_requested(service, generation) {
+                let result = self.shut_down(driver, launch, spawned.id, Some(spawned.pid)).await;
+                self.board.update(service, |inst| {
+                    if inst.generation == generation {
+                        inst.child = None;
+                        inst.stopping = false;
+                        inst.status = ServiceStatus::stopped(service.clone());
+                    }
+                });
+                return result.and(Err(PortError::Cancelled));
+            }
             if *exited.borrow() {
                 break "exited during startup".to_string();
             }
             // The listener may be a child of the spawned process (mysqld 8 runs a monitor
             // process on Windows); anything else on the port is somebody else's server.
-            let ours = win::tcp_listener_pid(launch.port).ok().flatten().is_some_and(|pid| win::is_same_or_descendant(pid, spawned.pid));
-            if ours && driver.probe(launch).await {
+            if self.supervisor.owns_listener(spawned.id, launch.port) && driver.probe(launch).await {
                 self.board.update(service, |inst| {
-                    if inst.generation == generation && inst.child.is_some() {
+                    if inst.generation == generation && inst.child.is_some() && !inst.stopping {
                         inst.status.state = ServiceState::Running;
                         inst.status.message = None;
                     }
                 });
                 return Ok(());
             }
-            if tokio::time::Instant::now() >= deadline {
-                let _ = self.supervisor.terminate(spawned.id, Duration::ZERO).await;
-                break format!("did not accept connections on port {} within {}s", launch.port, driver.startup_timeout().as_secs());
+            let now = Instant::now();
+            deadline.observe(now, driver.startup_progress(launch));
+            if deadline.expired(now) {
+                let _ = self.shut_down(driver, launch, spawned.id, Some(spawned.pid)).await;
+                break format!("did not accept connections on port {} within {}s", launch.port, deadline.elapsed(now).as_secs());
+            }
+            if !slow && deadline.is_extended(now) {
+                slow = true;
+                self.board.update(service, |inst| {
+                    if inst.generation == generation && inst.status.state == ServiceState::Starting {
+                        inst.status.message = Some(driver.slow_start_detail().to_string());
+                    }
+                });
             }
             tokio::select! {
                 _ = tokio::time::sleep(READY_POLL) => {}
@@ -325,7 +370,31 @@ impl ServiceHost {
         Err(PortError::process(driver.program(), message))
     }
 
+    /// Whether a stop arrived while the start of `generation` was waiting for readiness.
+    fn stop_requested(&self, service: &ServiceId, generation: u64) -> bool {
+        self.board.get(service).is_some_and(|inst| inst.generation == generation && inst.stopping)
+    }
+
+    /// The driver's shutdown request (only when it cannot reach another server), then the
+    /// supervisor's termination of the process tree after `stop_grace`.
+    async fn shut_down(&self, driver: &dyn ServiceDriver, launch: &ServiceLaunch, child: ChildId, pid: Option<u32>) -> PortResult<()> {
+        if let Some(pid) = pid.filter(|_| self.supervisor.is_alive(child)) {
+            if driver.shutdown_addresses_the_process() || self.supervisor.owns_listener(child, launch.port) {
+                driver.request_shutdown(launch, pid).await;
+            }
+        }
+        self.supervisor.terminate(child, driver.stop_grace()).await
+    }
+
     pub(crate) async fn stop(&self, driver: &dyn ServiceDriver, service: &ServiceId) -> PortResult<()> {
+        // A start waiting for readiness (possibly a long MySQL recovery, when the app shuts down)
+        // holds the lock: ask it to shut its process down cleanly and give up.
+        self.board.update(service, |inst| {
+            if inst.status.state == ServiceState::Starting {
+                inst.stopping = true;
+                inst.status.state = ServiceState::Stopping;
+            }
+        });
         let lock = self.lock_for(service);
         let _guard = lock.lock().await;
         let Some(inst) = self.board.get(service) else { return Ok(()) };
@@ -341,12 +410,7 @@ impl ServiceHost {
             i.stopping = true;
             i.status.state = ServiceState::Stopping;
         });
-        if self.supervisor.is_alive(child) {
-            if let Some(pid) = inst.status.pid {
-                driver.request_shutdown(&launch, pid).await;
-            }
-        }
-        let result = self.supervisor.terminate(child, driver.stop_grace()).await;
+        let result = self.shut_down(driver, &launch, child, inst.status.pid).await;
         self.board.update(service, |i| {
             i.child = None;
             i.stopping = false;

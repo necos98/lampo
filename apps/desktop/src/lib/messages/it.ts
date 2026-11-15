@@ -335,7 +335,9 @@ export const it = {
 			stopping: 'In arresto',
 			failed: 'Errore',
 			unknown: 'Sconosciuto'
-		} satisfies Record<ServiceState, string>
+		} satisfies Record<ServiceState, string>,
+		/** A start running long for a reason the backend names (MySQL crash recovery: `recovery`). */
+		startingWith: (detail: string) => `In avvio (${detail})`
 	},
 	packages: {
 		title: 'Pacchetti',
