@@ -116,7 +116,13 @@ unsafe impl Sync for UserOnlySecurity {}
 impl UserOnlySecurity {
     pub(crate) fn new(inheritable: bool) -> io::Result<Self> {
         let sid = current_user_sid()?;
-        let sddl = wide(format!("O:{sid}D:P(A;;GA;;;{sid})"));
+        Self::from_sddl(&format!("O:{sid}D:P(A;;GA;;;{sid})"), inheritable)
+    }
+
+    /// Attributes for an arbitrary SDDL descriptor. Production code uses [`Self::new`]; tests use
+    /// this to build objects Lampo itself never creates (e.g. owned by someone else).
+    pub(crate) fn from_sddl(sddl: &str, inheritable: bool) -> io::Result<Self> {
+        let sddl = wide(sddl);
         let mut sd: PSECURITY_DESCRIPTOR = null_mut();
         // SAFETY: valid NUL-terminated SDDL; the result is freed with LocalFree.
         if unsafe { ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), SDDL_REVISION_1, &mut sd, null_mut()) } == 0 {
@@ -133,6 +139,10 @@ impl UserOnlySecurity {
 }
 
 /// Whether the kernel object behind `handle` is owned by the current user.
+///
+/// "Current user" is the token's `TokenUser` SID, the same SID [`UserOnlySecurity`] writes as the
+/// explicit owner, not `TokenOwner` (the default owner, BUILTIN\Administrators in an elevated
+/// token). An elevated and a non-elevated process of the same user therefore agree.
 pub(crate) fn is_owned_by_current_user(handle: HANDLE) -> io::Result<bool> {
     let me = UserSid::current()?;
     unsafe {
@@ -320,5 +330,27 @@ pub(crate) fn close(h: HANDLE) {
     if !h.is_null() && h != INVALID_HANDLE_VALUE {
         // SAFETY: caller passes a handle it owns.
         unsafe { CloseHandle(h) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn an_object_created_with_user_only_security_is_owned_by_the_current_user() {
+        let security = UserOnlySecurity::new(false).unwrap();
+        let name = format!(r"\\.\pipe\lampo-win-test-{}", std::process::id());
+        // SAFETY: valid SECURITY_ATTRIBUTES alive for the call.
+        let pipe = unsafe { tokio::net::windows::named_pipe::ServerOptions::new().create_with_security_attributes_raw(&name, security.as_ptr() as *mut c_void) }.unwrap();
+        assert!(is_owned_by_current_user(pipe.as_raw_handle() as HANDLE).unwrap());
+    }
+
+    #[test]
+    fn an_object_owned_by_someone_else_is_not_owned_by_the_current_user() {
+        // System files are owned by TrustedInstaller, whether or not this process is elevated.
+        let system = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+        let file = std::fs::File::open(std::path::Path::new(&system).join(r"System32\kernel32.dll")).unwrap();
+        assert!(!is_owned_by_current_user(file.as_raw_handle() as HANDLE).unwrap());
     }
 }

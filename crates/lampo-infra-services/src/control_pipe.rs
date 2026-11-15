@@ -79,10 +79,36 @@ impl NamedPipeControlServer {
     }
 
     fn create(&self, security: &UserOnlySecurity, first: bool) -> std::io::Result<NamedPipeServer> {
-        let mut options = ServerOptions::new();
-        options.first_pipe_instance(first).reject_remote_clients(true).in_buffer_size(64 * 1024).out_buffer_size(64 * 1024);
-        // SAFETY: valid SECURITY_ATTRIBUTES alive for the call.
-        unsafe { options.create_with_security_attributes_raw(&self.pipe_name, security.as_ptr() as *mut std::ffi::c_void) }
+        create_pipe_instance(&self.pipe_name, security, first)
+    }
+}
+
+/// Creates one server instance of `pipe_name` with `security` (the only way Lampo creates one).
+fn create_pipe_instance(pipe_name: &str, security: &UserOnlySecurity, first: bool) -> std::io::Result<NamedPipeServer> {
+    let mut options = ServerOptions::new();
+    options.first_pipe_instance(first).reject_remote_clients(true).in_buffer_size(64 * 1024).out_buffer_size(64 * 1024);
+    // SAFETY: valid SECURITY_ATTRIBUTES alive for the call.
+    unsafe { options.create_with_security_attributes_raw(pipe_name, security.as_ptr() as *mut std::ffi::c_void) }
+}
+
+/// Raw server pipes for tests that need to speak something other than Lampo's framing. Not part
+/// of the public API.
+#[doc(hidden)]
+pub mod test_support {
+    use super::*;
+
+    /// A first-instance server pipe created exactly like [`NamedPipeControlServer`]'s (owned by
+    /// the current user, user-only DACL), so the client's owner check accepts it in any context,
+    /// elevated or not. (Default security would make BUILTIN\Administrators the owner when the
+    /// process is elevated.)
+    pub fn create_lampo_server_pipe(pipe_name: &str) -> std::io::Result<NamedPipeServer> {
+        create_pipe_instance(pipe_name, &UserOnlySecurity::new(false)?, true)
+    }
+
+    /// A first-instance server pipe whose descriptor is `sddl` (e.g. `O:BA...` for one owned by
+    /// Administrators). Setting an owner the caller's token cannot assign fails (`ERROR_INVALID_OWNER`).
+    pub fn create_server_pipe_with_sddl(pipe_name: &str, sddl: &str) -> std::io::Result<NamedPipeServer> {
+        create_pipe_instance(pipe_name, &UserOnlySecurity::from_sddl(sddl, false)?, true)
     }
 }
 

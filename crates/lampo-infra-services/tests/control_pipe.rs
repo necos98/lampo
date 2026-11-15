@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use lampo_domain::PortError;
 use lampo_domain::ports::{ControlChannelClient, ControlChannelServer, ControlFrameSink, ControlRequestHandler};
 use lampo_domain::progress::CancelFlag;
+use lampo_infra_services::control_pipe::test_support::{create_lampo_server_pipe, create_server_pipe_with_sddl};
 use lampo_infra_services::{NamedPipeControlClient, NamedPipeControlServer};
 use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
@@ -165,9 +166,10 @@ async fn a_second_server_on_the_same_pipe_is_refused() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn foreign_framing_is_handed_to_the_application_as_the_final_frame() {
-    use tokio::net::windows::named_pipe::ServerOptions;
     let name = unique_pipe();
-    let mut raw = ServerOptions::new().first_pipe_instance(true).create(&name).unwrap();
+    // Same security as the real server: default security would make the pipe owned by
+    // BUILTIN\Administrators when the test runs elevated, and the client would refuse it.
+    let mut raw = create_lampo_server_pipe(&name).unwrap();
     let server = tokio::spawn(async move {
         raw.connect().await.unwrap();
         raw.write_all(b"{\"legacy\":true}\n").await.unwrap();
@@ -176,5 +178,25 @@ async fn foreign_framing_is_handed_to_the_application_as_the_final_frame() {
     });
     let reply = NamedPipeControlClient::new(name).exchange("{}".into(), &Collect::default(), Duration::from_secs(5)).await.unwrap();
     assert_eq!(reply, r#"{"legacy":true}"#);
+    server.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pipe_owned_by_someone_else_is_refused() {
+    const ERROR_INVALID_OWNER: i32 = 1307;
+    let name = unique_pipe();
+    let raw = match create_server_pipe_with_sddl(&name, "O:BAD:P(A;;GA;;;BU)") {
+        Ok(raw) => raw,
+        // Not elevated: the token cannot make Administrators the owner, so nobody without admin
+        // rights can plant such a pipe either. The client-side check is covered by `win` unit tests.
+        Err(e) if e.raw_os_error() == Some(ERROR_INVALID_OWNER) => return,
+        Err(e) => panic!("creating the pipe: {e}"),
+    };
+    let server = tokio::spawn(async move {
+        let _ = raw.connect().await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    });
+    let err = NamedPipeControlClient::new(name).exchange("{}".into(), &Collect::default(), Duration::from_secs(5)).await.unwrap_err();
+    assert!(err.to_string().contains("not owned by the current user"), "{err}");
     server.abort();
 }
