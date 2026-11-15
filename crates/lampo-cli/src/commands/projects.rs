@@ -4,8 +4,8 @@ use lampo_application::control::ControlRequest;
 use lampo_application::dto::*;
 use lampo_application::AppResult;
 
-use super::Cmd;
-use crate::cli::{ProjectCommand, ProjectCreateArgs, ProjectNewArgs, StarterKitArg};
+use super::{Cmd, validation};
+use crate::cli::{ProjectCommand, ProjectCreateArgs, ProjectNewArgs, ProjectSetArgs, StarterKitArg};
 use crate::render;
 
 pub async fn run(c: &Cmd<'_>, command: ProjectCommand) -> AppResult<i32> {
@@ -34,8 +34,47 @@ pub async fn run(c: &Cmd<'_>, command: ProjectCommand) -> AppResult<i32> {
             let project: ProjectDto = c.app(ControlRequest::ProjectSetPhp(SetProjectPhpRequest { project_id, php_version })).await?;
             c.io.emit(&project, render::project);
         }
+        ProjectCommand::Set(args) => {
+            let project_id = c.project_id(args.id.as_ref())?;
+            let project: ProjectDto = c.app(ControlRequest::ProjectPatch(patch_request(project_id, *args)?)).await?;
+            c.io.emit(&project, render::project);
+        }
     }
     Ok(0)
+}
+
+/// `project set` flags → a [`ProjectPatchRequest`]. Values are validated by the app; only the
+/// command-line syntax (`KEY=VALUE`, `KIND[@VERSION]`) is parsed here.
+fn patch_request(project_id: String, args: ProjectSetArgs) -> AppResult<ProjectPatchRequest> {
+    let mut ini_set = std::collections::BTreeMap::new();
+    for pair in &args.ini {
+        let (key, value) = pair.split_once('=').filter(|(k, _)| !k.trim().is_empty()).ok_or_else(|| validation(format!("--ini expects KEY=VALUE, got `{pair}`")))?;
+        ini_set.insert(key.trim().to_string(), value.to_string());
+    }
+    Ok(ProjectPatchRequest {
+        project_id,
+        extensions_add: args.ext,
+        extensions_remove: args.no_ext,
+        addons_add: args.addon,
+        addons_remove: args.no_addon,
+        ini_set,
+        ini_unset: args.no_ini,
+        services_add: args.service.iter().map(|s| service_use(s)).collect(),
+        services_remove: args.no_service,
+        database_name: args.database,
+        public_dir: args.public_dir,
+        apache_directives: args.apache_directives,
+    })
+}
+
+/// `redis`, `mysql`, `mysql@5.7`, `mysql-5.7` (the service id form `lampo up` uses).
+fn service_use(raw: &str) -> ServiceUseDto {
+    let raw = raw.trim();
+    let split = raw.split_once('@').or_else(|| raw.rsplit_once('-').filter(|(_, v)| v.starts_with(|c: char| c.is_ascii_digit())));
+    match split {
+        Some((kind, version)) => ServiceUseDto { kind: kind.trim().to_string(), version: Some(version.trim().to_string()) },
+        None => ServiceUseDto { kind: raw.to_string(), version: None },
+    }
 }
 
 /// Localhost addressing (no UAC) unless `--hosts-name`; the database is created unless

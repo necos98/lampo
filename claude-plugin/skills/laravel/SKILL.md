@@ -58,8 +58,8 @@ REDIS_PASSWORD=null
 
   `REDIS_CLIENT=phpredis` (Laravel's default) needs the `php-redis` add-on enabled for the
   project (`lampo:php`); `predis` needs `composer require predis/predis`, which changes the
-  project's dependencies: ask before adding it. If the project has no Redis service, it is
-  enabled in the app ("Progetti" > project > "Database e cache"); meanwhile use
+  project's dependencies: ask before adding it. If the project has no Redis service and the
+  task needs it, enable it with `lampo project set --service redis` (say so); otherwise use
   `CACHE_STORE=database` / `SESSION_DRIVER=database` / `QUEUE_CONNECTION=database` (or `file`).
 - After editing `.env`: `php artisan config:clear` (a cached config ignores `.env`).
 

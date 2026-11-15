@@ -166,6 +166,9 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let delete_project = Arc::new(DeleteProject::new(projects.clone(), worktrees.clone(), env.clone(), events.clone()));
     let set_project_active = Arc::new(SetProjectActive::new(project_writer.clone()));
     let set_project_php = Arc::new(SetProjectPhp::new(project_writer.clone(), installed.clone()));
+    let php_extensions = Arc::new(PhpExtensionsQuery::new(installed.clone(), Arc::new(packages::FsPhpExtensionScanner)));
+    // CLI-only (`lampo project set`, via the control pipe): the GUI edits the full project.
+    let patch_project = Arc::new(PatchProjectEnvironment::new(project_writer.clone(), installed.clone(), php_extensions.clone()));
     let worktree_up = Arc::new(WorktreeUp::new(WorktreeUpDeps {
         projects: projects.clone(),
         worktrees: worktrees.clone(),
@@ -201,6 +204,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         update_project: update_project.clone(),
         set_project_active: set_project_active.clone(),
         set_project_php: set_project_php.clone(),
+        patch_project,
         delete_project: delete_project.clone(),
         service_control: service_control.clone(),
         environment: env.clone(),
@@ -243,7 +247,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
             settings: settings.clone(),
             services: service_catalog.clone(),
         })),
-        php_extensions: Arc::new(PhpExtensionsQuery::new(installed.clone(), Arc::new(packages::FsPhpExtensionScanner))),
+        php_extensions,
         install_package: install_package.clone(),
         uninstall_package: Arc::new(UninstallPackage::new(UninstallPackageDeps {
             installed: installed.clone(),

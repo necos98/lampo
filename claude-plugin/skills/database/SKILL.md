@@ -135,5 +135,9 @@ user's yes.
   as above (or ask the user if they created their own MySQL users).
 - `Unknown database`: `lampo db list`, then `lampo db create <name>` (allowed).
 - MySQL does not start: `lampo logs mysql-8.4-error -n 80` and `lampo:services-logs`.
-- A `lampo db` command fails with exit 4 "uses no MySQL": the project has no MySQL service; it is
-  enabled in the Lampo app, "Progetti" > project > "Database e cache".
+- A `lampo db` command fails with exit 4 "uses no MySQL": the project has no MySQL service.
+  Enabling it changes the project, so ask first; then `lampo project set --service mysql` (the
+  default series; `mysql@5.7` for another configured one) and `lampo db create`.
+- The project should point at another existing database: `lampo project set --database <name>`
+  (ask first on a main project). It only changes the name Lampo reports (`agent context`,
+  `LAMPO_DB_*`); it never creates, renames or copies a database.

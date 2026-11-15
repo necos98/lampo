@@ -75,6 +75,7 @@ lampo agent context --json            # tutto sul progetto della cartella corren
 lampo project create --activate       # registra la cartella corrente come progetto
 lampo project new --git https://github.com/acme/shop.git --in D:\sites
 lampo project new --laravel shop --in D:\sites --php 8.4
+lampo project set --ext intl --addon xdebug --ini memory_limit=512M   # modifica l'ambiente
 lampo worktree up --db clone:shop     # ambiente per il git worktree corrente
 lampo exec -- composer install        # comando con il PHP e il Composer del progetto
 lampo logs error -f                   # log degli errori del sito, in tempo reale

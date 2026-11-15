@@ -48,6 +48,13 @@ fields, `mysql_instances`/`redis_port`, shim index v1) are migrated on read.
 Loopback ports are handed out by one `LoopbackPortAllocator` (shared by project creation and
 `worktree up`), which also serialises every project save with its conflict check.
 
+The GUI saves a whole project (`UpdateProject`); the CLI edits one with `lampo project set`
+(`PatchProjectEnvironment`, control request `project-patch`): a patch of extensions, add-ons,
+php.ini values, services, database name, public folder and Apache directives, applied to the
+stored project under that same lock, so a CLI edit never reverts a concurrent GUI save. It
+also checks what the GUI only offers as choices: add-ons installed for the project's PHP,
+bundled extensions present in its `ext` dir, MySQL series configured in the settings.
+
 Creating a project that uses MySQL also creates its database (name derived from the project id) on
 its instance, starting it on demand; an existing database is kept, and a failure never fails
 the creation: the result reports it in `databaseSetup` (`lampo project create --no-database`

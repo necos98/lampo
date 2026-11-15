@@ -78,15 +78,18 @@ starting services); report the others (VC++ downloads, other programs on a port)
 ### 404 on every route but the home page, or rewrites not working
 
 - The document root must be the folder with the front controller: compare `documentRoot` in
-  `agent context` with the framework (Laravel and Symfony: `public`). It is set in the app,
-  "Progetti" > project > "Generale" > "Cartella pubblica".
+  `agent context` with the framework (Laravel and Symfony: `public`). Change it with
+  `lampo project set --public-dir public` (ask first on a main project; `""` = the folder
+  itself).
 - Lampo serves with `AllowOverride All` and mod_rewrite: the project's `.htaccess` works. Check
   it exists in the document root (Laravel ships `public\.htaccess`; WordPress writes it from
   "Settings > Permalinks").
 - Rules written for nginx (`try_files`, `location` blocks) do nothing under Apache: translate
-  them to `.htaccess` rules in the project or to Apache directives in the app ("Progetti" >
-  project > "Apache" > "Direttive Apache personalizzate"; Lampo validates them with `httpd -t`
-  and a rejected configuration comes back as exit 12 with `details.output`).
+  them to `.htaccess` rules in the project or, with the user's yes, to the project's Apache
+  directives: `lampo project set --apache-directives "<text>"` replaces them all (`""` clears;
+  from a file in PowerShell: `--apache-directives (Get-Content .\lampo.conf -Raw)`). Lampo
+  validates them with `httpd -t`; a rejected configuration comes back as exit 12 with
+  `details.output` (the project is saved: fix or clear the directives).
 
 ### The site does not open at all
 

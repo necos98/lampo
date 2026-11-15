@@ -21,6 +21,7 @@ pub mod lifecycle;
 pub mod logs;
 pub mod packages;
 pub mod presets;
+pub mod project_patch;
 pub mod projects;
 pub(crate) mod requirements;
 pub mod resolution;
@@ -47,6 +48,7 @@ pub use lifecycle::{FirstRunDeps, FirstRunSetup, Shutdown, ShutdownGate, Startup
 pub use logs::LogQueries;
 pub use packages::{InstallPackage, InstallPackageDeps, PackageCatalog, PackageCatalogDeps, PhpExtensionsQuery, UninstallPackage, UninstallPackageDeps};
 pub use presets::{DeletePreset, PresetQueries, SavePreset};
+pub use project_patch::PatchProjectEnvironment;
 pub use projects::{
     CreateProject, DeleteProject, DetectProject, ExportProject, ImportProject, ProjectQueries, ProjectWriter, RelinkProject, SetProjectActive, SetProjectPhp, SuggestAddresses, UpdateProject,
 };

@@ -45,7 +45,7 @@ down for the user in a short table before changing anything.
 | PostgreSQL | **not supported**. Stop here (see below) |
 | Redis / Valkey | Redis, optional per project |
 | Apache + `.htaccess` | identical: Apache 2.4 with `AllowOverride All` and mod_rewrite |
-| nginx-only rules | translate to `.htaccess` or to the project's Apache directives |
+| nginx-only rules | translate to `.htaccess` or to the project's Apache directives (`lampo project set --apache-directives "<rules>"`) |
 | Mailpit, MailHog | not provided: `MAIL_MAILER=log`, or keep the catcher running outside Lampo |
 | Meilisearch, Elasticsearch, OpenSearch, Typesense, MinIO, RabbitMQ, Memcached | not provided: keep running them where they are (Docker, native) and point `.env` at them |
 | HTTPS (`herd secure`, Laragon SSL) | not available yet: use `http://` |
@@ -54,8 +54,8 @@ down for the user in a short table before changing anything.
 **PostgreSQL**: say clearly that Lampo does not support PostgreSQL yet, and do not improvise
 (no installing PostgreSQL, no converting the schema on your own). Offer the options and let the
 user decide: keep the project on its current environment; keep PostgreSQL running where it is
-and serve only the PHP side with Lampo (the PHP build needs `pdo_pgsql`, enabled in the app;
-Lampo will not manage that database); or move the application to MySQL as a separate,
+and serve only the PHP side with Lampo (enable `pdo_pgsql` with
+`lampo project set --ext pdo_pgsql,pgsql`; Lampo will not manage that database); or move the application to MySQL as a separate,
 deliberate project change.
 
 **MariaDB to MySQL**: dumps from MariaDB 10.x/11.x mostly import into MySQL 8.4, but watch for
@@ -80,6 +80,15 @@ lampo project create C:\laragon\www\shop --php 8.2 --activate
 
 Add `--preset legacy` for old PHP/MySQL 5.7 projects, `--no-database` if the database will not
 move. The JSON result gives the URL and `databaseSetup` (the new, empty database `shop`).
+
+Then reproduce what the inventory found and the preset lacks, in one call (add-ons need
+`lampo package install xdebug --php 8.2` first; nginx rules translated to Apache go in
+`--apache-directives`):
+
+```powershell
+lampo project set shop --ext intl,gd,soap --ini memory_limit=512M --ini upload_max_filesize=64M --service redis
+lampo project set shop --public-dir public --service mysql@5.7
+```
 
 ## Step 4: move the data (confirm first)
 

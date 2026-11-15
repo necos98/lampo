@@ -738,6 +738,17 @@ pub fn php(s: &str) -> PhpMinor {
     PhpMinor::parse(s).unwrap()
 }
 
+/// What the fake scanner finds in every PHP build's `ext` dir.
+pub const FAKE_BUNDLED_EXTENSIONS: &[&str] = &["gd", "intl", "mbstring", "opcache", "pdo_mysql", "zip"];
+
+/// A `PhpExtensionScanner` returning a fixed list.
+pub struct FakeExtensionScanner(pub &'static [&'static str]);
+impl PhpExtensionScanner for FakeExtensionScanner {
+    fn bundled_extensions(&self, _php_dir: &Path) -> PortResult<Vec<lampo_domain::php::ExtensionName>> {
+        Ok(self.0.iter().map(|n| lampo_domain::php::ExtensionName::new(n).unwrap()).collect())
+    }
+}
+
 /// Every fake, plus the real `ApplyEnvironment` / `ServiceControl` wired to them.
 pub struct World {
     pub paths: LampoPaths,
@@ -955,6 +966,16 @@ impl World {
 
     pub fn relink_project(&self) -> RelinkProject {
         RelinkProject::new(self.project_writer(), self.fs.clone())
+    }
+
+    /// `lampo project set`, syncing through `env`; every installed PHP ships [`FAKE_BUNDLED_EXTENSIONS`].
+    pub fn patch_project_with(&self, env: Arc<dyn EnvironmentSync>) -> PatchProjectEnvironment {
+        let scanner = Arc::new(FakeExtensionScanner(FAKE_BUNDLED_EXTENSIONS));
+        PatchProjectEnvironment::new(self.project_writer_with(env), self.installed.clone(), Arc::new(PhpExtensionsQuery::new(self.installed.clone(), scanner)))
+    }
+
+    pub fn patch_project(&self) -> PatchProjectEnvironment {
+        self.patch_project_with(self.env.clone())
     }
 
     pub fn resolver(&self) -> Arc<SiteResolver> {

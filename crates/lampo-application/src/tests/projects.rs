@@ -416,3 +416,131 @@ fn the_create_result_is_a_project_with_an_optional_database_setup() {
     assert_eq!(back.id, "shop", "older readers expecting a ProjectDto still parse it");
     assert_eq!(serde_json::from_value::<CreateProjectResultDto>(json).unwrap(), with);
 }
+
+// --- partial environment edits (`lampo project set`) -------------------------------------------
+
+fn patch(id: &str) -> ProjectPatchRequest {
+    ProjectPatchRequest { project_id: id.into(), ..Default::default() }
+}
+
+fn service(kind: &str, version: Option<&str>) -> ServiceUseDto {
+    ServiceUseDto { kind: kind.into(), version: version.map(Into::into) }
+}
+
+#[tokio::test]
+async fn patch_changes_only_what_it_names_and_regenerates_apache_php_and_services() {
+    let w = World::with_basics();
+    w.project("shop", r"C:\sites\shop", true);
+    w.update_project("shop", |p| {
+        p.environment.extensions.insert(lampo_domain::php::ExtensionName::new("zip").unwrap());
+        p.environment.php_ini = lampo_domain::php::php_ini_overrides([("display_errors", "On")]).unwrap();
+    });
+    w.hosts_in_sync();
+    w.installed.add(PackageKind::XDEBUG, "3.3.2", Some("8.3"));
+    // A GUI edit saved meanwhile: the patch must not revert it.
+    w.update_project("shop", |p| p.name = lampo_domain::project::DisplayName::new("Shop (GUI)").unwrap());
+
+    let request = ProjectPatchRequest {
+        extensions_add: vec!["intl".into(), "php_gd.dll".into()],
+        extensions_remove: vec!["zip".into()],
+        addons_add: vec!["xdebug".into()],
+        ini_set: [("memory_limit".to_string(), "512M".to_string())].into(),
+        services_add: vec![service("redis", None)],
+        public_dir: Some("public".into()),
+        apache_directives: Some("Header set X-Lampo 1".into()),
+        ..patch("shop")
+    };
+    let dto = w.patch_project().execute(request, &cli()).await.unwrap();
+    assert_eq!(dto.name, "Shop (GUI)");
+    assert_eq!(dto.environment.extensions, ["gd", "intl"]);
+    assert_eq!(dto.environment.addons, ["xdebug"]);
+    assert_eq!(dto.environment.php_ini.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>(), ["display_errors=On", "memory_limit=512M"]);
+    assert_eq!(dto.environment.services, [service("mysql", Some("8.4")), service("redis", None)]);
+    assert_eq!(dto.database_name.as_deref(), Some("shop"));
+    assert_eq!(dto.environment.public_dir, "public");
+
+    // Regenerated like after a GUI save.
+    let ini = w.ini.0.lock().unwrap().iter().find(|s| s.site.to_string() == "shop").cloned().unwrap();
+    assert_eq!(ini.values.iter().find(|(k, _)| k.as_str() == "memory_limit").map(|(_, v)| v.as_str()), Some("512M"));
+    let loaded: Vec<String> = ini.extensions.iter().map(|e| e.name.to_string()).collect();
+    assert!(loaded.contains(&"xdebug".to_string()) && loaded.contains(&"intl".to_string()) && !loaded.contains(&"zip".to_string()), "{loaded:?}");
+    let vhost = w.web.last().unwrap().vhosts.into_iter().next().unwrap();
+    assert_eq!(vhost.document_root, std::path::PathBuf::from(r"C:\sites\shop").join("public"));
+    assert!(vhost.custom_directives.as_str().contains("X-Lampo"));
+    assert_eq!(w.redis.state(&redis_id()), lampo_domain::service::ServiceState::Running);
+    assert!(w.events.all().contains(&DomainEvent::ProjectsChanged { changed: vec![ProjectId::new("shop").unwrap()] }));
+
+    // Removing, switching MySQL series, naming the database.
+    let request = ProjectPatchRequest {
+        addons_remove: vec!["xdebug".into()],
+        ini_unset: vec!["display_errors".into()],
+        services_add: vec![service("mysql", Some("5.7"))],
+        services_remove: vec!["redis".into()],
+        database_name: Some("shop_legacy".into()),
+        ..patch("shop")
+    };
+    let dto = w.patch_project().execute(request, &cli()).await.unwrap();
+    assert!(dto.environment.addons.is_empty());
+    assert_eq!(dto.environment.php_ini.keys().collect::<Vec<_>>(), ["memory_limit"]);
+    assert_eq!(dto.environment.services, [service("mysql", Some("5.7"))]);
+    assert_eq!(dto.database.as_ref().map(|d| (d.database.as_str(), d.mysql_version.as_str())), Some(("shop_legacy", "5.7")));
+    assert_eq!(dto.environment.extensions, ["gd", "intl"], "untouched");
+
+    // Dropping MySQL clears the database name; adding it back without a series uses the default
+    // instance and the default database name.
+    let dto = w.patch_project().execute(ProjectPatchRequest { services_remove: vec!["mysql".into()], ..patch("shop") }, &cli()).await.unwrap();
+    assert_eq!((dto.database_name.as_deref(), dto.environment.services.len()), (None, 0));
+    let dto = w.patch_project().execute(ProjectPatchRequest { services_add: vec![service("mysql", None)], ..patch("shop") }, &cli()).await.unwrap();
+    assert_eq!((dto.database_name.as_deref(), dto.environment.service_version("mysql")), (Some("shop"), Some("8.4")));
+}
+
+#[tokio::test]
+async fn patch_rejects_bad_requests_without_saving_anything() {
+    let w = World::with_basics();
+    w.project("shop", r"C:\sites\shop", false);
+    w.project("blog", r"C:\sites\blog", false);
+    w.update_project("blog", |p| p.set_environment(lampo_domain::project::ProjectEnvironment::minimal(php("8.4"))).unwrap());
+    w.installed.add(PackageKind::XDEBUG, "3.3.2", Some("8.4"));
+    let before = w.projects.list().unwrap();
+    let sync = Arc::new(CountingSync::default());
+    let patcher = w.patch_project_with(sync.clone());
+
+    // Xdebug is installed for PHP 8.4 only: the message names the install command.
+    let request = ProjectPatchRequest { addons_add: vec!["xdebug".into()], extensions_add: vec!["intl".into()], ..patch("shop") };
+    let err = patcher.execute(request, &cli()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::PackageMissing);
+    assert!(err.message.contains("lampo package install xdebug --php 8.3"), "{}", err.message);
+    let err = patcher.execute(ProjectPatchRequest { extensions_add: vec!["intll".into()], ..patch("shop") }, &cli()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Validation);
+    assert!(err.message.contains("`intll`") && err.message.contains("available: gd, intl"), "{}", err.message);
+    for request in [
+        ProjectPatchRequest { extensions_add: vec!["intl".into()], extensions_remove: vec!["php_intl.dll".into()], ..patch("shop") },
+        ProjectPatchRequest { ini_set: [("memory_limit".to_string(), "1G".to_string())].into(), ini_unset: vec!["memory_limit".into()], ..patch("shop") },
+        ProjectPatchRequest { ini_set: [("extension".to_string(), "php_x.dll".to_string())].into(), ..patch("shop") },
+        ProjectPatchRequest { extensions_add: vec!["bad name".into()], ..patch("shop") },
+        ProjectPatchRequest { services_add: vec![service("mysql", Some("8.0"))], ..patch("shop") },
+        ProjectPatchRequest { services_add: vec![service("postgres", None)], ..patch("shop") },
+        ProjectPatchRequest { services_add: vec![service("redis", Some("7.2"))], ..patch("shop") },
+        ProjectPatchRequest { services_add: vec![service("apache", None)], ..patch("shop") },
+        ProjectPatchRequest { services_add: vec![service("redis", None)], services_remove: vec!["redis".into()], ..patch("shop") },
+        ProjectPatchRequest { public_dir: Some(r"..\outside".into()), ..patch("shop") },
+        ProjectPatchRequest { apache_directives: Some("<VirtualHost *:80>".into()), ..patch("shop") },
+        ProjectPatchRequest { database_name: Some("bad name!".into()), ..patch("shop") },
+        ProjectPatchRequest { database_name: Some("blog_db".into()), ..patch("blog") },
+    ] {
+        let shown = format!("{request:?}");
+        assert_eq!(patcher.execute(request, &cli()).await.unwrap_err().code, ErrorCode::Validation, "{shown}");
+    }
+    let err = patcher.execute(ProjectPatchRequest { extensions_add: vec!["intl".into()], ..patch("ghost") }, &cli()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::NotFound);
+    assert_eq!(w.projects.list().unwrap(), before, "nothing saved");
+    assert_eq!(sync.calls.load(Ordering::SeqCst), 0, "nothing synced");
+
+    // The same add-on for the project on PHP 8.4 is fine; an empty patch saves nothing.
+    let dto = patcher.execute(ProjectPatchRequest { addons_add: vec!["xdebug".into()], ..patch("blog") }, &cli()).await.unwrap();
+    assert_eq!(dto.environment.addons, ["xdebug"]);
+    let events = w.events.all().len();
+    let dto = patcher.execute(patch("blog"), &cli()).await.unwrap();
+    assert_eq!(dto.environment.addons, ["xdebug"]);
+    assert_eq!(w.events.all().len(), events, "no save, no ProjectsChanged");
+}
