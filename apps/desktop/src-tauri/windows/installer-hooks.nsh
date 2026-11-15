@@ -68,3 +68,27 @@ FunctionEnd
   !insertmacro LampoKillProcess "lampo.exe"
   !insertmacro LampoKillProcess "lampo-hosts-helper.exe"
 !macroend
+
+; --- Claude Code plugin ---
+;
+; The app registers its Claude Code plugin (user scope) only when the user asks for it (Settings >
+; Integrazioni > Claude Code); it then writes a marker in the generated plugin folder. A real
+; uninstall (not an update, which runs the uninstaller with /UPDATE) unregisters it with the
+; official CLI and deletes that generated folder; nothing else in the data root is touched. The
+; exit codes are ignored: Claude Code may have been removed already. `cmd /c` resolves the npm
+; shim (claude.cmd) as well as the native claude.exe.
+
+!define LAMPO_CLAUDE_PLUGIN_DIR "agent-plugins\claude-code"
+
+!macro NSIS_HOOK_POSTUNINSTALL
+  ${If} $UpdateMode <> 1
+  ${AndIf} ${FileExists} "$LOCALAPPDATA\${LAMPO_DATA_ROOT_NAME}\${LAMPO_CLAUDE_PLUGIN_DIR}\.installed-version"
+    Push $0
+    nsExec::Exec '"$SYSDIR\cmd.exe" /d /c claude plugin uninstall lampo@lampo --scope user'
+    Pop $0
+    nsExec::Exec '"$SYSDIR\cmd.exe" /d /c claude plugin marketplace remove lampo'
+    Pop $0
+    Pop $0
+    RMDir /r "$LOCALAPPDATA\${LAMPO_DATA_ROOT_NAME}\${LAMPO_CLAUDE_PLUGIN_DIR}"
+  ${EndIf}
+!macroend

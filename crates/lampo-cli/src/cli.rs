@@ -408,7 +408,16 @@ pub enum AgentCommand {
     /// Includes the resolved site, URL, PHP, database connection, services, log files, available
     /// commands, the exit-code table, the JSON error shape and actionable hints. Works when the
     /// app is not running. Use `--json` for the machine-readable form.
-    Context,
+    Context(AgentContextArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct AgentContextArgs {
+    /// Claude Code `SessionStart` hook mode: reads the hook JSON (its `cwd`) from stdin and, inside
+    /// a Lampo project or worktree, prints a compact summary as `additionalContext`. Prints nothing
+    /// and exits 0 elsewhere or on any error.
+    #[arg(long)]
+    pub hook: bool,
 }
 
 #[derive(Debug, Subcommand)]

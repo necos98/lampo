@@ -2,7 +2,7 @@
  * Italian UI strings. All user-facing text lives here (one module per language) so i18n can be
  * added later by adding another file with the same shape.
  */
-import type { CheckStatus, ErrorCode, ProgressStage, ServiceState } from '../api/types.js';
+import type { CheckStatus, ErrorCode, ProgressStage, ServiceState, StepOutcome } from '../api/types.js';
 
 export const it = {
 	app: {
@@ -427,6 +427,58 @@ export const it = {
 			folder: 'Cartella',
 			shadowed: 'Oscurati da altri programmi',
 			shadowedBy: (tool: string, by: string) => `${tool} è oscurato da ${by}`
+		},
+		integrations: {
+			title: 'Integrazioni',
+			claude: {
+				title: 'Claude Code',
+				help: 'Aggiunge a Claude Code un plugin di Lampo: a ogni sessione dentro un progetto Lampo Claude riceve URL, PHP, database e servizi del progetto, e le skill lampo:… per usare la CLI. Viene registrato solo per il tuo utente: nei progetti non viene scritto nulla.',
+				state: {
+					isolated: 'Disattivata in modalità isolata',
+					'claude-missing': 'Claude Code non trovato',
+					'not-installed': 'Non installato',
+					installed: (version: string) => `Installato · v${version}`,
+					outdated: 'Da aggiornare'
+				},
+				isolatedHelp: 'Con LAMPO_HOME impostato Lampo non tocca il Claude Code reale.',
+				missingHelp: 'Installa Claude Code (claude nel PATH), poi ricarica.',
+				cliMissing: 'Serve la CLI lampo nel PATH: installa prima gli strumenti da riga di comando qui sopra.',
+				updateError: (error: string) => `Aggiornamento automatico non riuscito: ${error}`,
+				install: 'Installa',
+				update: 'Aggiorna',
+				uninstall: 'Rimuovi',
+				installing: 'Installazione…',
+				removing: 'Rimozione…',
+				reload: 'Ricarica',
+				installed: 'Plugin di Claude Code installato.',
+				removed: 'Plugin di Claude Code rimosso.',
+				failed: 'Operazione non riuscita: vedi i passaggi.',
+				confirmRemove: {
+					title: 'Rimuovere il plugin di Claude Code?',
+					body: 'Lampo toglie il plugin e il suo marketplace da Claude Code ed elimina i file generati.',
+					confirm: 'Rimuovi'
+				},
+				claudeVersion: 'Claude Code',
+				pluginDir: 'Cartella del plugin',
+				log: 'Passaggi',
+				outcome: { ok: 'ok', failed: 'non riuscito', ignored: 'ignorato' } satisfies Record<StepOutcome, string>,
+				steps: {
+					'detect-claude': 'Ricerca di Claude Code',
+					'check-cli': 'CLI lampo',
+					'write-files': 'Scrittura dei file del plugin',
+					'validate-plugin': 'Validazione del plugin',
+					'validate-marketplace': 'Validazione del marketplace',
+					'remove-previous-plugin': 'Rimozione del plugin precedente',
+					'remove-previous-marketplace': 'Rimozione del marketplace precedente',
+					'add-marketplace': 'Aggiunta del marketplace',
+					'install-plugin': 'Installazione del plugin',
+					verify: 'Verifica in claude plugin list',
+					'write-marker': 'Registrazione della versione',
+					'remove-plugin': 'Rimozione del plugin',
+					'remove-marketplace': 'Rimozione del marketplace',
+					'remove-files': 'Eliminazione dei file generati'
+				} as Record<string, string>
+			}
 		},
 		doctor: {
 			title: 'Diagnostica',

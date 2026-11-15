@@ -23,13 +23,14 @@ and `redis-cli`.
 
 | Path | Owns | Reason to change |
 |------|------|------------------|
-| `crates/lampo-domain` | Entities/value objects (project, site, worktree environment, PHP minor, package, service, preset, address, hosts block, shim index, settings), domain rules, `DomainError`/`PortError`, **every port trait** | Business rules |
-| `crates/lampo-application` | Use cases (`Arc<dyn Port>` constructors), serde DTOs, front-end event names, CLI↔app control protocol, task registry | Behaviour of features |
-| `crates/lampo-infra-store` | TOML repositories (projects, worktrees, settings, presets), app paths, app location file, shim index file, shim installer (shims + CLI copy), project detectors, git metadata reader, user PATH, clock | Lampo's own files |
+| `crates/lampo-domain` | Entities/value objects (project, site, worktree environment, PHP minor, package, service, preset, address, hosts block, shim index, settings, Claude Code plugin files), domain rules, `DomainError`/`PortError`, **every port trait** | Business rules |
+| `crates/lampo-application` | Use cases (`Arc<dyn Port>` constructors), serde DTOs, front-end event names, CLI↔app control protocol, task registry, embedded Claude Code skills (`build.rs`) | Behaviour of features |
+| `crates/lampo-infra-store` | TOML repositories (projects, worktrees, settings, presets), app paths, app location file, shim index file, shim installer (shims + CLI copy), project detectors, git metadata reader, user PATH, clock, generated agent-plugin files | Lampo's own files |
 | `crates/lampo-infra-packages` | Embedded + windows.php.net catalogs, downloader, SHA-256, zip extraction, installed registry, VC++ runtime detection, post-install hooks | Where binaries come from |
 | `crates/lampo-infra-web` | Apache config templates + `httpd -t` + runner, php.ini rendering, hosts-file block via the elevated `lampo-hosts-helper` | Apache/PHP/hosts specifics |
-| `crates/lampo-infra-services` | Job Object supervisor, MySQL/Redis runners, port probe, log files, `DatabaseAdmin`, control named pipe, headless app launcher | Local processes and IPC |
+| `crates/lampo-infra-services` | Job Object supervisor, MySQL/Redis runners, port probe, log files, `DatabaseAdmin`, control named pipe, headless app launcher, `claude` CLI runner | Local processes and IPC |
 | `crates/lampo-cli` | `lampo` CLI and `lampo-shim` (copied as `php.exe` etc.): two composition roots (`src/composition.rs`, `src/bin/lampo-shim.rs`, which registers the shim tools) | CLI surface |
+| `claude-plugin/skills` | Skill sources of the Claude Code plugin (`<skill-id>/SKILL.md` + reference files), embedded as is | What agents are taught |
 | `apps/desktop` | SvelteKit GUI (`src/lib/api` typed API, `src/lib/messages` Italian strings) and `src-tauri` (Tauri commands, tray, composition root) | GUI |
 
 Key rules: the domain does no IO and depends on no workspace crate; use cases see only ports;
@@ -73,6 +74,53 @@ lampo project new --git https://github.com/acme/shop.git --in D:\sites [--branch
 lampo project new --laravel shop --in D:\sites [--php 8.4] [--starter-kit react|vue|livewire|svelte] [--phpunit] [--init-git] [--npm]
 #   then registers it like `project create` ([--activate] [--no-database]; `--no-register` skips it)
 ```
+
+### Claude Code integration
+
+A "ghost" integration: nothing is ever written inside a project (no `AGENTS.md`, no project
+`.claude/settings.json`, no project scope). Lampo generates a local plugin `lampo` in a local
+marketplace `lampo` (id `lampo@lampo`, skills invoked as `lampo:<skill>`) into
+`%LOCALAPPDATA%\Lampo\agent-plugins\claude-code\` and registers it **only through the official
+CLI, in user scope**:
+
+```text
+claude plugin validate <dir>/plugins/lampo        claude plugin validate <dir>
+claude plugin uninstall lampo@lampo --scope user  claude plugin marketplace remove lampo   (errors ignored)
+claude plugin marketplace add <dir>                claude plugin install lampo@lampo --scope user
+claude plugin list --json                          (verify: exact id match)
+```
+
+* **Generated files** (`lampo_domain::claude_code`, pure): `marketplace.json`, `plugin.json`
+  (name, version, description, author, homepage/repository, MIT), a README, `hooks/hooks.json`
+  and the skills. The skills are every file under `claude-plugin/skills/<skill-id>/` in the
+  repository, embedded at compile time by `crates/lampo-application/build.rs` (add files there,
+  no Rust change needed). Files are UTF-8 without BOM, LF, relative forward-slash paths.
+* **Version** `<app version>-h<fnv32>` hashed over every generated file (skills, hook, manifests,
+  CLI path): Claude Code caches plugins per version, so it refreshes exactly when content
+  changes. After a successful install the version is written to `.installed-version`.
+* **`SessionStart` hook** (matcher `startup|resume|clear|compact`, timeout 10 s, exec form):
+  `%LOCALAPPDATA%/Lampo/bin/lampo.exe agent context --hook`, the CLI copy in the shim dir that
+  app updates refresh (so installing needs the command-line tools). It reads the hook's JSON on
+  stdin (`cwd`, else the process cwd), resolves the site like `agent context` (file-based, never
+  starts the app; live service states only from an app already running) and prints
+  `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"…"}}` with a
+  compact Markdown summary. Outside a Lampo project, or on any error, it prints nothing and
+  exits 0.
+* **When**: install and removal only on an explicit click (Settings > Integrazioni > Claude Code:
+  Installa / Aggiorna / Rimuovi, with the step log); Lampo never touches `~/.claude` on its own
+  the first time. `Startup` updates silently, concurrently with the environment sync, a plugin
+  whose marker exists and differs from the expected version (file reads only to decide; a plugin
+  removed with `claude plugin uninstall` is forgotten instead of reinstalled); a failure is logged
+  and shown as a warning in the settings card.
+* **`claude`** is found on the user's PATH (registry) or at `~\.local\bin\claude.exe`; npm shims
+  run as `cmd /d /c claude …` with their folder first on PATH, all hidden, through the
+  supervisor's `CommandRunner` (`ClaudeCliRunner`). `claude --version` (10 s) missing = "Claude
+  Code non trovato". With `LAMPO_HOME` set nothing runs: the status is "isolated".
+* **Uninstalling Lampo** (not an update, `/UPDATE`) unregisters the plugin when its marker exists
+  (`NSIS_HOOK_POSTUNINSTALL`, errors ignored) and deletes the generated folder.
+
+`cargo test -p lampo-infra-services --test claude_validate -- --ignored` runs the real
+`claude plugin validate` on a generated plugin (it never installs anything).
 
 ## Process ownership and the CLI
 

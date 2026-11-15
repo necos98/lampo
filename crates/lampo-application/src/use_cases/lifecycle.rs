@@ -12,6 +12,7 @@ use super::environment::EnvironmentSync;
 use super::generation::runner_for;
 use super::service_catalog::ServiceCatalog;
 use super::packages::{InstallPackage, fetch_catalog};
+use super::claude_code::ClaudeCodeSetup;
 use super::shims::ShimSetup;
 use super::support::{COMPOSER_LTS_SERIES, installed_php_minors, newest_of};
 use crate::context::{CallContext, ElevationPolicy, Origin};
@@ -27,16 +28,25 @@ pub struct Startup {
     settings: Arc<dyn SettingsRepository>,
     shims: Arc<ShimSetup>,
     app_location: Arc<dyn AppLocationRecorder>,
+    claude_code: Option<Arc<ClaudeCodeSetup>>,
 }
 
 impl Startup {
     pub fn new(env: Arc<dyn EnvironmentSync>, settings: Arc<dyn SettingsRepository>, shims: Arc<ShimSetup>, app_location: Arc<dyn AppLocationRecorder>) -> Self {
-        Self { env, settings, shims, app_location }
+        Self { env, settings, shims, app_location, claude_code: None }
+    }
+
+    /// Also updates an outdated Claude Code plugin (only one the user installed before).
+    pub fn with_claude_code(mut self, claude_code: Arc<ClaudeCodeSetup>) -> Self {
+        self.claude_code = Some(claude_code);
+        self
     }
 
     /// App location and shims first (failures are only logged: the old files still work). The sync is a no-op
     /// until the first-run wizard completed; its errors (pending hosts change, busy port, …) are
-    /// returned for the GUI to show; everything else was still applied.
+    /// returned for the GUI to show; everything else was still applied. The Claude Code plugin
+    /// update (after the CLI copy is refreshed: the hook calls it) runs concurrently with the
+    /// sync, so its `claude` processes never delay the services; it only logs.
     pub async fn run(&self) -> AppResult<()> {
         if let Err(e) = self.app_location.record_running_app() {
             tracing::warn!("recording the app location failed: {e}");
@@ -46,6 +56,16 @@ impl Startup {
             Ok(false) => {}
             Err(e) => tracing::warn!("refreshing the shims failed: {e}"),
         }
+        let integrations = async {
+            if let Some(claude_code) = &self.claude_code {
+                claude_code.refresh_if_outdated().await;
+            }
+        };
+        let ((), synced) = tokio::join!(integrations, self.sync());
+        synced
+    }
+
+    async fn sync(&self) -> AppResult<()> {
         if !self.settings.load()?.first_run_completed {
             return Ok(());
         }

@@ -558,6 +558,38 @@ export interface ShimStatus {
 	shadowed: ShadowedTool[];
 }
 
+// Integrations (Settings > Integrazioni)
+
+/** `isolated`: isolated data root (`LAMPO_HOME`), the real Claude Code is never touched. */
+export type ClaudeCodeState = 'isolated' | 'claude-missing' | 'not-installed' | 'installed' | 'outdated';
+
+export interface ClaudeCodeStatus {
+	state: ClaudeCodeState;
+	claudeVersion: string | null;
+	installedVersion: string | null;
+	expectedVersion: string;
+	pluginDir: string;
+	cliPath: string;
+	cliInstalled: boolean;
+	/** Last automatic update at startup that failed. */
+	updateError: string | null;
+}
+
+export type StepOutcome = 'ok' | 'failed' | 'ignored';
+
+export interface ClaudeCodeStep {
+	/** Stable id: `detect-claude`, `check-cli`, `write-files`, `validate-plugin`, ... */
+	step: string;
+	outcome: StepOutcome;
+	detail: string | null;
+}
+
+export interface ClaudeCodeAction {
+	ok: boolean;
+	steps: ClaudeCodeStep[];
+	status: ClaudeCodeStatus;
+}
+
 export interface AppInfo {
 	version: string;
 	configDir: string;

@@ -15,6 +15,7 @@
 //! * paths are only *joined and compared*, never touched.
 
 pub mod address;
+pub mod claude_code;
 pub mod detection;
 pub mod error;
 pub mod events;

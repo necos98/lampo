@@ -24,6 +24,8 @@ Windows. Include la CLI `lampo`, pensata anche per i coding agent.
   proprio e database condiviso, nuovo o clonato.
 - **CLI `lampo` per gli agent**: `lampo agent context` descrive in una sola chiamata il progetto
   della cartella corrente, output `--json` ed exit code stabili, nessun prompt interattivo.
+- **Integrazione con Claude Code**, facoltativa: a ogni sessione dentro un progetto Lampo Claude
+  riceve URL, PHP, database e servizi del progetto, più le skill `lampo:…` per usare la CLI.
 - **Shim `.exe`** per `php`, `composer`, `mysql`, `mysqldump` e `redis-cli`, che scelgono da soli
   la versione giusta per la cartella corrente, installati nel PATH insieme alla CLI `lampo`.
 - **Apri il progetto** in Esplora risorse, in VS Code o in un terminale con il PHP del progetto nel
@@ -82,6 +84,21 @@ lampo doctor                          # diagnostica (exit code 14 se trova probl
 Ogni comando accetta `--json` (tranne `exec`) e restituisce exit code stabili, elencati in
 `lampo --help` e in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#lampo-exit-codes-stable).
 `lampo` non chiede mai conferme e non apre il prompt UAC senza `--allow-elevation`.
+
+## Integrazione Claude Code
+
+In Impostazioni › Integrazioni › Claude Code, **Installa** registra in Claude Code (solo per il
+tuo utente, con `claude plugin …`) un plugin generato da Lampo in
+`%LOCALAPPDATA%\Lampo\agent-plugins\claude-code`. Nei progetti non viene scritto nulla.
+
+- All'avvio di ogni sessione un hook esegue `lampo agent context --hook`: dentro un progetto o
+  un worktree di Lampo aggiunge al contesto progetto, URL, PHP, document root, database e
+  servizi; altrove non aggiunge niente.
+- Le skill `lampo:…` spiegano a Claude come usare la CLI `lampo`.
+- Serve la CLI nel PATH (Impostazioni › Strumenti da riga di comando).
+- Dopo un aggiornamento di Lampo il plugin, se l'avevi installato, si aggiorna da solo all'avvio;
+  **Rimuovi** lo toglie da Claude Code. Lampo non tocca Claude Code se non lo chiedi tu, e lo
+  disinstallatore toglie il plugin.
 
 ## Documentazione
 

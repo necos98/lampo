@@ -1,6 +1,7 @@
 //! Use-case tests against the in-memory fakes of [`crate::testing`].
 
 mod allocation;
+mod claude_code;
 mod environment;
 mod misc;
 mod packages;

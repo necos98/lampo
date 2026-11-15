@@ -432,6 +432,97 @@ pub fn agent_context(ctx: &AgentContextDto) -> String {
     out
 }
 
+fn service_state(state: ServiceStateDto) -> &'static str {
+    match state {
+        ServiceStateDto::Stopped => "stopped",
+        ServiceStateDto::Starting => "starting",
+        ServiceStateDto::Running => "running",
+        ServiceStateDto::Stopping => "stopping",
+        ServiceStateDto::Failed => "failed",
+        ServiceStateDto::Unknown => "unknown",
+    }
+}
+
+/// The compact Markdown summary the Claude Code `SessionStart` hook adds to a session (a few
+/// hundred tokens): the essentials of `agent context`, with `live` service states when the app
+/// is running.
+pub fn session_context(ctx: &AgentContextDto, live: Option<&[ServiceStatusDto]>) -> String {
+    let mut out = String::from("# Lampo project context\n\n");
+    out.push_str("This folder is served locally by Lampo (Windows PHP environment). Snapshot taken at session start: run `lampo agent context --json` for the full, current details.\n\n");
+    let id = ctx.project_id.clone().unwrap_or_default();
+    match &ctx.project_name {
+        Some(name) if *name != id => out.push_str(&format!("- Project: `{id}` ({name})")),
+        _ => out.push_str(&format!("- Project: `{id}`")),
+    }
+    if let Some(site) = ctx.resolution.site.as_ref().filter(|s| **s != id) {
+        out.push_str(&format!(", site `{site}`"));
+    }
+    out.push('\n');
+    if let Some(root) = &ctx.root {
+        out.push_str(&format!("- Folder: {root}\n"));
+    }
+    if let Some(wt) = &ctx.worktree {
+        let branch = wt.branch.as_ref().map(|b| format!(" (branch `{b}`)")).unwrap_or_default();
+        if wt.environment_up {
+            out.push_str(&format!("- Git worktree {}{branch} with its own environment (URL and database below are its own)\n", wt.worktree_root));
+        } else {
+            out.push_str(&format!(
+                "- Git worktree {}{branch} without an environment: URL and database below are the parent project's; `lampo worktree up` gives it its own\n",
+                wt.worktree_root
+            ));
+        }
+    }
+    match &ctx.url {
+        Some(url) => {
+            let others: Vec<&str> = ctx.urls.iter().map(String::as_str).filter(|u| u != url).collect();
+            let also = if others.is_empty() { String::new() } else { format!(" (also {})", others.join(", ")) };
+            out.push_str(&format!("- URL: {url}{also}\n"));
+        }
+        None => out.push_str("- URL: none\n"),
+    }
+    if let Some(doc) = &ctx.document_root {
+        out.push_str(&format!("- Document root: {doc}\n"));
+    }
+    let composer = if ctx.php.composer_phar.is_some() { format!("Composer {}", ctx.php.composer_channel) } else { "Composer not installed".to_string() };
+    out.push_str(&format!("- PHP {} ({composer}); `php` and `composer` on PATH already use it\n", ctx.php.version));
+    match &ctx.database {
+        Some(db) => {
+            let password = if db.password.is_empty() { "empty password".to_string() } else { format!("password `{}`", db.password) };
+            out.push_str(&format!(
+                "- Database: MySQL {} at {}:{}, user `{}`, {password}, database `{}` (Lampo never edits `.env`)\n",
+                db.mysql_version, db.host, db.port, db.user, db.database
+            ));
+        }
+        None => out.push_str("- Database: none\n"),
+    }
+    if !ctx.services.is_empty() {
+        let services: Vec<String> = ctx
+            .services
+            .iter()
+            .map(|s| {
+                let state = live.and_then(|l| l.iter().find(|x| x.service == s.service)).map(|x| format!(", {}", service_state(x.state))).unwrap_or_default();
+                format!("{} {}:{}{state}", s.label, s.host, s.port)
+            })
+            .collect();
+        out.push_str(&format!("- Services: {}\n", services.join("; ")));
+    }
+    out.push_str(if ctx.app_running { "- Lampo app: running\n" } else { "- Lampo app: not running (mutating `lampo` commands start it)\n" });
+    // The app line above already says whether it runs.
+    for hint in ctx.hints.iter().filter(|h| !h.starts_with("the Lampo app is not running")) {
+        out.push_str(&format!("- Note: {hint}\n"));
+    }
+    if !ctx.logs.is_empty() {
+        let ids: Vec<&str> = ctx.logs.iter().map(|l| l.id.as_str()).collect();
+        out.push_str(&format!("- Logs: `lampo logs <source> --tail 50` with source {}\n", ids.join(", ")));
+    }
+    out.push_str(
+        "\nKey commands (add `--json` for machine output; nothing prompts): `lampo status`, `lampo up` / `lampo down`, \
+         `lampo exec -- <cmd>` (this project's toolchain), `lampo db list|create|import|export`, `lampo worktree up`, `lampo doctor`. \
+         If `lampo` is not on PATH use `%LOCALAPPDATA%\\Lampo\\bin\\lampo.exe`.\n",
+    );
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

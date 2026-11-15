@@ -15,7 +15,7 @@
 //! | [`AppLocationFile`]        | `AppLocationRecorder`                   |
 //! | [`detectors`]              | `ProjectDetector` (one per framework)   |
 //! | [`FsGitInspector`]         | `GitInspector`                          |
-//! | [`LocalFileSystem`]        | `FileSystemInspector`, `ScaffoldFiles`  |
+//! | [`LocalFileSystem`]        | `FileSystemInspector`, `ScaffoldFiles`, `AgentPluginFiles` |
 //! | [`WindowsUserPath`]        | `UserPathEditor`                        |
 //! | [`ProcessOnlyUserPath`]    | `UserPathEditor` (isolated `LAMPO_HOME`: registry untouched) |
 //! | [`PathExecutableLocator`]  | `ExecutableLocator`                     |

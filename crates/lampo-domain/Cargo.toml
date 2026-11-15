@@ -11,7 +11,6 @@ publish.workspace = true
 # Only pure, IO-free crates are allowed here.
 async-trait = { workspace = true }
 serde = { workspace = true }
-thiserror = { workspace = true }
-
-[dev-dependencies]
+# Pure JSON rendering/parsing of the Claude Code plugin files (`claude_code`).
 serde_json = { workspace = true }
+thiserror = { workspace = true }

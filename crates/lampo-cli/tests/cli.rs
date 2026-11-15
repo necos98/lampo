@@ -93,3 +93,32 @@ fn version_is_printed() {
     assert_eq!(code, 0);
     assert!(out.starts_with("lampo "));
 }
+
+/// The hook never disturbs a Claude Code session: outside any project, or when nothing can be
+/// resolved (empty isolated data root, no default PHP), it prints nothing and exits 0.
+#[test]
+fn agent_context_hook_is_silent_outside_projects() {
+    let home = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_lampo"))
+        .args(["agent", "context", "--hook"])
+        .env("LAMPO_HOME", home.path())
+        .env_remove("LAMPO_PROJECT")
+        .current_dir(cwd.path())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        use std::io::Write;
+        let payload = format!(r#"{{"cwd":{:?},"hook_event_name":"SessionStart"}}"#, cwd.path().display().to_string());
+        child.stdin.take().unwrap().write_all(payload.as_bytes()).unwrap();
+    }
+    let started = std::time::Instant::now();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    assert!(out.stdout.is_empty(), "{}", String::from_utf8_lossy(&out.stdout));
+    assert!(out.stderr.is_empty(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+}

@@ -490,3 +490,72 @@ async fn project_new_laravel_maps_the_options_and_can_skip_registration() {
         assert!(crate::cli::build_command().try_get_matches_from(argv).is_err(), "{bad:?}");
     }
 }
+
+fn hook_json(out: &str) -> String {
+    let doc = parse(out);
+    assert_eq!(doc["hookSpecificOutput"]["hookEventName"], "SessionStart");
+    doc["hookSpecificOutput"]["additionalContext"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn agent_context_hook_summarises_the_project_of_the_hook_cwd() {
+    let fake = Fake::new();
+    fake.app_running.store(false, Ordering::SeqCst);
+    *fake.hook_payload.lock().unwrap() = Some(r#"{"session_id":"x","cwd":"D:\\elsewhere\\shop","hook_event_name":"SessionStart","source":"startup"}"#.into());
+    let (code, out, err) = run_cli(&fake, &["agent", "context", "--hook"]).await;
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out.lines().count(), 1, "one JSON line: {out}");
+    let text = hook_json(&out);
+    for needle in [
+        "# Lampo project context",
+        "`shop` (Shop)",
+        "http://127.0.0.1:8101",
+        r"C:\work\shop\public",
+        "PHP 8.3",
+        "MySQL 8.4 at 127.0.0.1:3306",
+        "user `root`",
+        "database `shop`",
+        "lampo worktree up",
+        "lampo agent context --json",
+        "not running",
+    ] {
+        assert!(text.contains(needle), "missing {needle:?} in:\n{text}");
+    }
+    // Compact: a few hundred tokens at most.
+    assert!(text.len() < 2400, "{} bytes:\n{text}", text.len());
+    assert_eq!(fake.agent_requests.lock().unwrap()[0].cwd, r"D:\elsewhere\shop");
+    assert!(fake.sent.lock().unwrap().is_empty(), "never talks to (or starts) the app when it is not running");
+    assert_eq!(fake.ensure_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn agent_context_hook_shows_live_service_states_from_a_running_app() {
+    let fake = Fake::new();
+    let mut ctx = agent_context_json();
+    ctx["appRunning"] = json!(true);
+    *fake.agent_result.lock().unwrap() = Some(Ok(ctx));
+    fake.reply(Ok(json!({"appRunning": true, "projects": [], "worktreeCount": 0, "services": [
+        {"service": "mysql-8.4", "kind": "mysql", "label": "MySQL 8.4", "state": "running", "pid": 1, "port": 3306, "message": null, "required": true, "requiredBy": ["shop"]}
+    ]})));
+    let (code, out, _) = run_cli(&fake, &["agent", "context", "--hook"]).await;
+    assert_eq!(code, 0);
+    let text = hook_json(&out);
+    assert!(text.contains("MySQL 8.4 127.0.0.1:3306, running"), "{text}");
+    assert!(matches!(fake.last_request().0, ControlRequest::Status));
+    // Without a stdin payload the process cwd is used.
+    assert_eq!(fake.agent_requests.lock().unwrap()[0].cwd, r"C:\work\shop");
+}
+
+#[tokio::test]
+async fn agent_context_hook_prints_nothing_outside_a_lampo_project() {
+    let fake = Fake::new();
+    let mut ctx = agent_context_json();
+    for key in ["projectId", "projectName", "root", "url", "documentRoot", "database"] {
+        ctx[key] = Value::Null;
+    }
+    ctx["resolution"] = site_json(None);
+    *fake.agent_result.lock().unwrap() = Some(Ok(ctx));
+    *fake.hook_payload.lock().unwrap() = Some("not json".into());
+    let (code, out, err) = run_cli(&fake, &["agent", "context", "--hook"]).await;
+    assert_eq!((code, out.as_str(), err.as_str()), (0, "", ""));
+}

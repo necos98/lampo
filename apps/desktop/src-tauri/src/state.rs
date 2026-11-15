@@ -49,6 +49,7 @@ pub struct AppState {
     pub settings: Arc<SettingsService>,
     pub doctor: Arc<Doctor>,
     pub shims: Arc<ShimSetup>,
+    pub claude_code: Arc<ClaudeCodeSetup>,
 
     pub startup: Arc<Startup>,
     pub shutdown: Arc<Shutdown>,

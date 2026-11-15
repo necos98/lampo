@@ -69,6 +69,7 @@ pub struct CliContext {
     pub toolchain: Arc<dyn ToolchainReader>,
     pub doctor: Arc<dyn DoctorRunner>,
     pub agent: Arc<dyn AgentContextReader>,
+    pub hook_input: Arc<dyn HookInput>,
     pub shims: Arc<dyn ShimAdmin>,
     pub offline_status: Arc<dyn OfflineStatus>,
     pub app: Arc<dyn AppGateway>,

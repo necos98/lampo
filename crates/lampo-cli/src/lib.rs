@@ -62,6 +62,8 @@ pub fn run(args: Vec<OsString>) -> i32 {
         }
     };
 
+    // The Claude Code hook must never disturb a session: any failure is silent, exit 0.
+    let hook = matches!(&cli.command, cli::Command::Agent(cli::AgentCommand::Context(a)) if a.hook);
     std::panic::set_hook(Box::new(|info| {
         if let Ok(mut slot) = PANIC_MESSAGE.lock() {
             *slot = info.to_string();
@@ -70,6 +72,7 @@ pub fn run(args: Vec<OsString>) -> i32 {
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| execute(cli, &io)));
     match outcome {
         Ok(Ok(code)) => code,
+        _ if hook => 0,
         Ok(Err(error)) => error_doc::report(&io, &error),
         Err(_) => {
             let message = PANIC_MESSAGE.lock().map(|m| m.clone()).unwrap_or_default();

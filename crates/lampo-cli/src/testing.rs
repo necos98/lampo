@@ -79,6 +79,11 @@ pub struct Fake {
     pub spawned: Mutex<Vec<SpawnSpec>>,
     pub spawn_result: Mutex<Result<i32, SpawnError>>,
     pub shim_installed: AtomicBool,
+    /// What the hook mode reads from stdin.
+    pub hook_payload: Mutex<Option<String>>,
+    /// Replaces the canned agent context (`None`: [`agent_context_json`]).
+    pub agent_result: Mutex<Option<AppResult<Value>>>,
+    pub agent_requests: Mutex<Vec<ResolveRequestDto>>,
 }
 
 impl Fake {
@@ -101,6 +106,9 @@ impl Fake {
             spawned: Mutex::new(Vec::new()),
             spawn_result: Mutex::new(Ok(0)),
             shim_installed: AtomicBool::new(false),
+            hook_payload: Mutex::new(None),
+            agent_result: Mutex::new(None),
+            agent_requests: Mutex::new(Vec::new()),
         })
     }
 
@@ -128,6 +136,7 @@ impl Fake {
             toolchain: self.clone(),
             doctor: self.clone(),
             agent: self.clone(),
+            hook_input: self.clone(),
             shims: self.clone(),
             offline_status: self.clone(),
             app: self.clone(),
@@ -206,8 +215,18 @@ impl DoctorRunner for Fake {
 }
 
 impl AgentContextReader for Fake {
-    fn context(&self, _: &ResolveRequestDto) -> AppResult<AgentContextDto> {
-        Ok(dto(agent_context_json()))
+    fn context(&self, request: &ResolveRequestDto) -> AppResult<AgentContextDto> {
+        self.agent_requests.lock().unwrap().push(request.clone());
+        match self.agent_result.lock().unwrap().clone() {
+            Some(result) => result.map(dto),
+            None => Ok(dto(agent_context_json())),
+        }
+    }
+}
+
+impl HookInput for Fake {
+    fn read(&self) -> Option<String> {
+        self.hook_payload.lock().unwrap().clone()
     }
 }
 

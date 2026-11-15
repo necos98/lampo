@@ -15,8 +15,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
-# Only `sync`/`time` primitives (task registry, timeouts); no IO.
-tokio = { workspace = true, features = ["sync", "time"] }
+# Only `sync`/`time` primitives (task registry, timeouts) and `join!`; no IO.
+tokio = { workspace = true, features = ["sync", "time", "macros"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }

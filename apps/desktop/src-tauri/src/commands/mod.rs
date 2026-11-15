@@ -10,6 +10,7 @@
 pub mod app;
 pub mod diagnostics;
 mod external_apps;
+pub mod integrations;
 pub mod logs;
 pub mod packages;
 pub mod presets;
@@ -76,6 +77,9 @@ macro_rules! lampo_command_handler {
             $crate::commands::diagnostics::run_doctor,
             $crate::commands::diagnostics::shim_status,
             $crate::commands::diagnostics::install_shims,
+            $crate::commands::integrations::claude_code_status,
+            $crate::commands::integrations::install_claude_code,
+            $crate::commands::integrations::uninstall_claude_code,
         ]
     };
 }

@@ -85,6 +85,7 @@ pub fn build() -> AppResult<CliContext> {
             paths: paths.clone(),
             services: services.clone(),
         })),
+        hook_input: Arc::new(crate::local::StdinHookInput),
         toolchain: Arc::new(ToolchainQuery::new(resolver, paths.clone())),
         logs: Arc::new(LogQueries::new(Arc::new(FileLogReader), projects_repo.clone(), settings_repo.clone(), services.clone(), paths.clone())),
         doctor: Arc::new(Doctor::new(DoctorDeps {

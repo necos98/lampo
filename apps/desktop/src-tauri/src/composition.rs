@@ -181,6 +181,15 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let prune_worktrees = Arc::new(PruneWorktrees::new(projects.clone(), worktrees.clone(), fs.clone(), worktree_databases, env.clone(), events.clone()));
     let shutdown = Arc::new(Shutdown::new(runners, service_catalog.clone(), settings.clone()));
     let shims = Arc::new(ShimSetup::new(shim_installer.clone(), user_path.clone(), locator.clone(), paths.clone(), shim_tools.clone()));
+    // Claude Code: user scope only, never under an isolated data root (`LAMPO_HOME`).
+    let claude_code = Arc::new(ClaudeCodeSetup::new(ClaudeCodeSetupDeps {
+        cli: Arc::new(services::ClaudeCliRunner::new(commands.clone(), locator.clone(), std::env::var_os("USERPROFILE").map(PathBuf::from))),
+        files: Arc::new(store::LocalFileSystem),
+        paths: paths.clone(),
+        app_version: env!("CARGO_PKG_VERSION").into(),
+        skills: embedded_skills(),
+        isolated: isolated_home.is_some(),
+    }));
 
     let quit_handle = handle.clone();
     let control_handler: Arc<dyn ControlRequestHandler> = Arc::new(ControlDispatcher::new(ControlServices {
@@ -280,7 +289,8 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
             ],
         })),
         shims: shims.clone(),
-        startup: Arc::new(Startup::new(env, settings, shims, app_location)),
+        claude_code: claude_code.clone(),
+        startup: Arc::new(Startup::new(env, settings, shims, app_location).with_claude_code(claude_code)),
         shutdown,
     };
 

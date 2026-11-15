@@ -106,6 +106,25 @@ impl AppGateway for ControlClient {
     }
 }
 
+/// Hook JSON on stdin; nothing when stdin is a console (a person running the command).
+pub struct StdinHookInput;
+
+/// Hook payloads are small; never read more.
+const HOOK_INPUT_LIMIT: u64 = 1024 * 1024;
+
+impl HookInput for StdinHookInput {
+    fn read(&self) -> Option<String> {
+        use std::io::{IsTerminal, Read};
+        let stdin = std::io::stdin();
+        if stdin.is_terminal() {
+            return None;
+        }
+        let mut text = String::new();
+        stdin.lock().take(HOOK_INPUT_LIMIT).read_to_string(&mut text).ok()?;
+        Some(text).filter(|t| !t.trim().is_empty())
+    }
+}
+
 /// Ctrl+C as seen by the tokio runtime.
 pub struct CtrlC;
 

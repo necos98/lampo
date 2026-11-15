@@ -32,6 +32,8 @@
 //!   tools\laravel-installer\<php>\ Lampo's own `laravel/installer` (Composer project)
 //!   tools\composer\<php>\composer.bat   `composer` for scaffolding commands
 //!   generated\php\_tools-<php>\php.ini  php.ini of Lampo's own tools
+//!   agent-plugins\claude-code\     generated Claude Code plugin (a local marketplace, see
+//!                                  `claude_code`), registered in user scope only on request
 //! ```
 
 use std::path::PathBuf;
@@ -177,6 +179,17 @@ impl LampoPaths {
         self.tools_dir().join("composer").join(php.to_string())
     }
 
+    /// The generated Claude Code plugin (a local marketplace): `agent-plugins\claude-code`.
+    pub fn claude_plugin_dir(&self) -> PathBuf {
+        self.data_root.join("agent-plugins").join("claude-code")
+    }
+
+    /// The CLI copy in the shim dir (`bin\lampo.exe`, refreshed after app updates): the stable
+    /// path agent integrations call.
+    pub fn shim_cli_exe(&self) -> PathBuf {
+        self.shim_dir().join("lampo.exe")
+    }
+
     /// php.ini used by Lampo's own tools (scaffolding) for a PHP minor:
     /// `generated\php\_tools-<php>`.
     pub fn tool_php_ini_dir(&self, php: PhpMinor) -> PathBuf {
@@ -200,5 +213,7 @@ mod tests {
         assert_eq!(p.service_log_dir(&"mysql-5.7".parse().unwrap()), PathBuf::from(r"C:\data").join("logs").join("mysql-5.7"));
         assert_eq!(p.apache_config_dir(), PathBuf::from(r"C:\data").join("generated").join("apache"));
         assert_eq!(p.app_location_file(), PathBuf::from(r"C:\data").join("app-location.txt"));
+        assert_eq!(p.claude_plugin_dir(), PathBuf::from(r"C:\data").join("agent-plugins").join("claude-code"));
+        assert_eq!(p.shim_cli_exe(), PathBuf::from(r"C:\data").join("bin").join("lampo.exe"));
     }
 }

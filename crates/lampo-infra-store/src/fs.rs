@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use lampo_domain::ports::{FileSystemInspector, ScaffoldFiles};
+use lampo_domain::ports::{AgentPluginFiles, FileSystemInspector, ScaffoldFiles};
 use lampo_domain::scaffold::PathState;
 use lampo_domain::{PortError, PortResult};
 
@@ -84,6 +84,42 @@ impl ScaffoldFiles for LocalFileSystem {
     }
 }
 
+impl AgentPluginFiles for LocalFileSystem {
+    fn read_text(&self, path: &Path) -> PortResult<Option<String>> {
+        match std::fs::read_to_string(path) {
+            Ok(text) => Ok(Some(text)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(PortError::io(format!("reading {}", path.display()), e)),
+        }
+    }
+
+    fn exists(&self, path: &Path) -> bool {
+        path.exists()
+    }
+
+    fn list_dir(&self, dir: &Path) -> PortResult<Vec<String>> {
+        let entries = match std::fs::read_dir(dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(PortError::io(format!("listing {}", dir.display()), e)),
+        };
+        Ok(entries.flatten().filter_map(|e| e.file_name().into_string().ok()).collect())
+    }
+
+    fn write_text(&self, path: &Path, contents: &str) -> PortResult<()> {
+        self.write_file(path, contents)
+    }
+
+    fn remove(&self, path: &Path) -> PortResult<()> {
+        match std::fs::symlink_metadata(path) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(PortError::io(format!("removing {}", path.display()), e)),
+            Ok(meta) if meta.is_dir() => self.remove_dir_all(path),
+            Ok(_) => std::fs::remove_file(path).map_err(|e| PortError::io(format!("removing {}", path.display()), e)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,5 +143,26 @@ mod tests {
         fs.remove_dir_all(&dir).unwrap();
         assert_eq!(fs.path_state(&dir), PathState::Missing);
         fs.remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn agent_plugin_files_round_trip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fs = LocalFileSystem;
+        let root = tmp.path().join("claude-code");
+        assert_eq!(fs.read_text(&root.join("x.json")).unwrap(), None);
+        assert!(fs.list_dir(&root).unwrap().is_empty());
+        fs.write_text(&root.join("skills").join("lampo").join("SKILL.md"), "---\n").unwrap();
+        fs.write_text(&root.join("marker"), "1").unwrap();
+        assert_eq!(std::fs::read(root.join("marker")).unwrap(), b"1", "no BOM");
+        assert_eq!(fs.read_text(&root.join("marker")).unwrap().as_deref(), Some("1"));
+        let mut names = fs.list_dir(&root).unwrap();
+        names.sort();
+        assert_eq!(names, ["marker", "skills"]);
+        fs.remove(&root.join("marker")).unwrap();
+        fs.remove(&root.join("skills")).unwrap();
+        fs.remove(&root.join("missing")).unwrap();
+        assert!(fs.list_dir(&root).unwrap().is_empty());
+        assert!(fs.exists(&root) && !fs.exists(&root.join("skills")));
     }
 }

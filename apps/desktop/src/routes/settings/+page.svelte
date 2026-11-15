@@ -7,6 +7,7 @@
 	import DoctorPanel from '#lib/components/settings/DoctorPanel.svelte';
 	import PresetsPanel from '#lib/components/settings/PresetsPanel.svelte';
 	import SettingsForm from '#lib/components/settings/SettingsForm.svelte';
+	import ClaudeCodePanel from '#lib/components/settings/ClaudeCodePanel.svelte';
 	import ShimsPanel from '#lib/components/settings/ShimsPanel.svelte';
 	import UpdatesPanel from '#lib/components/settings/UpdatesPanel.svelte';
 	import { Separator } from '#lib/components/ui/separator/index.js';
@@ -33,6 +34,8 @@
 	<UpdatesPanel />
 	<Separator class="my-6" />
 	<ShimsPanel />
+	<Separator class="my-6" />
+	<ClaudeCodePanel />
 	<Separator class="my-6" />
 	<PresetsPanel />
 	<Separator class="my-6" />

@@ -50,6 +50,12 @@ pub trait AgentContextReader: Send + Sync {
     fn context(&self, request: &ResolveRequestDto) -> AppResult<AgentContextDto>;
 }
 
+/// What a Claude Code hook passes on stdin (a JSON object), read only by the hook mode.
+pub trait HookInput: Send + Sync {
+    /// `None` when stdin is a console or empty.
+    fn read(&self) -> Option<String>;
+}
+
 pub trait ShimAdmin: Send + Sync {
     fn status(&self) -> AppResult<ShimStatusDto>;
     fn install(&self) -> AppResult<ShimStatusDto>;

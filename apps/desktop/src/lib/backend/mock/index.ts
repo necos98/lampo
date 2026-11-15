@@ -55,6 +55,18 @@ export function createMockBackend({ fresh }: Options): Backend {
 		firstRunCompleted: !fresh
 	};
 	let shims: T.ShimStatus = { shimDir: 'C:\\Users\\dev\\AppData\\Local\\Lampo\\shims', installed: true, onPath: false, shadowed: [{ tool: 'php', shim: 'C:\\Users\\dev\\AppData\\Local\\Lampo\\shims\\php.exe', shadowedBy: 'C:\\xampp\\php\\php.exe' }] };
+	const expectedPlugin = '0.1.0-mock-h1a2b3c4d';
+	let claudeCode: T.ClaudeCodeStatus = {
+		state: 'not-installed',
+		claudeVersion: '2.1.0 (Claude Code)',
+		installedVersion: null,
+		expectedVersion: expectedPlugin,
+		pluginDir: 'C:\\Users\\dev\\AppData\\Local\\Lampo\\agent-plugins\\claude-code',
+		cliPath: 'C:\\Users\\dev\\AppData\\Local\\Lampo\\bin\\lampo.exe',
+		cliInstalled: true,
+		updateError: null
+	};
+	const step = (s: string, detail: string | null = null): T.ClaudeCodeStep => ({ step: s, outcome: 'ok', detail });
 
 	const services = new Map<string, T.ServiceStatus>();
 	const serviceLabel = (service: string) => (service.startsWith('mysql-') ? `MySQL ${service.slice(6)}` : service.charAt(0).toUpperCase() + service.slice(1));
@@ -610,6 +622,34 @@ export function createMockBackend({ fresh }: Options): Backend {
 			await sleep(600);
 			shims = { ...shims, installed: true, onPath: true, shadowed: [] };
 			return clone(shims);
+		},
+		claudeCodeStatus: async () => {
+			await sleep(400);
+			return clone(claudeCode);
+		},
+		installClaudeCode: async () => {
+			await sleep(1500);
+			claudeCode = { ...claudeCode, state: 'installed', installedVersion: expectedPlugin, updateError: null };
+			const steps = [
+				step('detect-claude', claudeCode.claudeVersion),
+				step('check-cli', claudeCode.cliPath),
+				step('write-files', claudeCode.pluginDir),
+				step('validate-plugin'),
+				step('validate-marketplace'),
+				{ step: 'remove-previous-plugin', outcome: 'ignored' as const, detail: 'Plugin "lampo@lampo" not found' },
+				step('remove-previous-marketplace'),
+				step('add-marketplace'),
+				step('install-plugin'),
+				step('verify', 'lampo@lampo'),
+				step('write-marker', expectedPlugin)
+			];
+			return { ok: true, steps, status: clone(claudeCode) };
+		},
+		uninstallClaudeCode: async () => {
+			await sleep(900);
+			claudeCode = { ...claudeCode, state: 'not-installed', installedVersion: null, updateError: null };
+			const steps = [step('detect-claude', claudeCode.claudeVersion), step('remove-plugin'), step('remove-marketplace'), step('remove-files', claudeCode.pluginDir)];
+			return { ok: true, steps, status: clone(claudeCode) };
 		}
 	};
 

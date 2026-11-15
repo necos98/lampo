@@ -61,7 +61,10 @@ export const COMMANDS = {
 	updateSettings: 'update_settings',
 	runDoctor: 'run_doctor',
 	shimStatus: 'shim_status',
-	installShims: 'install_shims'
+	installShims: 'install_shims',
+	claudeCodeStatus: 'claude_code_status',
+	installClaudeCode: 'install_claude_code',
+	uninstallClaudeCode: 'uninstall_claude_code'
 } as const;
 
 export type CommandName = (typeof COMMANDS)[keyof typeof COMMANDS];
@@ -147,3 +150,8 @@ export const updateSettings = (settings: T.Settings) => call<T.Settings>(COMMAND
 export const runDoctor = () => call<T.DoctorReport>(COMMANDS.runDoctor);
 export const shimStatus = () => call<T.ShimStatus>(COMMANDS.shimStatus);
 export const installShims = () => call<T.ShimStatus>(COMMANDS.installShims);
+
+// Integrations
+export const claudeCodeStatus = () => call<T.ClaudeCodeStatus>(COMMANDS.claudeCodeStatus);
+export const installClaudeCode = () => call<T.ClaudeCodeAction>(COMMANDS.installClaudeCode);
+export const uninstallClaudeCode = () => call<T.ClaudeCodeAction>(COMMANDS.uninstallClaudeCode);

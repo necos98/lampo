@@ -15,6 +15,7 @@
 //! | [`NamedPipeControlClient`]   | `ControlChannelClient`                       |
 //! | [`HeadlessAppLauncher`]      | `AppLauncher`                                |
 //! | [`TokioTimer`]               | `Timer`                                      |
+//! | [`ClaudeCliRunner`]          | `ClaudeCodeCli` (`claude` via the `CommandRunner`) |
 //!
 //! Internal modules: `process` (process creation inside the job, IOCP stdio pipes),
 //! `service_host` (what every supervised runner shares; runners only describe their service),
@@ -23,6 +24,7 @@
 #[cfg(not(windows))]
 compile_error!("lampo-infra-services targets Windows only");
 
+pub mod claude_code;
 pub mod control_pipe;
 pub mod database;
 pub mod launcher;
@@ -36,6 +38,7 @@ pub mod supervisor;
 pub mod timer;
 mod win;
 
+pub use claude_code::ClaudeCliRunner;
 pub use control_pipe::{NamedPipeControlClient, NamedPipeControlServer};
 pub use database::MysqlCliAdmin;
 pub use launcher::HeadlessAppLauncher;

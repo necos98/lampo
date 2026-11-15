@@ -102,7 +102,8 @@ pub async fn run(cli: Cli, ctx: &CliContext, io: &Io) -> AppResult<i32> {
         Command::Exec(a) => toolchain::exec(&cmd, a),
         Command::Env(a) => toolchain::env(&cmd, a),
         Command::Doctor => diagnostics::doctor(&cmd).await,
-        Command::Agent(AgentCommand::Context) => diagnostics::agent_context(&cmd),
+        Command::Agent(AgentCommand::Context(a)) if a.hook => diagnostics::agent_context_hook(&cmd).await,
+        Command::Agent(AgentCommand::Context(_)) => diagnostics::agent_context(&cmd),
         Command::Shims(c) => diagnostics::shims(&cmd, c),
     }
 }
