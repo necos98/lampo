@@ -15,7 +15,7 @@ use lampo_domain::hostname::Tld;
 use lampo_domain::hosts::HostsBlock;
 use lampo_domain::logs::{LogChunk, LogLine, LogQuery};
 use lampo_domain::mysql::{DatabaseName, MysqlSeries};
-use lampo_domain::package::{CatalogChannel, CatalogEntry, DownloadUrl, InstalledPackage, PackageId, PackageKind, PackagePayload, Sha256Digest};
+use lampo_domain::package::{CatalogChannel, CatalogEntry, DownloadUrl, DownloadedFile, InstalledPackage, PackageId, PackageKind, PackagePayload, Sha256Digest};
 use lampo_domain::paths::LampoPaths;
 use lampo_domain::php::PhpMinor;
 use lampo_domain::ports::*;
@@ -569,23 +569,32 @@ impl PackageCatalogSource for FakeSource {
 }
 
 /// Reports two progress chunks; cancels itself between them when `cancel_midway` is set.
-#[derive(Default)]
+/// The "downloaded" file hashes to `digest` (that of every `catalog_entry` by default).
 pub struct FakeDownloader {
     pub downloads: Mutex<Vec<PathBuf>>,
+    /// The size limit of each download.
+    pub limits: Mutex<Vec<Option<u64>>>,
     pub discarded: Mutex<Vec<PathBuf>>,
     pub cancel_midway: AtomicBool,
+    pub digest: Mutex<Sha256Digest>,
+}
+impl Default for FakeDownloader {
+    fn default() -> Self {
+        Self { downloads: Mutex::default(), limits: Mutex::default(), discarded: Mutex::default(), cancel_midway: AtomicBool::default(), digest: Mutex::new(digest(7)) }
+    }
 }
 #[async_trait]
 impl PackageDownloader for FakeDownloader {
-    async fn download(&self, _url: &DownloadUrl, destination: &Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<u64> {
+    async fn download(&self, _url: &DownloadUrl, destination: &Path, max_bytes: Option<u64>, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<DownloadedFile> {
         lock(&self.downloads).push(destination.to_path_buf());
+        lock(&self.limits).push(max_bytes);
         progress.report(Progress::new(ProgressStage::Downloading, 500, Some(1000)));
         if self.cancel_midway.load(Ordering::SeqCst) {
             cancel.cancel();
         }
         cancel.check()?;
         progress.report(Progress::new(ProgressStage::Downloading, 1000, Some(1000)));
-        Ok(1000)
+        Ok(DownloadedFile { bytes: 1000, sha256: *lock(&self.digest) })
     }
     async fn discard(&self, destination: &Path) -> PortResult<()> {
         lock(&self.discarded).push(destination.to_path_buf());
@@ -593,22 +602,23 @@ impl PackageDownloader for FakeDownloader {
     }
 }
 
-pub struct FakeChecksum(pub Mutex<Sha256Digest>);
-#[async_trait]
-impl ChecksumCalculator for FakeChecksum {
-    async fn sha256(&self, _file: &Path) -> PortResult<Sha256Digest> {
-        Ok(*lock(&self.0))
-    }
-}
-
+/// Records extractions (archive, destination) and single-file placements (file, destination, name).
 #[derive(Default)]
-pub struct FakeExtractor(pub Mutex<Vec<(PathBuf, PathBuf)>>);
+pub struct FakeExtractor {
+    pub extracted: Mutex<Vec<(PathBuf, PathBuf)>>,
+    pub placed: Mutex<Vec<(PathBuf, PathBuf, String)>>,
+}
 #[async_trait]
 impl ArchiveExtractor for FakeExtractor {
     async fn extract_zip(&self, archive: &Path, destination: &Path, _strip: Option<&str>, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
         cancel.check()?;
         progress.report(Progress::new(ProgressStage::Extracting, 1, Some(1)));
-        lock(&self.0).push((archive.to_path_buf(), destination.to_path_buf()));
+        lock(&self.extracted).push((archive.to_path_buf(), destination.to_path_buf()));
+        Ok(())
+    }
+    async fn place_file(&self, file: &Path, destination: &Path, file_name: &str, cancel: &CancelFlag) -> PortResult<()> {
+        cancel.check()?;
+        lock(&self.placed).push((file.to_path_buf(), destination.to_path_buf(), file_name.to_string()));
         Ok(())
     }
 }

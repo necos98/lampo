@@ -19,7 +19,8 @@
 //!
 //! A directory is a **slot**: kind + `<major>.<minor>` series (+ PHP minor for add-on
 //! extensions). A patch update (8.3.14 → 8.3.15) is extracted into the *same* slot, replacing the
-//! old tree atomically (see [`crate::extract`]), and its record replaces the old record. Paths
+//! old tree atomically (see [`crate::slot`]; a single-file payload replaces its slot the same
+//! way), and its record replaces the old record. Paths
 //! that other components derive from a slot (`php-8.3\php-cgi.exe` in vhosts, `PHPRC` pointing at
 //! the per-project `generated\php\<site>\php.ini`) therefore stay valid across patch updates;
 //! nothing per-project lives inside a package directory.
@@ -39,7 +40,7 @@ use lampo_domain::version::PackageVersion;
 use lampo_domain::{PortError, PortResult};
 use serde::{Deserialize, Serialize};
 
-use crate::extract::{clean_leftovers, unique_sibling};
+use crate::slot::{clean_leftovers, unique_sibling};
 
 /// The directory name of the slot `id` belongs to (`php-8.3`, `xdebug-3.5-php8.3`).
 pub fn slot_key(id: &PackageId) -> String {

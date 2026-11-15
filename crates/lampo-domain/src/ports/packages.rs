@@ -5,7 +5,7 @@ use std::path::Path;
 use async_trait::async_trait;
 
 use crate::error::PortResult;
-use crate::package::{CatalogEntry, DownloadUrl, InstalledPackage, PackageId, PackageKind, Sha256Digest};
+use crate::package::{CatalogEntry, DownloadUrl, DownloadedFile, InstalledPackage, PackageId, PackageKind};
 use crate::ports::events::ProgressSink;
 use crate::progress::CancelFlag;
 use crate::vc_runtime::InstalledVcRuntime;
@@ -25,27 +25,28 @@ pub trait PackageCatalogSource: Send + Sync {
 /// Downloads a URL to a file, resuming or restarting as the implementation sees fit.
 #[async_trait]
 pub trait PackageDownloader: Send + Sync {
-    /// Writes to `destination` (creating its parent dir if missing) and returns the byte count.
-    /// Reports `ProgressStage::Downloading`; honours `cancel` between chunks.
-    async fn download(&self, url: &DownloadUrl, destination: &Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<u64>;
+    /// Writes to `destination` (creating its parent dir if missing) and returns the byte count
+    /// with the SHA-256 computed while streaming (the comparison is the domain's
+    /// `package::verify_checksum`). Refuses (`InvalidData`) a body announced or received larger
+    /// than `max_bytes`. Reports `ProgressStage::Downloading`; honours `cancel` between chunks.
+    async fn download(&self, url: &DownloadUrl, destination: &Path, max_bytes: Option<u64>, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<DownloadedFile>;
     /// Deletes a download made by [`PackageDownloader::download`] (complete or partial, with any
     /// resume metadata) once it is no longer needed. Ok if absent.
     async fn discard(&self, destination: &Path) -> PortResult<()>;
 }
 
-/// Computes file digests (the comparison is the domain's `package::verify_checksum`).
-#[async_trait]
-pub trait ChecksumCalculator: Send + Sync {
-    async fn sha256(&self, file: &Path) -> PortResult<Sha256Digest>;
-}
-
-/// Extracts archives.
+/// Places verified payloads into a package directory, all-or-nothing: `destination` ends up
+/// either as it was or as the complete new package.
 #[async_trait]
 pub trait ArchiveExtractor: Send + Sync {
     /// Extracts the zip `archive` into `destination` (created if missing), dropping the
-    /// `strip_prefix` top-level folder when given. Rejects entries escaping `destination`.
+    /// `strip_prefix` top-level folder when given. Rejects entries escaping `destination` or
+    /// unsafe on Windows, and archives expanding beyond a bounded size.
     /// Reports `ProgressStage::Extracting`; honours `cancel`.
     async fn extract_zip(&self, archive: &Path, destination: &Path, strip_prefix: Option<&str>, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()>;
+    /// Moves the single-file payload `file` into a fresh `destination` as `file_name` (a plain
+    /// file name), replacing the previous contents of `destination` in one rename.
+    async fn place_file(&self, file: &Path, destination: &Path, file_name: &str, cancel: &CancelFlag) -> PortResult<()>;
 }
 
 /// The set of installed packages on disk.

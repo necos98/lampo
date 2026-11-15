@@ -85,6 +85,7 @@ impl From<DomainError> for AppError {
             | DomainError::NoFreeLoopbackPort { .. }
             | DomainError::BuiltinPresetIsReadOnly(_) => ErrorCode::Conflict,
             DomainError::ToolNotAvailable { .. } => ErrorCode::PackageMissing,
+            DomainError::ChecksumConflict { .. } => ErrorCode::ChecksumMismatch,
             _ => ErrorCode::Validation,
         };
         let error = Self::new(code, e.to_string());

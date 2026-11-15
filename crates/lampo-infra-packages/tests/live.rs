@@ -7,10 +7,10 @@ use std::process::Command;
 use lampo_domain::package::{CatalogEntry, InstalledPackage, PackageKind, PackagePayload, latest, merge_catalogs, verify_checksum};
 use lampo_domain::paths::LampoPaths;
 use lampo_domain::php::PhpMinor;
-use lampo_domain::ports::{ArchiveExtractor, ChecksumCalculator, InstalledPackageRegistry, NullProgressSink, PackageDownloader, VcRuntimeDetector};
+use lampo_domain::ports::{ArchiveExtractor, InstalledPackageRegistry, NullProgressSink, PackageDownloader, VcRuntimeDetector};
 use lampo_domain::progress::CancelFlag;
 use lampo_infra_packages::catalog::default_sources;
-use lampo_infra_packages::{EmbeddedCatalog, FsInstalledPackageRegistry, HttpDownloader, RegistryVcRuntimeDetector, Sha256Calculator, ZipExtractor, hooks};
+use lampo_infra_packages::{EmbeddedCatalog, FsInstalledPackageRegistry, HttpDownloader, RegistryVcRuntimeDetector, ZipExtractor, hooks};
 
 async fn all_entries(paths: &LampoPaths) -> Vec<CatalogEntry> {
     let client = lampo_infra_packages::http::build_client().unwrap();
@@ -23,29 +23,29 @@ async fn all_entries(paths: &LampoPaths) -> Vec<CatalogEntry> {
             }
         }
     }
-    merge_catalogs(lists)
+    let merged = merge_catalogs(lists);
+    assert!(merged.conflicts.is_empty(), "live and pinned hashes disagree: {:?}", merged.conflicts);
+    merged.entries
 }
 
-/// The install pipeline as the application runs it: download → verify → extract/copy → hook → record.
+/// The install pipeline as the application runs it: download (hashed) → verify → extract/place → hook → record.
 async fn install(entry: &CatalogEntry, registry: &FsInstalledPackageRegistry, downloads: &Path) -> InstalledPackage {
     let client = lampo_infra_packages::http::build_client().unwrap();
     let downloader = HttpDownloader::new(client);
     let cancel = CancelFlag::new();
     std::fs::create_dir_all(downloads).unwrap();
     let file = downloads.join(entry.url.file_name());
-    let bytes = downloader.download(&entry.url, &file, &NullProgressSink, &cancel).await.unwrap();
-    println!("downloaded {} ({bytes} bytes)", entry.url);
-    let actual = Sha256Calculator.sha256(&file).await.unwrap();
-    verify_checksum(entry.url.file_name(), entry.sha256.as_ref().expect("pinned"), &actual).unwrap();
+    let downloaded = downloader.download(&entry.url, &file, entry.max_download_bytes(), &NullProgressSink, &cancel).await.unwrap();
+    println!("downloaded {} ({} bytes)", entry.url, downloaded.bytes);
+    verify_checksum(entry.url.file_name(), entry.sha256.as_ref().expect("pinned"), &downloaded.sha256).unwrap();
     let dir = registry.install_dir(&entry.id);
     match &entry.payload {
-        PackagePayload::Zip { strip_prefix } => ZipExtractor.extract_zip(&file, &dir, strip_prefix.as_deref(), &NullProgressSink, &cancel).await.unwrap(),
-        PackagePayload::SingleFile { file_name } => {
-            std::fs::create_dir_all(&dir).unwrap();
-            std::fs::copy(&file, dir.join(file_name)).unwrap();
+        PackagePayload::Zip { strip_prefix } => {
+            ZipExtractor.extract_zip(&file, &dir, strip_prefix.as_deref(), &NullProgressSink, &cancel).await.unwrap();
+            std::fs::remove_file(&file).unwrap();
         }
+        PackagePayload::SingleFile { file_name } => ZipExtractor.place_file(&file, &dir, file_name, &cancel).await.unwrap(),
     }
-    std::fs::remove_file(&file).unwrap();
     let package = InstalledPackage::new(entry.id.clone(), dir, entry.vc_runtime);
     for hook in hooks::all().iter().filter(|h| h.kind() == entry.id.kind) {
         hook.after_install(&package).await.unwrap();
@@ -114,8 +114,8 @@ async fn patch_update_replaces_the_minor_in_place() {
     older.url = lampo_domain::package::DownloadUrl::new(format!("https://windows.php.net/downloads/releases/archives/{file}")).unwrap();
     let probe = paths.data_root.join("probe.zip");
     std::fs::create_dir_all(&paths.data_root).unwrap();
-    HttpDownloader::new(lampo_infra_packages::http::build_client().unwrap()).download(&older.url, &probe, &NullProgressSink, &CancelFlag::new()).await.unwrap();
-    older.sha256 = Some(Sha256Calculator.sha256(&probe).await.unwrap());
+    let probed = HttpDownloader::new(lampo_infra_packages::http::build_client().unwrap()).download(&older.url, &probe, None, &NullProgressSink, &CancelFlag::new()).await.unwrap();
+    older.sha256 = Some(probed.sha256);
     std::fs::remove_file(&probe).unwrap();
 
     let a = install(&older, &registry, &paths.downloads_dir()).await;

@@ -350,7 +350,6 @@ fn dispatcher(w: &World, quit: Arc<std::sync::atomic::AtomicBool>, gate: Arc<Shu
     let install = Arc::new(InstallPackage::new(InstallPackageDeps {
         sources: vec![FakeSource::new("embedded", vec![catalog_entry(PackageKind::REDIS, "5.0.14.1", None)])],
         downloader: Arc::new(FakeDownloader::default()),
-        checksum: Arc::new(FakeChecksum(Mutex::new(digest(7)))),
         extractor: Arc::new(FakeExtractor::default()),
         installed: w.installed.clone(),
         hooks: vec![],

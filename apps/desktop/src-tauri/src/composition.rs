@@ -142,7 +142,6 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let install_package = Arc::new(InstallPackage::new(InstallPackageDeps {
         sources: sources.clone(),
         downloader: Arc::new(packages::HttpDownloader::new(http)),
-        checksum: Arc::new(packages::Sha256Calculator),
         extractor: Arc::new(packages::ZipExtractor),
         installed: installed.clone(),
         hooks: packages::hooks::all(),

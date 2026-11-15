@@ -208,7 +208,7 @@ impl FirstRunSetup {
     /// Newest PHP minor offered by the catalogs (falls back to "latest" resolution by the
     /// install use case when the catalogs cannot tell).
     async fn latest_php(&self) -> Option<VersionSeries> {
-        let entries = fetch_catalog(&self.sources, Some(&PackageKind::PHP)).await.ok()?;
+        let entries = fetch_catalog(&self.sources, Some(&PackageKind::PHP)).await.ok()?.entries;
         let newest = latest(&entries, &PackageKind::PHP, None)?;
         PhpMinor::try_from(newest.id.series()).ok().map(PhpMinor::as_series)
     }

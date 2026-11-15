@@ -10,7 +10,6 @@
 //! | [`ComposerSource`]               | `PackageCatalogSource` (live getcomposer.org) |
 //! | [`ApacheLoungeSource`]           | `PackageCatalogSource` (live apachelounge.com) |
 //! | [`HttpDownloader`]               | `PackageDownloader`         |
-//! | [`Sha256Calculator`]             | `ChecksumCalculator`        |
 //! | [`ZipExtractor`]                 | `ArchiveExtractor`          |
 //! | [`FsInstalledPackageRegistry`]   | `InstalledPackageRegistry`  |
 //! | [`RegistryVcRuntimeDetector`]    | `VcRuntimeDetector`         |
@@ -25,8 +24,9 @@
 //! vendor-published SHA-256.
 
 pub mod catalog;
-pub mod checksum;
+mod checksum;
 pub mod download;
+mod entry_name;
 pub mod extract;
 pub mod hooks;
 pub mod http;
@@ -34,6 +34,7 @@ pub mod layout;
 pub mod mirrors;
 pub mod php_extensions;
 pub mod registry;
+pub mod slot;
 pub mod vc_runtime;
 
 #[cfg(test)]
@@ -43,7 +44,6 @@ pub use catalog::apache_lounge::ApacheLoungeSource;
 pub use catalog::composer::ComposerSource;
 pub use catalog::embedded::EmbeddedCatalog;
 pub use catalog::php_net::PhpNetReleasesSource;
-pub use checksum::Sha256Calculator;
 pub use download::HttpDownloader;
 pub use extract::ZipExtractor;
 pub use php_extensions::FsPhpExtensionScanner;

@@ -28,6 +28,9 @@ pub enum DomainError {
     InvalidSha256(String),
     #[error("invalid download URL `{0}`: only https URLs are allowed")]
     InvalidDownloadUrl(String),
+    /// A live catalog advertises another SHA-256 than the one pinned in the embedded catalog.
+    #[error("integrity check failed for {id}: the pinned SHA-256 is {frozen} but the live catalog publishes {live}; it is not installed")]
+    ChecksumConflict { id: String, frozen: String, live: String },
     #[error("invalid identifier `{0}`: use 1-63 lowercase letters, digits and dashes, starting with a letter or digit")]
     InvalidSlug(String),
     #[error("invalid name: {0}")]

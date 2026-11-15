@@ -21,7 +21,6 @@ struct Kit {
     source: Arc<FakeSource>,
     live: Arc<FakeSource>,
     downloader: Arc<FakeDownloader>,
-    checksum: Arc<FakeChecksum>,
     extractor: Arc<FakeExtractor>,
     hook: Arc<FakeHook>,
     vc: Arc<FakeVc>,
@@ -56,7 +55,6 @@ impl Kit {
             source,
             live,
             downloader: Arc::new(FakeDownloader::default()),
-            checksum: Arc::new(FakeChecksum(Mutex::new(digest(7)))),
             extractor: Arc::new(FakeExtractor::default()),
             hook: Arc::new(FakeHook { kind: PackageKind::PHP, calls: Mutex::default() }),
             vc: Arc::new(FakeVc::modern()),
@@ -72,7 +70,6 @@ impl Kit {
         Arc::new(InstallPackage::new(InstallPackageDeps {
             sources: self.sources(),
             downloader: self.downloader.clone(),
-            checksum: self.checksum.clone(),
             extractor: self.extractor.clone(),
             installed: self.w.installed.clone(),
             hooks: vec![self.hook.clone()],
@@ -125,7 +122,7 @@ async fn install_runs_the_whole_pipeline_and_adopts_the_first_php_as_default() {
     let downloads = k.downloader.downloads.lock().unwrap().clone();
     assert_eq!(downloads, [k.w.paths.downloads_dir().join("php-8.3.15-php-8.3.15.zip")]);
     assert_eq!(*k.downloader.discarded.lock().unwrap(), downloads, "the archive is deleted once extracted");
-    assert_eq!(k.extractor.0.lock().unwrap()[0].1, std::path::PathBuf::from("C:\\lampo\\packages\\php-8.3.15"));
+    assert_eq!(k.extractor.extracted.lock().unwrap()[0].1, std::path::PathBuf::from("C:\\lampo\\packages\\php-8.3.15"));
     assert_eq!(k.hook.calls.lock().unwrap().len(), 1, "the PHP hook ran");
     assert!(k.w.installed.has(&PackageKind::PHP, "8.3.15"));
     assert_eq!(k.w.settings.load().unwrap().default_php, Some(php("8.3")));
@@ -168,10 +165,10 @@ async fn unverifiable_or_corrupt_downloads_are_refused() {
     assert_eq!(err.code, ErrorCode::ChecksumMismatch);
     assert!(k.downloader.downloads.lock().unwrap().is_empty());
 
-    *k.checksum.0.lock().unwrap() = digest(9);
+    *k.downloader.digest.lock().unwrap() = digest(9);
     let err = k.install().execute(request("mysql", None, Some("8.4")), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::ChecksumMismatch);
-    assert!(k.extractor.0.lock().unwrap().is_empty(), "nothing extracted");
+    assert!(k.extractor.extracted.lock().unwrap().is_empty(), "nothing extracted");
     assert_eq!(k.downloader.discarded.lock().unwrap().len(), 1, "the corrupt download is not kept for resume");
     assert!(k.w.installed.list().unwrap().is_empty(), "nothing recorded");
     assert_eq!(k.w.installed.removed.lock().unwrap().len(), 1, "partial files cleaned up");
@@ -188,12 +185,53 @@ async fn installs_can_be_cancelled_mid_download() {
 }
 
 #[tokio::test]
-async fn single_file_packages_are_downloaded_into_place_and_not_extracted() {
+async fn single_file_packages_are_downloaded_aside_verified_then_placed() {
     let k = Kit::new(World::new());
     k.install().execute(request("composer", None, None), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap();
-    assert_eq!(k.downloader.downloads.lock().unwrap()[0], std::path::PathBuf::from("C:\\lampo\\packages\\composer-2.8.4\\composer.phar"));
-    assert!(k.extractor.0.lock().unwrap().is_empty());
-    assert!(k.downloader.discarded.lock().unwrap().is_empty(), "the downloaded file is the package");
+    let download = k.w.paths.downloads_dir().join("composer-2.8.4-composer-2.8.4.zip");
+    assert_eq!(*k.downloader.downloads.lock().unwrap(), std::slice::from_ref(&download), "never straight into the install dir");
+    assert_eq!(*k.extractor.placed.lock().unwrap(), [(download, std::path::PathBuf::from("C:\\lampo\\packages\\composer-2.8.4"), "composer.phar".to_string())]);
+    assert!(k.extractor.extracted.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_corrupt_single_file_download_leaves_the_installed_version_alone() {
+    let k = Kit::new(World::new());
+    k.install().execute(request("composer", Some("2.8.4"), None), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap();
+    let mut patch = catalog_entry(PackageKind::COMPOSER, "2.8.5", None);
+    patch.payload = PackagePayload::SingleFile { file_name: "composer.phar".into() };
+    k.source.entries.lock().unwrap().push(patch);
+    *k.downloader.digest.lock().unwrap() = digest(9);
+
+    let err = k.install().execute(request("composer", Some("2.8.5"), None), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::ChecksumMismatch);
+    assert_eq!(k.extractor.placed.lock().unwrap().len(), 1, "only the first, verified version was placed");
+    assert!(k.downloader.downloads.lock().unwrap().iter().all(|d| d.starts_with(k.w.paths.downloads_dir())));
+    assert!(k.w.installed.has(&PackageKind::COMPOSER, "2.8.4"), "the previous version is still installed");
+}
+
+#[tokio::test]
+async fn downloads_are_limited_to_the_catalog_size_plus_the_tolerance() {
+    let k = Kit::new(World::new());
+    k.install().execute(request("mysql", None, Some("8.4")), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap();
+    assert_eq!(*k.downloader.limits.lock().unwrap(), [Some(1100)], "catalog_entry sizes are 1000 bytes");
+}
+
+#[tokio::test]
+async fn a_live_hash_contradicting_the_pinned_one_is_refused_before_downloading() {
+    let k = Kit::new(World::new());
+    let mut tampered = catalog_entry(PackageKind::PHP, "8.3.15", None);
+    tampered.channel = lampo_domain::package::CatalogChannel::Live;
+    tampered.sha256 = Some(digest(9));
+    k.live.entries.lock().unwrap().push(tampered);
+
+    let err = k.install().execute(request("php", Some("8.3.15"), None), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::ChecksumMismatch);
+    assert!(err.message.contains("integrity"), "{}", err.message);
+    assert!(k.downloader.downloads.lock().unwrap().is_empty());
+    let listed = k.catalog().list(Some("php")).await.unwrap();
+    assert!(listed.iter().any(|e| e.id.version == "8.3.15"), "the catalog still lists it");
+    k.install().execute(request("php", Some("8.3.14"), None), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap();
 }
 
 #[test]

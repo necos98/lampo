@@ -1,5 +1,6 @@
 //! Catalog sources, one per origin, all behind `PackageCatalogSource`. Composition roots order
-//! them live-first so live data wins on duplicates (`lampo_domain::package::merge_catalogs`);
+//! them live-first so live metadata (a moved URL) wins on duplicates, while the SHA-256 pinned in
+//! the embedded catalog always wins over a live one (`lampo_domain::package::merge_catalogs`);
 //! [`default_sources`] does exactly that.
 //!
 //! | Source                     | Origin                                   | Kinds |

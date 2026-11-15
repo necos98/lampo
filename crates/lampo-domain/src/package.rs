@@ -17,6 +17,10 @@ use crate::php::PhpMinor;
 use crate::vc_runtime::VcRuntime;
 use crate::version::{PackageVersion, VersionSeries};
 
+mod catalog_merge;
+
+pub use catalog_merge::{ChecksumConflict, MergedCatalog, merge_catalogs};
+
 /// Identifier of a kind of package (`php`, `apache`, `xdebug`…): lowercase letters, digits, dashes.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -240,6 +244,18 @@ pub struct CatalogEntry {
     pub payload: PackagePayload,
 }
 
+/// How much larger than its catalog `size_bytes` a download may be, in percent. Pinned sizes are
+/// exact; the margin absorbs sizes a live source only knows approximately, while still stopping
+/// a server that streams far more than the package (filling the disk) before it is written.
+pub const DOWNLOAD_SIZE_TOLERANCE_PERCENT: u64 = 10;
+
+impl CatalogEntry {
+    /// The most bytes its download may have (`None` when the catalog does not know the size).
+    pub fn max_download_bytes(&self) -> Option<u64> {
+        self.size_bytes.map(|size| size.saturating_add(size.saturating_mul(DOWNLOAD_SIZE_TOLERANCE_PERCENT) / 100))
+    }
+}
+
 /// What a file inside an installed package is *for*. Consumers ask an [`InstalledPackage`] for
 /// a role instead of joining file names onto its install dir: where each kind keeps its files is
 /// known only to the registry adapter (`lampo-infra-packages`), which fills
@@ -300,6 +316,13 @@ impl InstalledPackage {
     }
 }
 
+/// A completed download: its size and the SHA-256 computed while it was streamed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DownloadedFile {
+    pub bytes: u64,
+    pub sha256: Sha256Digest,
+}
+
 /// Outcome of comparing a computed digest with the expected one.
 pub fn verify_checksum(file: &str, expected: &Sha256Digest, actual: &Sha256Digest) -> Result<(), crate::error::PortError> {
     if expected == actual { Ok(()) } else { Err(crate::error::PortError::ChecksumMismatch { file: file.to_string(), expected: expected.to_string(), actual: actual.to_string() }) }
@@ -316,28 +339,16 @@ pub fn latest<'a>(entries: &'a [CatalogEntry], kind: &PackageKind, php: Option<P
     entries.iter().filter(|e| &e.id.kind == kind && e.id.php == php).max_by(|a, b| a.id.version.cmp(&b.id.version))
 }
 
-/// Merges entries from several sources: on duplicate ids the *first* source wins
-/// (the composition root orders sources, e.g. live before frozen). Output is sorted by id.
-pub fn merge_catalogs(sources: impl IntoIterator<Item = Vec<CatalogEntry>>) -> Vec<CatalogEntry> {
-    let mut seen = std::collections::BTreeMap::new();
-    for list in sources {
-        for entry in list {
-            seen.entry(entry.id.clone()).or_insert(entry);
-        }
-    }
-    seen.into_values().collect()
-}
-
 /// The newest installed package of `kind` in `series`, e.g. the PHP 8.3 build a project uses.
 pub fn newest_installed<'a>(installed: &'a [InstalledPackage], kind: &PackageKind, series: VersionSeries, php: Option<PhpMinor>) -> Option<&'a InstalledPackage> {
     installed.iter().filter(|p| &p.id.kind == kind && p.id.series() == series && p.id.php == php).max_by(|a, b| a.id.version.cmp(&b.id.version))
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn entry(kind: PackageKind, version: &str, php: Option<&str>) -> CatalogEntry {
+    pub(crate) fn entry(kind: PackageKind, version: &str, php: Option<&str>) -> CatalogEntry {
         CatalogEntry {
             id: PackageId { kind, version: PackageVersion::parse(version).unwrap(), php: php.map(|p| PhpMinor::parse(p).unwrap()) },
             url: DownloadUrl::new(format!("https://example.invalid/{version}.zip")).unwrap(),
@@ -395,12 +406,12 @@ mod tests {
     }
 
     #[test]
-    fn merge_keeps_first_source_on_duplicates() {
-        let mut live = entry(PackageKind::PHP, "8.3.14", None);
-        live.channel = CatalogChannel::Live;
-        let frozen = entry(PackageKind::PHP, "8.3.14", None);
-        let merged = merge_catalogs([vec![live], vec![frozen, entry(PackageKind::PHP, "5.6.40", None)]]);
-        assert_eq!(merged.len(), 2);
-        assert_eq!(merged.iter().find(|e| e.id.version.as_str() == "8.3.14").unwrap().channel, CatalogChannel::Live);
+    fn download_limit_is_the_catalog_size_plus_the_tolerance() {
+        let mut e = entry(PackageKind::PHP, "8.3.14", None);
+        assert_eq!(e.max_download_bytes(), None, "unknown size: no limit from the catalog");
+        e.size_bytes = Some(1000);
+        assert_eq!(e.max_download_bytes(), Some(1100));
+        e.size_bytes = Some(u64::MAX);
+        assert_eq!(e.max_download_bytes(), Some(u64::MAX), "saturates instead of overflowing");
     }
 }

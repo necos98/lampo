@@ -2,12 +2,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lampo_domain::events::DomainEvent;
-use lampo_domain::package::{CatalogEntry, InstalledPackage, PackageId, PackageKind, PackagePayload, Sha256Digest, latest, latest_in_series, merge_catalogs, verify_checksum};
+use lampo_domain::package::{CatalogEntry, InstalledPackage, MergedCatalog, PackageId, PackageKind, PackagePayload, Sha256Digest, latest, latest_in_series, merge_catalogs, verify_checksum};
 use lampo_domain::paths::LampoPaths;
 use lampo_domain::php::PhpMinor;
 use lampo_domain::ports::{
-    ArchiveExtractor, ChecksumCalculator, EventPublisher, InstalledPackageRegistry, PackageCatalogSource, PackageDownloader, PackageInstallHook, PhpExtensionScanner, ProgressSink,
-    ProjectRepository, SettingsRepository, VcRuntimeDetector, WorktreeRepository,
+    ArchiveExtractor, EventPublisher, InstalledPackageRegistry, PackageCatalogSource, PackageDownloader, PackageInstallHook, PhpExtensionScanner, ProgressSink, ProjectRepository,
+    SettingsRepository, VcRuntimeDetector, WorktreeRepository,
 };
 use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
 use lampo_domain::vc_runtime::InstalledVcRuntime;
@@ -24,7 +24,8 @@ use crate::mapping::{package_id_from_dto, package_id_to_dto};
 
 /// Fetches `kind` (every kind each source serves when `None`) from all sources. A failing
 /// source is logged and skipped; the call fails (`Network`) only if every relevant source failed.
-pub(crate) async fn fetch_catalog(sources: &[Arc<dyn PackageCatalogSource>], kind: Option<&PackageKind>) -> AppResult<Vec<CatalogEntry>> {
+/// Integrity conflicts between live and pinned hashes are logged and returned with the catalog.
+pub(crate) async fn fetch_catalog(sources: &[Arc<dyn PackageCatalogSource>], kind: Option<&PackageKind>) -> AppResult<MergedCatalog> {
     let mut lists = Vec::new();
     let mut failures = Vec::new();
     let mut attempted = 0;
@@ -48,7 +49,11 @@ pub(crate) async fn fetch_catalog(sources: &[Arc<dyn PackageCatalogSource>], kin
     if attempted > 0 && lists.is_empty() {
         return Err(AppError::new(ErrorCode::Network, format!("no package catalog is reachable ({})", failures.join("; "))));
     }
-    Ok(merge_catalogs(lists))
+    let catalog = merge_catalogs(lists);
+    for conflict in &catalog.conflicts {
+        tracing::warn!(package = %conflict.id, pinned = %conflict.frozen, live = %conflict.live, "a live catalog publishes another SHA-256 than the pinned one; the package will not be installed");
+    }
+    Ok(catalog)
 }
 
 /// `"8.3"` (or `"8.3.14"`) → the 8.3 series.
@@ -62,7 +67,7 @@ fn installed_dto(p: &InstalledPackage, reqs: &[super::requirements::Requirement]
 
 /// Catalog and installed packages (read-only; network for live sources).
 pub struct PackageCatalog {
-    /// Ordered: earlier sources win on duplicate ids (`merge_catalogs`).
+    /// Ordered: earlier sources win on duplicate ids, except for pinned hashes (`merge_catalogs`).
     sources: Vec<Arc<dyn PackageCatalogSource>>,
     installed: Arc<dyn InstalledPackageRegistry>,
     vc: Arc<dyn VcRuntimeDetector>,
@@ -108,7 +113,7 @@ impl PackageCatalog {
     /// other sources (logged), it does not fail the call.
     pub async fn list(&self, kind: Option<&str>) -> AppResult<Vec<CatalogEntryDto>> {
         let kind = kind.map(|k| PackageKind::new(k.trim())).transpose()?;
-        let mut entries = fetch_catalog(&self.sources, kind.as_ref()).await?;
+        let mut entries = fetch_catalog(&self.sources, kind.as_ref()).await?.entries;
         // Newest first within a kind and series, so front-ends never re-derive version ordering.
         entries.sort_by(|a, b| {
             (&a.id.kind, std::cmp::Reverse(a.id.series()), std::cmp::Reverse(a.id.php), std::cmp::Reverse(&a.id.version)).cmp(&(
@@ -156,7 +161,7 @@ impl PackageCatalog {
                 newest.insert(key, p);
             }
         }
-        let entries = fetch_catalog(&self.sources, None).await?;
+        let entries = fetch_catalog(&self.sources, None).await?.entries;
         Ok(newest
             .into_iter()
             .filter_map(|((kind, series, php), current)| {
@@ -246,7 +251,6 @@ impl PhpExtensionListing {
 pub struct InstallPackageDeps {
     pub sources: Vec<Arc<dyn PackageCatalogSource>>,
     pub downloader: Arc<dyn PackageDownloader>,
-    pub checksum: Arc<dyn ChecksumCalculator>,
     pub extractor: Arc<dyn ArchiveExtractor>,
     pub installed: Arc<dyn InstalledPackageRegistry>,
     /// Post-install hooks; the one whose `kind()` matches runs.
@@ -270,7 +274,8 @@ impl ProgressSink for SubjectProgress<'_> {
     }
 }
 
-/// Resolve → VC++ runtime check → download → verify SHA-256 → extract → hook → record → sync.
+/// Resolve → integrity and VC++ runtime checks → download (hashed while streamed) → verify
+/// SHA-256 → extract or place → hook → record → sync.
 /// Also used for one-click patch updates (install latest in series; projects bind to minors so
 /// they follow).
 pub struct InstallPackage {
@@ -282,21 +287,24 @@ impl InstallPackage {
         Self { deps }
     }
 
-    /// Catalog lookup: exact `version`, else newest in `series`, else newest overall.
-    async fn resolve(&self, request: &InstallPackageRequest) -> AppResult<CatalogEntry> {
+    /// Catalog lookup: exact `version`, else newest in `series`, else newest overall. Also returns
+    /// the merged catalog, whose integrity conflicts decide whether the entry may be installed.
+    async fn resolve(&self, request: &InstallPackageRequest) -> AppResult<(CatalogEntry, MergedCatalog)> {
         let kind = PackageKind::new(request.kind.trim())?;
         let php = request.php_version.as_deref().map(PhpMinor::parse).transpose()?;
-        let entries = fetch_catalog(&self.deps.sources, Some(&kind)).await?;
+        let catalog = fetch_catalog(&self.deps.sources, Some(&kind)).await?;
+        let entries = &catalog.entries;
         let found = match (&request.version, &request.series) {
             (Some(v), _) => {
                 let version = PackageVersion::parse(v)?;
                 entries.iter().find(|e| e.id.kind == kind && e.id.version == version && e.id.php == php)
             }
-            (None, Some(s)) => latest_in_series(&entries, &kind, parse_series(s)?, php),
-            (None, None) => latest(&entries, &kind, php),
+            (None, Some(s)) => latest_in_series(entries, &kind, parse_series(s)?, php),
+            (None, None) => latest(entries, &kind, php),
         };
         let wanted = [Some(kind.to_string()), request.version.clone().or(request.series.clone()), php.map(|p| format!("for PHP {p}"))];
-        found.cloned().ok_or_else(|| AppError::not_found("package", wanted.into_iter().flatten().collect::<Vec<_>>().join(" ")))
+        let entry = found.cloned().ok_or_else(|| AppError::not_found("package", wanted.into_iter().flatten().collect::<Vec<_>>().join(" ")))?;
+        Ok((entry, catalog))
     }
 
     fn check_vc_runtime(&self, entry: &CatalogEntry) -> AppResult<()> {
@@ -312,31 +320,29 @@ impl InstallPackage {
         })))
     }
 
-    /// Download, verify and place the files. Single-file payloads are downloaded straight into
-    /// the install dir (there is no copy port).
+    /// Download into the downloads dir (hashed while streamed, refused when larger than the
+    /// catalog announces), verify, then place the files into the install dir: a corrupt or
+    /// oversized download never touches the package currently installed there.
     async fn fetch_files(&self, entry: &CatalogEntry, expected: &Sha256Digest, install_dir: &std::path::Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<()> {
         let d = &self.deps;
-        let file = match &entry.payload {
-            PackagePayload::Zip { .. } => d.paths.downloads_dir().join(format!("{}-{}", entry.id.key(), entry.url.file_name())),
-            PackagePayload::SingleFile { file_name } => install_dir.join(file_name),
-        };
+        let file = d.paths.downloads_dir().join(format!("{}-{}", entry.id.key(), entry.url.file_name()));
         cancel.check()?;
-        d.downloader.download(&entry.url, &file, progress, cancel).await?;
+        let downloaded = d.downloader.download(&entry.url, &file, entry.max_download_bytes(), progress, cancel).await?;
         cancel.check()?;
         progress.report(Progress::new(ProgressStage::Verifying, 0, Some(1)).with_subject(entry.id.key()));
-        let actual = d.checksum.sha256(&file).await?;
-        if let Err(e) = verify_checksum(&file.display().to_string(), expected, &actual) {
+        if let Err(e) = verify_checksum(&file.display().to_string(), expected, &downloaded.sha256) {
             // A corrupt download must not be resumed or reused.
             self.discard(&file).await;
             return Err(e.into());
         }
         progress.report(Progress::new(ProgressStage::Verifying, 1, Some(1)).with_subject(entry.id.key()));
         cancel.check()?;
-        if let PackagePayload::Zip { strip_prefix } = &entry.payload {
-            d.extractor.extract_zip(&file, install_dir, strip_prefix.as_deref(), progress, cancel).await?;
-            // The archive is not needed once extracted.
-            self.discard(&file).await;
+        match &entry.payload {
+            PackagePayload::Zip { strip_prefix } => d.extractor.extract_zip(&file, install_dir, strip_prefix.as_deref(), progress, cancel).await?,
+            PackagePayload::SingleFile { file_name } => d.extractor.place_file(&file, install_dir, file_name, cancel).await?,
         }
+        // Not needed once placed (a single file was moved: only its resume metadata may remain).
+        self.discard(&file).await;
         Ok(())
     }
 
@@ -363,7 +369,8 @@ impl InstallPackage {
     }
 
     /// Long-running: the caller runs it as a task (see `crate::tasks`) and passes a progress
-    /// sink (GUI events or control-pipe frames). Refuses entries without a checksum and builds
+    /// sink (GUI events or control-pipe frames). Refuses entries without a checksum or whose live
+    /// and pinned checksums disagree (`ChecksumMismatch`), and builds
     /// whose VC++ runtime is missing (`PackageMissing`, `details.downloadUrl`). Already installed
     /// → returned as is. Sets `default_php` when installing the first PHP. Publishes
     /// `PackagesChanged`. A failure after the files were placed removes them again.
@@ -376,7 +383,7 @@ impl InstallPackage {
         // download (the downloader would name the file), extraction (unnamed) and configure.
         let progress = &SubjectProgress { inner: progress, subject: request.kind.clone() };
         progress.report(Progress::new(ProgressStage::Resolving, 0, None));
-        let entry = self.resolve(&request).await?;
+        let (entry, catalog) = self.resolve(&request).await?;
         if let Some(existing) = d.installed.list()?.into_iter().find(|p| p.id == entry.id) {
             // Settings may have been reset while packages stayed: still adopt it as the default.
             self.adopt_default_php(&existing.id)?;
@@ -387,6 +394,7 @@ impl InstallPackage {
                 series: existing.id.series().to_string(),
             });
         }
+        catalog.ensure_consistent(&entry.id)?;
         self.check_vc_runtime(&entry)?;
         let expected = entry
             .sha256

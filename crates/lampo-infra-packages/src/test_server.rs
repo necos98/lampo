@@ -22,11 +22,15 @@ pub struct Reply {
     headers: Vec<(String, String)>,
     body: Vec<u8>,
     slow: bool,
+    /// Omit `Content-Length`: the body ends when the connection closes.
+    unannounced: bool,
+    /// Close the connection after this many body bytes (a dropped connection).
+    cut_after: Option<usize>,
 }
 
 impl Reply {
     pub fn ok(body: Vec<u8>) -> Self {
-        Self { status: 200, headers: Vec::new(), body, slow: false }
+        Self { status: 200, headers: Vec::new(), body, slow: false, unannounced: false, cut_after: None }
     }
 
     pub fn text(body: &str) -> Self {
@@ -34,7 +38,7 @@ impl Reply {
     }
 
     pub fn status(status: u16) -> Self {
-        Self { status, headers: Vec::new(), body: Vec::new(), slow: false }
+        Self { status, ..Self::ok(Vec::new()) }
     }
 
     /// Honours `Range: bytes=N-` when `If-Range` is absent or equals `etag`.
@@ -46,8 +50,7 @@ impl Reply {
                 Self {
                     status: 206,
                     headers: vec![("Content-Range".into(), format!("bytes {start}-{}/{total}", total - 1)), ("ETag".into(), etag.into())],
-                    body: body[start..].to_vec(),
-                    slow: false,
+                    ..Self::ok(body[start..].to_vec())
                 }
             }
             _ => Self::ok(body).with_header("ETag", etag),
@@ -62,6 +65,18 @@ impl Reply {
     /// Sends the body in small pieces with pauses (to test cancellation).
     pub fn slow(mut self) -> Self {
         self.slow = true;
+        self
+    }
+
+    /// Sends no `Content-Length` (a body delimited by the connection closing).
+    pub fn unannounced(mut self) -> Self {
+        self.unannounced = true;
+        self
+    }
+
+    /// Announces the whole body but drops the connection after `bytes` of it.
+    pub fn cut_after(mut self, bytes: usize) -> Self {
+        self.cut_after = Some(bytes);
         self
     }
 }
@@ -93,7 +108,10 @@ impl TestServer {
                     let path = lines.next().unwrap_or("").split(' ').nth(1).unwrap_or("/").to_string();
                     let headers = lines.take_while(|l| !l.is_empty()).filter_map(|l| l.split_once(':')).map(|(k, v)| (k.trim().to_string(), v.trim().to_string())).collect();
                     let reply = handler(Request { path, headers });
-                    let mut head = format!("HTTP/1.1 {} X\r\nContent-Length: {}\r\nConnection: close\r\n", reply.status, reply.body.len());
+                    let mut head = format!("HTTP/1.1 {} X\r\nConnection: close\r\n", reply.status);
+                    if !reply.unannounced {
+                        head.push_str(&format!("Content-Length: {}\r\n", reply.body.len()));
+                    }
                     for (k, v) in &reply.headers {
                         head.push_str(&format!("{k}: {v}\r\n"));
                     }
@@ -101,15 +119,16 @@ impl TestServer {
                     if socket.write_all(head.as_bytes()).await.is_err() {
                         return;
                     }
+                    let body = &reply.body[..reply.cut_after.unwrap_or(reply.body.len()).min(reply.body.len())];
                     if reply.slow {
-                        for piece in reply.body.chunks(16 * 1024) {
+                        for piece in body.chunks(16 * 1024) {
                             if socket.write_all(piece).await.is_err() {
                                 return;
                             }
                             tokio::time::sleep(Duration::from_millis(20)).await;
                         }
                     } else {
-                        let _ = socket.write_all(&reply.body).await;
+                        let _ = socket.write_all(body).await;
                     }
                     let _ = socket.shutdown().await;
                 });
