@@ -22,41 +22,8 @@ use crate::settings::Settings;
 use crate::version::VersionSeries;
 use crate::worktree::WorktreeEnvironment;
 
-// ---------------------------------------------------------------------------------------------
-// Slugs (shared rules for project and preset ids)
-// ---------------------------------------------------------------------------------------------
-
-pub(crate) fn validate_slug(s: &str) -> Result<String, DomainError> {
-    let ok = !s.is_empty() && s.len() <= 63 && s.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-') && !s.starts_with('-') && !s.ends_with('-') && !s.contains("--");
-    if ok { Ok(s.to_string()) } else { Err(DomainError::InvalidSlug(s.to_string())) }
-}
-
-/// Turns any display name into a valid slug (`"Il mio Shop!"` → `"il-mio-shop"`).
-/// Never fails: falls back to `fallback` when nothing usable is left.
-pub fn slugify(name: &str, fallback: &str) -> String {
-    let mut out = String::with_capacity(name.len());
-    for c in name.chars() {
-        let mapped = match c {
-            'a'..='z' | '0'..='9' => Some(c),
-            'A'..='Z' => Some(c.to_ascii_lowercase()),
-            'à' | 'á' | 'â' | 'ä' | 'À' | 'Á' => Some('a'),
-            'è' | 'é' | 'ê' | 'ë' | 'È' | 'É' => Some('e'),
-            'ì' | 'í' | 'î' | 'ï' | 'Ì' | 'Í' => Some('i'),
-            'ò' | 'ó' | 'ô' | 'ö' | 'Ò' | 'Ó' => Some('o'),
-            'ù' | 'ú' | 'û' | 'ü' | 'Ù' | 'Ú' => Some('u'),
-            _ => None,
-        };
-        match mapped {
-            Some(m) => out.push(m),
-            None if !out.ends_with('-') && !out.is_empty() => out.push('-'),
-            None => {}
-        }
-    }
-    let mut s = out.trim_matches('-').to_string();
-    s.truncate(63);
-    let s = s.trim_end_matches('-').to_string();
-    if s.is_empty() { fallback.to_string() } else { s }
-}
+pub use crate::slug::slugify;
+use crate::slug::{MAX_SLUG_LEN, validate_slug};
 
 /// Stable identifier of a project: a slug, also used as config file name and default hostname.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -562,23 +529,21 @@ impl Project {
 }
 
 /// Checks that `candidate` does not collide with other projects (id, folder, host names,
-/// loopback ports), with worktree environments (loopback ports: each one owns a dedicated
-/// `127.0.0.1:<port>` listener) nor with the service ports in `settings`.
+/// loopback ports), with worktree environments ([`check_worktree_conflicts`]) nor with the
+/// service ports in `settings`.
 /// When updating, `existing` may contain the candidate itself (same id): it is skipped,
 /// unless `is_new` is true, in which case a same-id project is a conflict.
 ///
 /// Every use case that saves a project's addresses or folder must call this (with every
-/// worktree environment): two sites on one loopback port make Apache serve one site's code for
-/// the other.
+/// worktree environment): two sites on one loopback port or host name make Apache serve one
+/// site's code for the other.
 pub fn check_conflicts(existing: &[Project], worktrees: &[WorktreeEnvironment], candidate: &Project, is_new: bool, settings: &Settings) -> Result<(), DomainError> {
     for port in candidate.addresses.iter().filter_map(SiteAddress::loopback) {
         if let Some(service) = settings.service_on_port(port) {
             return Err(DomainError::LoopbackPortTaken { port, service });
         }
-        if let Some(w) = worktrees.iter().find(|w| w.loopback_port == port) {
-            return Err(DomainError::DuplicateLoopbackPort { port, other: w.site_id().to_string() });
-        }
     }
+    check_worktree_conflicts(worktrees, candidate)?;
     for other in existing {
         if other.id == candidate.id {
             if is_new {
@@ -607,6 +572,25 @@ pub fn check_conflicts(existing: &[Project], worktrees: &[WorktreeEnvironment], 
     Ok(())
 }
 
+/// The worktree side of [`check_conflicts`]: every environment owns its folder, a dedicated
+/// `127.0.0.1:<port>` listener and its `<slug>.<project>.localhost` alias (a `ServerAlias` of its
+/// vhost), none of which a project may take.
+fn check_worktree_conflicts(worktrees: &[WorktreeEnvironment], candidate: &Project) -> Result<(), DomainError> {
+    for w in worktrees {
+        if w.root == candidate.root {
+            return Err(DomainError::DuplicateProjectRoot { root: candidate.root.to_string(), other: w.site_id().to_string() });
+        }
+        if candidate.addresses.iter().filter_map(SiteAddress::loopback).any(|port| port == w.loopback_port) {
+            return Err(DomainError::DuplicateLoopbackPort { port: w.loopback_port, other: w.site_id().to_string() });
+        }
+        let alias = w.localhost_alias();
+        if candidate.addresses.iter().filter_map(SiteAddress::host).any(|host| *host == alias) {
+            return Err(DomainError::DuplicateHostname { hostname: alias.to_string(), other: w.site_id().to_string() });
+        }
+    }
+    Ok(())
+}
+
 /// First free id derived from `base` (`shop`, `shop-2`, `shop-3`, …).
 pub fn unique_project_id(existing: &[Project], base: &ProjectId) -> ProjectId {
     let taken = |id: &str| existing.iter().any(|p| p.id.as_str() == id);
@@ -617,7 +601,7 @@ pub fn unique_project_id(existing: &[Project], base: &ProjectId) -> ProjectId {
         .map(|n| {
             let mut stem = base.as_str().to_string();
             let suffix = format!("-{n}");
-            stem.truncate(63 - suffix.len());
+            stem.truncate(MAX_SLUG_LEN - suffix.len());
             ProjectId(format!("{}{suffix}", stem.trim_end_matches('-')))
         })
         .find(|id| !taken(id.as_str()))
@@ -638,11 +622,9 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn slugify_names() {
-        assert_eq!(slugify("Il mio Shop!", "x"), "il-mio-shop");
-        assert_eq!(slugify("  Città -- Nuova ", "x"), "citta-nuova");
-        assert_eq!(slugify("!!!", "project"), "project");
+    fn ids_from_names() {
         assert_eq!(ProjectId::from_name("WordPress Blog").as_str(), "wordpress-blog");
+        assert_eq!(ProjectId::from_name("Façade Straße").as_str(), "facade-strasse");
         assert!(ProjectId::new("Bad Id").is_err());
         assert!(ProjectId::new("a--b").is_err());
     }
@@ -748,10 +730,10 @@ pub(crate) mod tests {
 
     #[test]
     fn loopback_ports_of_worktree_environments_are_conflicts() {
-        use crate::worktree::DatabaseMode;
+        use crate::worktree::{DatabaseMode, Occupancy};
         let s = Settings::default();
         let shop = project("shop", "C:\\sites\\shop");
-        let wt = WorktreeEnvironment::derive(&shop, &[], ProjectRoot::new("D:\\wt\\a").unwrap(), Some("fix".into()), 8100, &DatabaseMode::Shared, 0).unwrap();
+        let wt = WorktreeEnvironment::derive(&shop, &Occupancy::default(), ProjectRoot::new("D:\\wt\\a").unwrap(), Some("fix".into()), 8100, &DatabaseMode::Shared, 0).unwrap();
         let mut api = project("api", "C:\\sites\\api");
         api.addresses.push(SiteAddress::LoopbackPort(8100));
         let err = check_conflicts(std::slice::from_ref(&shop), std::slice::from_ref(&wt), &api, true, &s).unwrap_err();
@@ -760,6 +742,30 @@ pub(crate) mod tests {
         assert!(check_conflicts(&[shop.clone(), api.clone()], std::slice::from_ref(&wt), &api, false, &s).is_err());
         api.addresses.pop();
         assert!(check_conflicts(&[shop], &[wt], &api, true, &s).is_ok());
+    }
+
+    #[test]
+    fn folders_and_aliases_of_worktree_environments_are_conflicts() {
+        use crate::hostname::Hostname;
+        use crate::worktree::{DatabaseMode, Occupancy};
+        let s = Settings::default();
+        let shop = project("shop", r"C:\sites\shop");
+        let wt = WorktreeEnvironment::derive(&shop, &Occupancy::default(), ProjectRoot::new(r"D:\wt\fix").unwrap(), Some("fix".into()), 8100, &DatabaseMode::Shared, 0).unwrap();
+        let (projects, worktrees) = (std::slice::from_ref(&shop), std::slice::from_ref(&wt));
+
+        let in_the_worktree = project("fix", r"d:\WT\fix");
+        let err = check_conflicts(projects, worktrees, &in_the_worktree, true, &s).unwrap_err();
+        assert_eq!(err, DomainError::DuplicateProjectRoot { root: r"D:\WT\fix".into(), other: "shop@fix".into() });
+
+        let mut on_the_alias = project("blog", r"C:\sites\blog");
+        on_the_alias.set_addresses(vec![SiteAddress::Localhost(Hostname::new("Fix.Shop.localhost").unwrap())]).unwrap();
+        let err = check_conflicts(projects, worktrees, &on_the_alias, true, &s).unwrap_err();
+        assert_eq!(err, DomainError::DuplicateHostname { hostname: "fix.shop.localhost".into(), other: "shop@fix".into() });
+        // The parent itself may not take its environment's alias either.
+        let mut parent = shop.clone();
+        parent.addresses.push(SiteAddress::Localhost(Hostname::new("fix.shop.localhost").unwrap()));
+        assert!(matches!(check_conflicts(projects, worktrees, &parent, false, &s), Err(DomainError::DuplicateHostname { .. })));
+        assert!(check_conflicts(projects, worktrees, &project("blog", r"C:\sites\blog"), true, &s).is_ok());
     }
 
     #[test]

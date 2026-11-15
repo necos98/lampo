@@ -15,12 +15,14 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::address::SiteAddress;
+use crate::claude_code::fnv32;
 use crate::error::DomainError;
 use crate::hostname::Hostname;
 use crate::mysql::{DatabaseConnection, DatabaseName};
-use crate::project::{Project, ProjectEnvironment, ProjectRoot};
+use crate::project::{Project, ProjectEnvironment, ProjectId, ProjectRoot};
 use crate::settings::Settings;
 use crate::site::{SiteId, WorktreeSlug};
+use crate::slug::MAX_SLUG_LEN;
 
 /// How a worktree environment gets its database, chosen at creation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,12 +62,40 @@ pub struct WorktreeEnvironment {
     pub created_at_unix_ms: u64,
 }
 
+/// What a new environment must not collide with: every registered site (folders, `.localhost`
+/// aliases, databases) and the databases already present on the parent's MySQL instance.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Occupancy<'a> {
+    pub projects: &'a [Project],
+    /// Every environment, of every project.
+    pub worktrees: &'a [WorktreeEnvironment],
+    /// Every database found on the parent's MySQL instance, including those no site owns any
+    /// more (a `down` without `--drop-database` keeps its database): never to be adopted.
+    pub server_databases: &'a [String],
+}
+
+impl Occupancy<'_> {
+    /// `slug` is free under `parent`: no sibling has it and no project serves its alias.
+    fn slug_is_free(&self, parent: &Project, slug: &str) -> bool {
+        let alias = localhost_alias(slug, &parent.id);
+        let sibling = self.worktrees.iter().any(|w| w.parent == parent.id && w.slug.as_str() == slug);
+        let served = self.projects.iter().flat_map(|p| p.addresses()).filter_map(SiteAddress::host).any(|h| h.as_str() == alias);
+        !sibling && !served
+    }
+
+    /// MySQL compares schema names case-insensitively on Windows.
+    fn database_is_taken(&self, name: &str) -> bool {
+        let registered = self.projects.iter().filter_map(Project::database).chain(self.worktrees.iter().filter_map(WorktreeEnvironment::owned_database)).map(DatabaseName::as_str);
+        registered.chain(self.server_databases.iter().map(String::as_str)).any(|taken| taken.eq_ignore_ascii_case(name))
+    }
+}
+
 impl WorktreeEnvironment {
-    /// Builds a new environment for `root` under `parent`.
-    /// `existing` are the parent's current environments (slug de-duplication).
+    /// Builds a new environment for `root` under `parent`, with a slug, an alias and (for
+    /// `Fresh`/`Clone`) a database that no other site in `taken` uses.
     pub fn derive(
         parent: &Project,
-        existing: &[WorktreeEnvironment],
+        taken: &Occupancy<'_>,
         root: ProjectRoot,
         branch: Option<String>,
         loopback_port: u16,
@@ -75,18 +105,21 @@ impl WorktreeEnvironment {
         if root == parent.root {
             return Err(DomainError::InvalidWorktree("the worktree folder is the project folder itself".into()));
         }
-        if let Some(other) = existing.iter().find(|e| e.root == root) {
+        if let Some(other) = taken.projects.iter().find(|p| p.root == root) {
+            return Err(DomainError::DuplicateProjectRoot { root: root.to_string(), other: other.id.to_string() });
+        }
+        if let Some(other) = taken.worktrees.iter().find(|w| w.root == root) {
             return Err(DomainError::InvalidWorktree(format!("an environment already exists for this folder (`{}`)", other.site_id())));
         }
         let label = branch.clone().unwrap_or_else(|| root.as_str().rsplit('\\').next().unwrap_or("worktree").to_string());
-        let slug = unique_slug(existing, WorktreeSlug::from_label(&label));
+        let slug = unique_slug(WorktreeSlug::from_label(&label), |s| taken.slug_is_free(parent, s));
         let database = match mode {
             DatabaseMode::Shared => WorktreeDatabase::Shared,
             DatabaseMode::Fresh | DatabaseMode::Clone { .. } if parent.environment.mysql().is_none() => {
                 return Err(DomainError::InvalidWorktree("the parent project does not use MySQL".into()));
             }
-            DatabaseMode::Fresh => WorktreeDatabase::Own { name: own_database_name(parent, &slug)?, cloned_from: None },
-            DatabaseMode::Clone { source } => WorktreeDatabase::Own { name: own_database_name(parent, &slug)?, cloned_from: Some(source.clone()) },
+            DatabaseMode::Fresh => WorktreeDatabase::Own { name: own_database_name(parent, &slug, taken)?, cloned_from: None },
+            DatabaseMode::Clone { source } => WorktreeDatabase::Own { name: own_database_name(parent, &slug, taken)?, cloned_from: Some(source.clone()) },
         };
         Ok(Self { parent: parent.id.clone(), slug, root, branch, loopback_port, database, created_at_unix_ms })
     }
@@ -97,7 +130,7 @@ impl WorktreeEnvironment {
 
     /// `<slug>.<project>.localhost`.
     pub fn localhost_alias(&self) -> Hostname {
-        Hostname::new(format!("{}.{}.localhost", self.slug, self.parent)).expect("slugs always form a valid hostname")
+        Hostname::new(localhost_alias(self.slug.as_str(), &self.parent)).expect("slugs always form a valid hostname")
     }
 
     /// Canonical address first (loopback port), then the `.localhost` alias.
@@ -153,28 +186,52 @@ impl WorktreeEnvironment {
     }
 }
 
-fn unique_slug(existing: &[WorktreeEnvironment], base: WorktreeSlug) -> WorktreeSlug {
-    let taken = |s: &str| existing.iter().any(|e| e.slug.as_str() == s);
-    if !taken(base.as_str()) {
+/// The `.localhost` alias of the environment `slug` of `parent`.
+fn localhost_alias(slug: &str, parent: &ProjectId) -> String {
+    format!("{slug}.{parent}.localhost")
+}
+
+/// `base`, else `base-2`, `base-3`, … : the first one `is_free` accepts.
+fn unique_slug(base: WorktreeSlug, is_free: impl Fn(&str) -> bool) -> WorktreeSlug {
+    if is_free(base.as_str()) {
         return base;
     }
     (2u32..)
         .map(|n| {
             let suffix = format!("-{n}");
             let mut stem = base.as_str().to_string();
-            stem.truncate(63 - suffix.len());
+            stem.truncate(MAX_SLUG_LEN - suffix.len());
             WorktreeSlug::new(format!("{}{suffix}", stem.trim_end_matches('-'))).expect("valid slug")
         })
-        .find(|s| !taken(s.as_str()))
+        .find(|s| is_free(s.as_str()))
         .expect("unbounded")
 }
 
-/// `<parent db>_wt_<slug>`, truncated to MySQL's 64-character limit.
-pub fn own_database_name(parent: &Project, slug: &WorktreeSlug) -> Result<DatabaseName, DomainError> {
+/// MySQL's limit on a schema name.
+const MAX_DATABASE_NAME_LEN: usize = 64;
+/// `_` + the 8 hex digits of the hash that keeps a shortened name distinct.
+const HASH_SUFFIX_LEN: usize = 9;
+
+/// `<parent db>_wt_<slug>`, else `<parent db>_wt_<slug>_2`, `_3`, … : the first name no other
+/// site and no database of the instance uses. A name over MySQL's limit is shortened to
+/// [`within_database_name_limit`]. Names that fit and are free are the plain form, so existing
+/// environments keep theirs.
+fn own_database_name(parent: &Project, slug: &WorktreeSlug, taken: &Occupancy<'_>) -> Result<DatabaseName, DomainError> {
     let base = parent.database().map(|d| d.to_string()).unwrap_or_else(|| parent.id.as_str().replace('-', "_"));
-    let mut name = format!("{base}_wt_{}", slug.as_str().replace('-', "_"));
-    name.truncate(64);
+    let preferred = format!("{base}_wt_{}", slug.as_str().replace('-', "_"));
+    let numbered = (2u32..).map(|n| format!("{preferred}_{n}"));
+    let name = std::iter::once(preferred.clone()).chain(numbered).map(|n| within_database_name_limit(&n)).find(|n| !taken.database_is_taken(n)).expect("unbounded");
     DatabaseName::new(name)
+}
+
+/// `name` unchanged when it fits MySQL's limit; otherwise its head followed by `_<fnv32 of the
+/// whole name>`, so two long names sharing their first 64 characters stay distinct.
+fn within_database_name_limit(name: &str) -> String {
+    if name.len() <= MAX_DATABASE_NAME_LEN {
+        return name.to_string();
+    }
+    let head: String = name.chars().take(MAX_DATABASE_NAME_LEN - HASH_SUFFIX_LEN).collect();
+    format!("{}_{:08x}", head.trim_end_matches('_'), fnv32(name))
 }
 
 /// Inclusive TCP port range for dedicated loopback listeners (worktree environments and
@@ -230,48 +287,118 @@ mod tests {
     #[test]
     fn derive_uses_branch_and_dedupes_slugs() {
         let parent = project("shop", "C:\\sites\\shop");
-        let a = WorktreeEnvironment::derive(&parent, &[], root("D:\\wt\\a"), Some("feature/login".into()), 8100, &DatabaseMode::Shared, 1).unwrap();
+        let a = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), Some("feature/login".into()), 8100, &DatabaseMode::Shared, 1).unwrap();
         assert_eq!(a.site_id().to_string(), "shop@feature-login");
         assert_eq!(a.localhost_alias().as_str(), "feature-login.shop.localhost");
         assert_eq!(a.url(), "http://127.0.0.1:8100");
         assert!(a.addresses().iter().all(|x| !x.needs_hosts_entry()));
-        let b = WorktreeEnvironment::derive(&parent, std::slice::from_ref(&a), root("D:\\wt\\b"), Some("feature/login".into()), 8101, &DatabaseMode::Shared, 1).unwrap();
+        let taken = Occupancy { worktrees: std::slice::from_ref(&a), ..Default::default() };
+        let b = WorktreeEnvironment::derive(&parent, &taken, root("D:\\wt\\b"), Some("feature/login".into()), 8101, &DatabaseMode::Shared, 1).unwrap();
         assert_eq!(b.slug.as_str(), "feature-login-2");
-        let c = WorktreeEnvironment::derive(&parent, &[], root("D:\\wt\\no-branch"), None, 8102, &DatabaseMode::Shared, 1).unwrap();
+        let c = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\no-branch"), None, 8102, &DatabaseMode::Shared, 1).unwrap();
         assert_eq!(c.slug.as_str(), "no-branch");
     }
 
     #[test]
     fn derive_rejects_bad_folders() {
         let parent = project("shop", "C:\\sites\\shop");
-        assert!(WorktreeEnvironment::derive(&parent, &[], root("C:\\Sites\\Shop"), None, 8100, &DatabaseMode::Shared, 1).is_err());
-        let a = WorktreeEnvironment::derive(&parent, &[], root("D:\\wt\\a"), None, 8100, &DatabaseMode::Shared, 1).unwrap();
-        assert!(WorktreeEnvironment::derive(&parent, &[a], root("d:\\WT\\a"), None, 8101, &DatabaseMode::Shared, 1).is_err());
+        assert!(WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("C:\\Sites\\Shop"), None, 8100, &DatabaseMode::Shared, 1).is_err());
+        let a = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), None, 8100, &DatabaseMode::Shared, 1).unwrap();
+        assert!(WorktreeEnvironment::derive(&parent, &Occupancy { worktrees: &[a], ..Default::default() }, root("d:\\WT\\a"), None, 8101, &DatabaseMode::Shared, 1).is_err());
     }
 
     #[test]
     fn database_modes() {
         let parent = project("my-shop", "C:\\sites\\shop");
-        let shared = WorktreeEnvironment::derive(&parent, &[], root("D:\\wt\\a"), Some("x".into()), 8100, &DatabaseMode::Shared, 1).unwrap();
+        let shared = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), Some("x".into()), 8100, &DatabaseMode::Shared, 1).unwrap();
         assert_eq!(shared.database_name(&parent).unwrap().as_str(), "my_shop");
         assert!(shared.owned_database().is_none());
 
         let mode = DatabaseMode::Clone { source: DatabaseName::new("my_shop").unwrap() };
-        let cloned = WorktreeEnvironment::derive(&parent, &[], root("D:\\wt\\b"), Some("fix-1".into()), 8101, &mode, 1).unwrap();
+        let cloned = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\b"), Some("fix-1".into()), 8101, &mode, 1).unwrap();
         assert_eq!(cloned.database_name(&parent).unwrap().as_str(), "my_shop_wt_fix_1");
         let conn = cloned.database_connection(&parent, &Settings::default()).unwrap().unwrap();
         assert_eq!((conn.port, conn.database.as_str()), (3306, "my_shop_wt_fix_1"));
 
         let mut no_db = parent.clone();
         no_db.environment.set_mysql(None);
-        assert!(WorktreeEnvironment::derive(&no_db, &[], root("D:\\wt\\c"), None, 8102, &DatabaseMode::Fresh, 1).is_err());
+        assert!(WorktreeEnvironment::derive(&no_db, &Occupancy::default(), root("D:\\wt\\c"), None, 8102, &DatabaseMode::Fresh, 1).is_err());
         let _ = MysqlSeries::DEFAULT;
+    }
+
+    fn fresh(parent: &Project, taken: &Occupancy<'_>, folder: &str, branch: &str) -> WorktreeEnvironment {
+        WorktreeEnvironment::derive(parent, taken, root(folder), Some(branch.into()), 8100, &DatabaseMode::Fresh, 1).unwrap()
+    }
+
+    fn own_name(env: &WorktreeEnvironment) -> &str {
+        env.owned_database().unwrap().as_str()
+    }
+
+    #[test]
+    fn long_database_names_keep_a_hash_of_the_whole_name() {
+        let parent = project("shop", r"C:\sites\shop");
+        let stem = "a".repeat(60);
+        let first = fresh(&parent, &Occupancy::default(), r"D:\wt\one", &format!("{stem}-one"));
+        let second = fresh(&parent, &Occupancy::default(), r"D:\wt\two", &format!("{stem}-two"));
+        let (a, b) = (own_name(&first), own_name(&second));
+        assert_eq!((a.len(), b.len()), (MAX_DATABASE_NAME_LEN, MAX_DATABASE_NAME_LEN));
+        assert_ne!(a, b, "same first 64 characters, different slugs");
+        assert!(a.starts_with("shop_wt_aaaa"), "{a}");
+        assert_eq!(a, fresh(&parent, &Occupancy::default(), r"D:\wt\three", &format!("{stem}-one")).owned_database().unwrap().as_str(), "stable");
+        // `shop_wt_` + 46 letters puts a separator right at the cut: it is not doubled.
+        let on_separator = fresh(&parent, &Occupancy::default(), r"D:\wt\four", &format!("{}-{}", "a".repeat(46), "b".repeat(30)));
+        let name = own_name(&on_separator);
+        assert!(!name.contains("__") && name.len() == MAX_DATABASE_NAME_LEN - 1, "{name}");
+
+        let fits = fresh(&parent, &Occupancy::default(), r"D:\wt\short", "feature/login");
+        assert_eq!(own_name(&fits), "shop_wt_feature_login", "names within the limit keep the plain form");
+    }
+
+    #[test]
+    fn own_databases_skip_names_used_by_any_site_or_found_on_the_instance() {
+        let parent = project("shop", r"C:\sites\shop");
+        let mut blog = project("blog", r"C:\sites\blog");
+        blog.set_database_name(DatabaseName::new("SHOP_WT_FIX").unwrap());
+        let projects = [parent.clone(), blog];
+        // An environment of another project whose own database happens to bear the name.
+        let mut claimed = fresh(&project("api", r"C:\sites\api"), &Occupancy::default(), r"D:\wt\y", "y");
+        claimed.database = WorktreeDatabase::Own { name: DatabaseName::new("shop_wt_fix_2").unwrap(), cloned_from: None };
+        let worktrees = [claimed];
+        let server = ["shop_wt_fix_3".to_string()];
+        let taken = Occupancy { projects: &projects, worktrees: &worktrees, server_databases: &server };
+        let env = fresh(&parent, &taken, r"D:\wt\fix", "fix");
+        assert_eq!(own_name(&env), "shop_wt_fix_4", "a project's, an environment's (case-insensitively) and a leftover database are skipped");
+    }
+
+    #[test]
+    fn derive_refuses_a_registered_project_folder_and_any_environment_folder() {
+        let parent = project("shop", r"C:\sites\shop");
+        let projects = [parent.clone(), project("login", r"D:\wt\login")];
+        let taken = Occupancy { projects: &projects, ..Default::default() };
+        let err = WorktreeEnvironment::derive(&parent, &taken, root(r"d:\WT\login"), None, 8100, &DatabaseMode::Shared, 1).unwrap_err();
+        assert_eq!(err, DomainError::DuplicateProjectRoot { root: r"D:\WT\login".into(), other: "login".into() });
+
+        let other_parent = project("blog", r"C:\sites\blog");
+        let theirs = WorktreeEnvironment::derive(&other_parent, &Occupancy::default(), root(r"D:\wt\x"), None, 8100, &DatabaseMode::Shared, 1).unwrap();
+        let taken = Occupancy { worktrees: std::slice::from_ref(&theirs), ..Default::default() };
+        assert!(matches!(WorktreeEnvironment::derive(&parent, &taken, root(r"D:\wt\x"), None, 8101, &DatabaseMode::Shared, 1), Err(DomainError::InvalidWorktree(_))));
+    }
+
+    #[test]
+    fn slugs_skip_aliases_served_by_a_project() {
+        let parent = project("shop", r"C:\sites\shop");
+        let mut blog = project("blog", r"C:\sites\blog");
+        blog.set_addresses(vec![SiteAddress::Localhost(Hostname::new("fix.shop.localhost").unwrap())]).unwrap();
+        let projects = [parent.clone(), blog];
+        let taken = Occupancy { projects: &projects, ..Default::default() };
+        let env = WorktreeEnvironment::derive(&parent, &taken, root(r"D:\wt\fix"), Some("fix".into()), 8100, &DatabaseMode::Shared, 1).unwrap();
+        assert_eq!(env.localhost_alias().as_str(), "fix-2.shop.localhost");
     }
 
     #[test]
     fn stale_means_folder_gone_or_parent_gone() {
         let parent = project("shop", "C:\\sites\\shop");
-        let w = WorktreeEnvironment::derive(&parent, &[], root("D:\\wt\\a"), None, 8100, &DatabaseMode::Shared, 1).unwrap();
+        let w = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), None, 8100, &DatabaseMode::Shared, 1).unwrap();
         let projects = std::slice::from_ref(&parent);
         assert!(!w.is_stale(projects, |_| true));
         assert!(w.is_stale(projects, |r| r.as_str() != "D:\\wt\\a"));
@@ -282,7 +409,7 @@ mod tests {
     fn document_root_follows_parent_public_dir() {
         let mut parent = project("shop", "C:\\sites\\shop");
         parent.environment.public_dir = crate::project::PublicDir::new("public").unwrap();
-        let w = WorktreeEnvironment::derive(&parent, &[], root("D:\\wt\\a"), None, 8100, &DatabaseMode::Shared, 1).unwrap();
+        let w = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), None, 8100, &DatabaseMode::Shared, 1).unwrap();
         assert_eq!(w.document_root(&parent), PathBuf::from("D:\\wt\\a").join("public"));
     }
 

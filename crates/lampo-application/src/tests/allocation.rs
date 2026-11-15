@@ -9,7 +9,7 @@ use lampo_domain::address::SiteAddress;
 use lampo_domain::ports::{ProjectRepository, WorktreeRepository};
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::project::{ProjectId, ProjectRoot, check_conflicts};
-use lampo_domain::worktree::{DatabaseMode, WorktreeEnvironment};
+use lampo_domain::worktree::{DatabaseMode, Occupancy, WorktreeEnvironment};
 
 use super::cli;
 use crate::dto::*;
@@ -70,9 +70,9 @@ async fn concurrent_allocations_never_hand_out_the_same_port() {
                         check_conflicts(&snap.projects, &snap.worktrees, &p, true, &snap.settings)?;
                         projects.save(&p)?;
                     } else {
-                        let siblings: Vec<_> = snap.worktrees.iter().filter(|e| e.parent == parent.id).cloned().collect();
                         let root = ProjectRoot::new(format!("D:\\wt\\{n}")).unwrap();
-                        let env = WorktreeEnvironment::derive(&parent, &siblings, root, Some(format!("b{n}")), port, &DatabaseMode::Shared, 0)?;
+                        let taken = Occupancy { projects: &snap.projects, worktrees: &snap.worktrees, ..Default::default() };
+                        let env = WorktreeEnvironment::derive(&parent, &taken, root, Some(format!("b{n}")), port, &DatabaseMode::Shared, 0)?;
                         worktrees.save(&env)?;
                     }
                     Ok(port)

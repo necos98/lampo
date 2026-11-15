@@ -39,6 +39,7 @@ pub mod service;
 pub mod settings;
 pub mod shim;
 pub mod site;
+pub mod slug;
 pub mod vc_runtime;
 pub mod version;
 pub mod web;

@@ -483,6 +483,8 @@ pub struct FakeDb {
     pub fail_create: AtomicBool,
     /// `drop_database` fails (MySQL error) for these names, dropping nothing.
     pub fail_drop_of: Mutex<BTreeSet<String>>,
+    /// Present but missing from `list`: created by another client after the listing.
+    pub unlisted: Mutex<BTreeSet<String>>,
 }
 impl FakeDb {
     pub fn has(&self, name: &str) -> bool {
@@ -495,7 +497,8 @@ impl FakeDb {
 #[async_trait]
 impl DatabaseAdmin for FakeDb {
     async fn list(&self, _e: &MysqlEndpoint) -> PortResult<Vec<String>> {
-        Ok(lock(&self.dbs).iter().cloned().collect())
+        let unlisted = lock(&self.unlisted);
+        Ok(lock(&self.dbs).iter().filter(|d| !unlisted.contains(*d)).cloned().collect())
     }
     async fn create(&self, e: &MysqlEndpoint, name: &DatabaseName) -> PortResult<()> {
         lock(&self.calls).push(format!("create:{}:{name}", e.port));
@@ -528,7 +531,10 @@ impl DatabaseAdmin for FakeDb {
     }
     async fn clone_database(&self, _e: &MysqlEndpoint, source: &DatabaseName, target: &DatabaseName, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
         lock(&self.calls).push(format!("clone:{source}->{target}"));
-        lock(&self.dbs).insert(target.to_string());
+        // Like the adapter, which creates `target` before restoring into it.
+        if !lock(&self.dbs).insert(target.to_string()) {
+            return Err(PortError::AlreadyExists { entity: "database", id: target.to_string() });
+        }
         progress.report(Progress::new(ProgressStage::Configuring, 50, Some(100)));
         cancel.check()?;
         if self.fail_clone.load(Ordering::SeqCst) {

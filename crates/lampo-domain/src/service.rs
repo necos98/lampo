@@ -499,10 +499,11 @@ mod tests {
 
     #[test]
     fn worktree_environments_are_served_even_if_parent_is_inactive() {
-        use crate::worktree::{DatabaseMode, WorktreeEnvironment};
+        use crate::worktree::{DatabaseMode, Occupancy, WorktreeEnvironment};
         let mut parent = project("shop", "C:\\a");
         parent.environment.use_service(ServiceKind::REDIS, None);
-        let wt = WorktreeEnvironment::derive(&parent, &[], crate::project::ProjectRoot::new("D:\\wt\\x").unwrap(), Some("x".into()), 8100, &DatabaseMode::Shared, 0).unwrap();
+        let wt =
+            WorktreeEnvironment::derive(&parent, &Occupancy::default(), crate::project::ProjectRoot::new("D:\\wt\\x").unwrap(), Some("x".into()), 8100, &DatabaseMode::Shared, 0).unwrap();
         let orphan = WorktreeEnvironment { parent: crate::project::ProjectId::new("gone").unwrap(), ..wt.clone() };
         let plan = plan_services(&[parent], &[wt, orphan], &Settings::default());
         assert_eq!(plan[&ServiceId::apache()].iter().map(|s| s.to_string()).collect::<Vec<_>>(), ["shop@x"]);

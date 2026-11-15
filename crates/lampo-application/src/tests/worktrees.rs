@@ -228,3 +228,61 @@ async fn prune_reports_a_failed_environment_and_still_removes_and_syncs_the_othe
     assert!(w.events.all()[events..].contains(&DomainEvent::WorktreesChanged { project: lampo_domain::project::ProjectId::new("shop").unwrap() }));
     assert!(!w.web.last().unwrap().vhosts.iter().any(|v| v.site.to_string() == "shop@feature-cart"), "synced");
 }
+
+#[tokio::test]
+async fn fresh_mode_never_adopts_a_database_left_by_an_earlier_down() {
+    let w = setup();
+    // Kept by a `down` without `--drop-database`: nobody owns it any more, but it holds data.
+    w.db.dbs.lock().unwrap().insert("shop_wt_feature_login".into());
+    let result = up(&w, r"D:\wt\login", DatabaseModeDto::Fresh).await.unwrap();
+    assert_eq!(result.environment.database.as_ref().unwrap().database, "shop_wt_feature_login_2");
+    assert!(w.db.has("shop_wt_feature_login_2"));
+
+    let down = w.worktree_down().execute(WorktreeDownRequest { target: "shop@feature-login".into(), drop_database: true }, &gui()).await.unwrap();
+    assert_eq!(down.database_dropped.as_deref(), Some("shop_wt_feature_login_2"));
+    assert!(w.db.has("shop_wt_feature_login"), "the leftover database is never dropped by an environment that did not create it");
+}
+
+#[tokio::test]
+async fn own_databases_never_reuse_the_database_of_another_site() {
+    let w = setup();
+    w.project("blog", r"C:\sites\blog", false);
+    w.update_project("blog", |p| p.set_database_name(lampo_domain::mysql::DatabaseName::new("shop_wt_feature_login").unwrap()));
+    let result = up(&w, r"D:\wt\login", DatabaseModeDto::Fresh).await.unwrap();
+    assert_eq!(result.environment.database.as_ref().unwrap().database, "shop_wt_feature_login_2");
+}
+
+#[tokio::test]
+async fn a_database_created_concurrently_by_another_client_is_a_conflict_and_is_kept() {
+    for mode in [DatabaseModeDto::Fresh, DatabaseModeDto::Clone { source: "shop".into() }] {
+        let w = setup();
+        // Created between the listing and the `CREATE DATABASE` (another MySQL client).
+        w.db.dbs.lock().unwrap().insert("shop_wt_feature_login".into());
+        w.db.unlisted.lock().unwrap().insert("shop_wt_feature_login".into());
+        let err = up(&w, r"D:\wt\login", mode.clone()).await.unwrap_err();
+        assert_eq!(err.code, ErrorCode::Conflict, "{mode:?}: {err}");
+        assert!(w.worktrees.list_all().unwrap().is_empty(), "{mode:?}");
+        assert!(w.db.has("shop_wt_feature_login"), "{mode:?}: another client's database is never dropped");
+    }
+}
+
+#[tokio::test]
+async fn up_refuses_a_folder_registered_as_a_project() {
+    let w = setup();
+    w.project("login-app", r"D:\wt\login", false);
+    let err = up(&w, r"D:\wt\login", DatabaseModeDto::Shared).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Conflict, "{err}");
+    assert!(err.message.contains("login-app"), "{}", err.message);
+    assert!(w.worktrees.list_all().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn up_picks_a_slug_whose_alias_no_project_uses() {
+    let w = setup();
+    w.project("blog", r"C:\sites\blog", false);
+    let taken = lampo_domain::hostname::Hostname::new("feature-login.shop.localhost").unwrap();
+    w.update_project("blog", |p| p.set_addresses(vec![lampo_domain::address::SiteAddress::Localhost(taken)]).unwrap());
+    let result = up(&w, r"D:\wt\login", DatabaseModeDto::Shared).await.unwrap();
+    assert_eq!(result.environment.site, "shop@feature-login-2");
+    assert_eq!(result.environment.urls[1], "http://feature-login-2.shop.localhost");
+}

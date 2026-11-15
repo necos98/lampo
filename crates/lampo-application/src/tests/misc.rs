@@ -13,7 +13,7 @@ use lampo_domain::preset::builtin;
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::project::{ProjectId, ProjectRoot};
 use lampo_domain::service::{ServiceId, ServiceState};
-use lampo_domain::worktree::{DatabaseMode, WorktreeEnvironment};
+use lampo_domain::worktree::{DatabaseMode, Occupancy, WorktreeEnvironment};
 
 use super::{cli, gui};
 use crate::control::*;
@@ -25,7 +25,8 @@ use crate::use_cases::*;
 
 fn add_worktree(w: &World, root: &str, branch: &str, port: u16, mode: DatabaseMode) -> WorktreeEnvironment {
     let parent = w.projects.0.lock().unwrap().get(&ProjectId::new("shop").unwrap()).cloned().unwrap();
-    let env = WorktreeEnvironment::derive(&parent, &w.worktrees.list_all().unwrap(), ProjectRoot::new(root).unwrap(), Some(branch.into()), port, &mode, 5).unwrap();
+    let existing = w.worktrees.list_all().unwrap();
+    let env = WorktreeEnvironment::derive(&parent, &Occupancy { worktrees: &existing, ..Default::default() }, ProjectRoot::new(root).unwrap(), Some(branch.into()), port, &mode, 5).unwrap();
     w.worktrees.save(&env).unwrap();
     w.fs.add(root);
     env

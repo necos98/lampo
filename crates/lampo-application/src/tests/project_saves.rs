@@ -10,7 +10,7 @@ use lampo_domain::events::DomainEvent;
 use lampo_domain::package::PackageKind;
 use lampo_domain::ports::{ProjectRepository, WorktreeRepository};
 use lampo_domain::project::{DisplayName, ProjectId, ProjectRoot};
-use lampo_domain::worktree::{DatabaseMode, WorktreeEnvironment};
+use lampo_domain::worktree::{DatabaseMode, Occupancy, WorktreeEnvironment};
 
 use super::{cli, gui};
 use crate::context::CallContext;
@@ -194,9 +194,9 @@ async fn a_delete_reports_the_worktree_databases_it_leaves_in_mysql() {
     let w = World::with_basics();
     let shop = w.project("shop", r"C:\sites\shop", false);
     w.hosts_in_sync();
-    let own = WorktreeEnvironment::derive(&shop, &[], ProjectRoot::new(r"D:\wt\login").unwrap(), Some("feature/login".into()), 8100, &DatabaseMode::Fresh, 1).unwrap();
-    let shared =
-        WorktreeEnvironment::derive(&shop, std::slice::from_ref(&own), ProjectRoot::new(r"D:\wt\cart").unwrap(), Some("feature/cart".into()), 8101, &DatabaseMode::Shared, 1).unwrap();
+    let own = WorktreeEnvironment::derive(&shop, &Occupancy::default(), ProjectRoot::new(r"D:\wt\login").unwrap(), Some("feature/login".into()), 8100, &DatabaseMode::Fresh, 1).unwrap();
+    let taken = Occupancy { worktrees: std::slice::from_ref(&own), ..Default::default() };
+    let shared = WorktreeEnvironment::derive(&shop, &taken, ProjectRoot::new(r"D:\wt\cart").unwrap(), Some("feature/cart".into()), 8101, &DatabaseMode::Shared, 1).unwrap();
     w.worktrees.save(&own).unwrap();
     w.worktrees.save(&shared).unwrap();
 

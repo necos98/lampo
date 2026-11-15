@@ -12,7 +12,7 @@ use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
 use lampo_domain::project::{Project, ProjectRoot};
 use lampo_domain::resolution::git;
 use lampo_domain::site::SiteId;
-use lampo_domain::worktree::{WorktreeDatabase, WorktreeEnvironment};
+use lampo_domain::worktree::{DatabaseMode, Occupancy, WorktreeDatabase, WorktreeEnvironment};
 use lampo_domain::PortError;
 
 use super::allocation::LoopbackPortAllocator;
@@ -87,25 +87,36 @@ impl WorktreeDatabases {
         Ok(endpoint)
     }
 
-    /// Creates the environment's own database. On failure the half-created database is dropped
-    /// (best effort).
+    /// The databases already on the parent's instance, which a new environment's own database
+    /// must not adopt (`WorktreeEnvironment::derive` picks another name). Empty for `Shared` and
+    /// for a parent without MySQL (which `derive` rejects for the other modes).
+    async fn existing_on_instance(&self, parent: &Project, mode: &DatabaseMode) -> AppResult<Vec<String>> {
+        if *mode == DatabaseMode::Shared || parent.environment.mysql().is_none() {
+            return Ok(Vec::new());
+        }
+        let endpoint = self.mysql_for(parent).await?;
+        Ok(self.database.list(&endpoint).await?)
+    }
+
+    /// Creates the environment's own database. Its name was free when the environment was
+    /// derived: one that exists by now was created by another client and is reported as
+    /// `Conflict`, never adopted nor dropped. On any other failure the half-created database is
+    /// dropped (best effort).
     async fn provision(&self, env: &WorktreeEnvironment, parent: &Project, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<()> {
         let WorktreeDatabase::Own { name, cloned_from } = &env.database else { return Ok(()) };
         let endpoint = self.mysql_for(parent).await?;
         cancel.check()?;
         let subject = env.site_id().to_string();
         match cloned_from {
-            None => match self.database.create(&endpoint, name).await {
-                Ok(()) | Err(PortError::AlreadyExists { .. }) => Ok(()),
-                Err(e) => Err(e.into()),
-            },
+            None => Ok(self.database.create(&endpoint, name).await?),
             Some(source) => {
                 if !self.database.list(&endpoint).await?.iter().any(|d| d == source.as_str()) {
                     return Err(AppError::not_found("database", source));
                 }
                 progress.report(Progress::new(ProgressStage::Configuring, 0, None).with_subject(subject));
                 let result = self.database.clone_database(&endpoint, source, name, progress, cancel).await;
-                if result.is_err() {
+                let partial = result.as_ref().is_err_and(|e| !matches!(e, PortError::AlreadyExists { .. }));
+                if partial {
                     if let Err(e) = self.database.drop_database(&endpoint, name).await {
                         tracing::warn!("could not drop the partial clone `{name}`: {e}");
                     }
@@ -198,11 +209,13 @@ impl WorktreeUp {
     ///    worktree and no `project_id` given);
     /// 2. parent = `project_id` or the project containing the main repo (`ProjectNotResolved`);
     /// 3. existing environment for that folder → return it (`created: false`), re-syncing;
-    /// 4. allocate a loopback port and save the derived environment, atomically
-    ///    ([`LoopbackPortAllocator::allocate`]);
-    /// 5. database: `Fresh` → create; `Clone` → ensure MySQL running, `clone_database`
-    ///    (progress reported); on failure (or cancellation) the environment is removed again;
-    /// 6. publish `WorktreesChanged`, sync (never needs elevation).
+    /// 4. `Fresh`/`Clone`: ensure MySQL running and list its databases (never adopted);
+    /// 5. allocate a loopback port and save the derived environment, atomically
+    ///    ([`LoopbackPortAllocator::allocate`]): `Conflict` if the folder is a registered
+    ///    project's; slug, alias and database name are free across every site;
+    /// 6. database: `Fresh` → create; `Clone` → `clone_database` (progress reported); on failure
+    ///    (or cancellation) the environment is removed again;
+    /// 7. publish `WorktreesChanged`, sync (never needs elevation).
     pub async fn execute(&self, request: WorktreeUpRequest, ctx: &CallContext, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<WorktreeUpResultDto> {
         let d = &self.deps;
         let placement = self.place(&request)?;
@@ -211,14 +224,15 @@ impl WorktreeUp {
         let (env, created) = match d.worktrees.find_by_root(&placement.root)? {
             Some(existing) => (existing, false),
             None => {
+                let server_databases = d.databases.existing_on_instance(&placement.parent, &mode).await?;
                 d.allocator
                     .allocate(|port, snap| {
                         // Re-checked under the lock: a concurrent `up` may have created it.
                         if let Some(existing) = snap.worktrees.iter().find(|w| w.root == placement.root) {
                             return Ok((existing.clone(), false));
                         }
-                        let siblings: Vec<WorktreeEnvironment> = snap.worktrees.iter().filter(|w| w.parent == placement.parent.id).cloned().collect();
-                        let env = WorktreeEnvironment::derive(&placement.parent, &siblings, placement.root.clone(), placement.branch.clone(), port, &mode, d.clock.now_unix_ms())?;
+                        let taken = Occupancy { projects: &snap.projects, worktrees: &snap.worktrees, server_databases: &server_databases };
+                        let env = WorktreeEnvironment::derive(&placement.parent, &taken, placement.root.clone(), placement.branch.clone(), port, &mode, d.clock.now_unix_ms())?;
                         d.worktrees.save(&env)?;
                         Ok((env, true))
                     })

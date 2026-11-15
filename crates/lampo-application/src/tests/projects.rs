@@ -10,7 +10,7 @@ use lampo_domain::ports::{CustomPresetRepository, ProjectRepository, WorktreeRep
 use lampo_domain::preset::PresetId;
 use lampo_domain::project::{ProjectId, ProjectRoot};
 use lampo_domain::service::ServiceKind;
-use lampo_domain::worktree::{DatabaseMode, WorktreeEnvironment};
+use lampo_domain::worktree::{DatabaseMode, Occupancy, WorktreeEnvironment};
 
 use super::{cli, gui};
 use crate::dto::*;
@@ -120,7 +120,7 @@ async fn no_elevation_addressing_allocates_a_free_loopback_port_and_never_prompt
     let w = World::with_basics();
     w.project("shop", "C:\\sites\\shop", false);
     let parent = w.projects.get(&ProjectId::new("shop").unwrap()).unwrap().unwrap();
-    let wt = WorktreeEnvironment::derive(&parent, &[], ProjectRoot::new("D:\\wt\\a").unwrap(), None, 8100, &DatabaseMode::Shared, 1).unwrap();
+    let wt = WorktreeEnvironment::derive(&parent, &Occupancy::default(), ProjectRoot::new("D:\\wt\\a").unwrap(), None, 8100, &DatabaseMode::Shared, 1).unwrap();
     w.worktrees.save(&wt).unwrap();
     w.ports.busy(8101, "node.exe");
     w.hosts_in_sync();
@@ -198,7 +198,7 @@ async fn activate_set_php_relink_update_and_delete() {
     assert_eq!((dto.name.as_str(), dto.database_name.as_deref(), dto.url.as_str()), ("Shop 2", Some("shop_main"), "http://shop.localhost"));
 
     let parent = w.projects.get(&ProjectId::new("shop").unwrap()).unwrap().unwrap();
-    let wt = WorktreeEnvironment::derive(&parent, &[], ProjectRoot::new("D:\\wt\\a").unwrap(), None, 8100, &DatabaseMode::Shared, 1).unwrap();
+    let wt = WorktreeEnvironment::derive(&parent, &Occupancy::default(), ProjectRoot::new("D:\\wt\\a").unwrap(), None, 8100, &DatabaseMode::Shared, 1).unwrap();
     w.worktrees.save(&wt).unwrap();
     assert_eq!(queries.get("shop").unwrap().worktrees.len(), 1);
     w.delete_project_with(sync.clone()).execute("shop", &cli()).await.unwrap();
@@ -249,7 +249,7 @@ async fn import_and_relink_refuse_a_loopback_port_owned_by_a_worktree_environmen
     let w = World::with_basics();
     w.project("shop", "C:\\sites\\shop", false);
     let parent = w.projects.get(&ProjectId::new("shop").unwrap()).unwrap().unwrap();
-    let wt = WorktreeEnvironment::derive(&parent, &[], ProjectRoot::new("D:\\wt\\a").unwrap(), None, 8100, &DatabaseMode::Shared, 1).unwrap();
+    let wt = WorktreeEnvironment::derive(&parent, &Occupancy::default(), ProjectRoot::new("D:\\wt\\a").unwrap(), None, 8100, &DatabaseMode::Shared, 1).unwrap();
     w.worktrees.save(&wt).unwrap();
     w.hosts_in_sync();
 
@@ -310,7 +310,7 @@ async fn address_suggestions_use_the_domain_defaults_and_the_allocator() {
     let w = World::with_basics();
     w.project("shop", r"C:\sites\shop", false);
     let parent = w.projects.get(&ProjectId::new("shop").unwrap()).unwrap().unwrap();
-    let wt = WorktreeEnvironment::derive(&parent, &[], ProjectRoot::new(r"D:\wt\a").unwrap(), None, 8100, &DatabaseMode::Shared, 1).unwrap();
+    let wt = WorktreeEnvironment::derive(&parent, &Occupancy::default(), ProjectRoot::new(r"D:\wt\a").unwrap(), None, 8100, &DatabaseMode::Shared, 1).unwrap();
     w.worktrees.save(&wt).unwrap();
     w.ports.busy(8101, "node.exe");
     let s = SuggestAddresses::new(w.allocator.clone(), w.settings.clone()).execute("blog").await.unwrap();

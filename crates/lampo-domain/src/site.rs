@@ -8,7 +8,8 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 use crate::error::DomainError;
-use crate::project::{ProjectId, validate_slug};
+use crate::project::ProjectId;
+use crate::slug::{slugify, validate_slug};
 
 /// Identifier of a worktree environment within its parent project (`feature-login`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -22,7 +23,7 @@ impl WorktreeSlug {
 
     /// From a branch name (`feature/Login-Form` → `feature-login-form`) or folder name.
     pub fn from_label(label: &str) -> Self {
-        Self(crate::project::slugify(label, "worktree"))
+        Self(slugify(label, "worktree"))
     }
 
     pub fn as_str(&self) -> &str {

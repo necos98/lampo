@@ -10,7 +10,7 @@ use lampo_domain::ports::{InstalledPackageRegistry, ProjectRepository, SettingsR
 use lampo_domain::project::{ApacheDirectives, ProjectRoot, PublicDir};
 use lampo_domain::service::{ServiceId, ServiceState};
 use lampo_domain::site::SiteId;
-use lampo_domain::worktree::{DatabaseMode, WorktreeEnvironment};
+use lampo_domain::worktree::{DatabaseMode, Occupancy, WorktreeEnvironment};
 
 use super::{cli, gui};
 use crate::dto::SettingsPatchRequest;
@@ -21,7 +21,10 @@ use crate::mapping::package_id_to_dto;
 
 fn worktree(w: &World, parent: &str, root: &str, branch: &str, port: u16) -> WorktreeEnvironment {
     let p = w.projects.get(&lampo_domain::project::ProjectId::new(parent).unwrap()).unwrap().unwrap();
-    let env = WorktreeEnvironment::derive(&p, &w.worktrees.list_for(&p.id).unwrap(), ProjectRoot::new(root).unwrap(), Some(branch.into()), port, &DatabaseMode::Shared, 1).unwrap();
+    let existing = w.worktrees.list_all().unwrap();
+    let env =
+        WorktreeEnvironment::derive(&p, &Occupancy { worktrees: &existing, ..Default::default() }, ProjectRoot::new(root).unwrap(), Some(branch.into()), port, &DatabaseMode::Shared, 1)
+            .unwrap();
     w.worktrees.save(&env).unwrap();
     w.fs.add(root);
     env

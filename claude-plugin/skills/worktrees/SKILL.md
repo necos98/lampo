@@ -64,6 +64,10 @@ runs on that database; with `shared` (or without an environment), on the parent'
 | `fresh` | new empty database `<parent db>_wt_<slug>` | run migrations and seeders from scratch |
 | `clone:<database>` | new database `<parent db>_wt_<slug>`, a copy of `<database>` | realistic data, destructive tests, risky migrations |
 
+An existing database is never reused: when that name is taken (by another site, or left on
+MySQL by an earlier `down` without `--drop-database`) a `_2`, `_3`, … suffix is added, and a
+name over 64 characters is shortened with a hash. Always read the real name from `agent context`.
+
 The clone source must be a database on the parent's MySQL instance, usually the parent's own
 (`database.database` in the parent's `agent context`, e.g. `shop`). The mode is chosen at
 creation: to change it, remove the environment (see below) and bring it up again.
