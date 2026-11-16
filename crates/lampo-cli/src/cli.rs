@@ -186,7 +186,11 @@ pub enum ProjectCommand {
         /// Project id (default: resolved from the current folder).
         id: Option<String>,
     },
-    /// Switch the project's PHP minor (e.g. `8.3`).
+    /// Switch the project's PHP minor (e.g. `8.3`). Same as `lampo project set --php`
+    ///
+    /// The version comes first, then the optional project id.
+    ///
+    /// Example: lampo project set-php 8.4 shop
     SetPhp {
         /// PHP minor version, `8.3`.
         #[arg(value_name = "VERSION")]
@@ -194,7 +198,7 @@ pub enum ProjectCommand {
         /// Project id (default: resolved from the current folder).
         id: Option<String>,
     },
-    /// Change the project's PHP extensions, add-ons (Xdebug), php.ini values, services (MySQL/Redis), database name, public folder, Apache directives, display name or addresses
+    /// Change the project's PHP version, extensions, add-ons (Xdebug), php.ini values, services (MySQL/Redis), database name, public folder, Apache directives, display name or addresses
     ///
     /// Only what is named changes, in one atomic edit of the stored project (no lost update
     /// with the GUI); then Apache, php.ini, services and the hosts file are regenerated as after
@@ -204,6 +208,7 @@ pub enum ProjectCommand {
     /// updated project (`--json`: the ProjectDto).
     ///
     /// Examples:
+    ///   lampo project set --php 8.4 --ext intl,gd
     ///   lampo project set --ext intl,gd --ini memory_limit=512M
     ///   lampo project set --addon xdebug --ini xdebug.mode=debug,develop
     ///   lampo project set --no-addon xdebug --no-ini xdebug.mode
@@ -265,12 +270,17 @@ pub enum ProjectCommand {
 
 #[derive(Debug, Args)]
 #[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args([
-    "ext", "no_ext", "addon", "no_addon", "ini", "no_ini", "service", "no_service", "database", "public_dir", "apache_directives",
+    "php", "ext", "no_ext", "addon", "no_addon", "ini", "no_ini", "service", "no_service", "database", "public_dir", "apache_directives",
     "name", "address", "no_address",
 ])))]
 pub struct ProjectSetArgs {
     /// Project id (default: resolved from the current folder or --project).
     pub id: Option<String>,
+    /// Switch to another PHP minor (`8.4`), as `lampo project set-php` does. It must be
+    /// installed (`lampo package install php 8.4`; exit 10 otherwise), and so must the
+    /// project's add-ons for it. Applied first: the other flags are checked against it.
+    #[arg(long, value_name = "VERSION")]
+    pub php: Option<String>,
     /// Enable a bundled PHP extension (`intl`, `gd`, `pdo_mysql`, `opcache`...; `php_intl.dll`
     /// also works). Must ship with the project's PHP (the error lists the available ones).
     #[arg(long, value_name = "NAME", value_delimiter = ',')]

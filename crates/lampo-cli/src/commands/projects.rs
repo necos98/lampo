@@ -3,6 +3,7 @@
 use lampo_application::control::ControlRequest;
 use lampo_application::dto::*;
 use lampo_application::AppResult;
+use lampo_domain::php::PhpMinor;
 use serde::Serialize;
 
 use super::{Cmd, validation};
@@ -35,6 +36,7 @@ pub async fn run(c: &Cmd<'_>, command: ProjectCommand) -> AppResult<i32> {
         ProjectCommand::Activate { id } => set_active(c, id, true).await?,
         ProjectCommand::Deactivate { id } => set_active(c, id, false).await?,
         ProjectCommand::SetPhp { php_version, id } => {
+            reject_swapped_set_php_args(&php_version, id.as_deref())?;
             let project_id = c.project_id(id.as_ref())?;
             let project: ProjectDto = c.app(ControlRequest::ProjectSetPhp(SetProjectPhpRequest { project_id, php_version })).await?;
             c.io.emit(&project, render::project);
@@ -103,6 +105,19 @@ async fn remove(c: &Cmd<'_>, id: Option<String>, yes: bool) -> AppResult<()> {
     Ok(())
 }
 
+/// `project set-php shop 7.4`: the id where the version goes. Refused with the corrected command
+/// rather than guessed, since an id may itself look like a version; anything else is left to the
+/// app's own validation.
+fn reject_swapped_set_php_args(php_version: &str, id: Option<&str>) -> AppResult<()> {
+    let is_version = |s: &str| PhpMinor::parse(s).is_ok();
+    match id {
+        Some(id) if !is_version(php_version) && is_version(id) => {
+            Err(validation(format!("invalid PHP version `{php_version}`: the version comes first, did you mean: lampo project set-php {} {}?", id.trim(), php_version.trim())))
+        }
+        _ => Ok(()),
+    }
+}
+
 /// `project set` flags → a [`ProjectPatchRequest`]. Values are validated by the app; only the
 /// command-line syntax (`KEY=VALUE`, `KIND[@VERSION]`) is parsed here.
 fn patch_request(project_id: String, args: ProjectSetArgs) -> AppResult<ProjectPatchRequest> {
@@ -113,6 +128,7 @@ fn patch_request(project_id: String, args: ProjectSetArgs) -> AppResult<ProjectP
     }
     Ok(ProjectPatchRequest {
         project_id,
+        php_version: args.php,
         extensions_add: args.ext,
         extensions_remove: args.no_ext,
         addons_add: args.addon,

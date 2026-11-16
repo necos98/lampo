@@ -784,10 +784,50 @@ async fn project_set_errors_keep_their_exit_codes() {
     assert_eq!(code, 6);
 }
 
+#[tokio::test]
+async fn project_set_php_switches_the_minor_in_the_same_patch() {
+    let fake = Fake::new();
+    fake.reply(Ok(project_json()));
+    let (code, out, _) = run_cli(&fake, &["project", "set", "blog", "--php", "8.4", "--ext", "intl", "--json"]).await;
+    assert_eq!(code, 0, "{out}");
+    let r = sent_patch(&fake);
+    assert_eq!((r.project_id.as_str(), r.php_version.as_deref(), r.extensions_add), ("blog", Some("8.4"), vec!["intl".to_string()]));
+    assert_eq!(fake.sent.lock().unwrap().len(), 1, "one atomic request, no separate set-php");
+}
+
+#[tokio::test]
+async fn project_set_php_with_swapped_arguments_suggests_the_right_order() {
+    let fake = Fake::new();
+    let (code, out, _) = run_cli(&fake, &["project", "set-php", "shop", "7.4", "--json"]).await;
+    assert_eq!(code, 4);
+    let error = &parse(&out)["error"];
+    assert_eq!(error["code"], "validation");
+    assert!(error["message"].as_str().unwrap().contains("did you mean: lampo project set-php 7.4 shop?"), "{error}");
+    assert!(fake.sent.lock().unwrap().is_empty(), "nothing sent");
+
+    fake.reply(Ok(project_json()));
+    let (code, out, _) = run_cli(&fake, &["project", "set-php", "7.4", "shop", "--json"]).await;
+    assert_eq!(code, 0, "{out}");
+    match fake.last_request().0 {
+        ControlRequest::ProjectSetPhp(r) => assert_eq!((r.project_id.as_str(), r.php_version.as_str()), ("shop", "7.4")),
+        other => panic!("wrong request: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn project_set_php_leaves_other_bad_versions_to_the_app() {
+    let fake = Fake::new();
+    fake.reply(Err(AppError::new(ErrorCode::Validation, "invalid PHP version `latest`")));
+    let (code, out, _) = run_cli(&fake, &["project", "set-php", "latest", "shop", "--json"]).await;
+    assert_eq!(code, 4);
+    assert!(!parse(&out)["error"]["message"].as_str().unwrap().contains("did you mean"), "no hint when the id is not a version either");
+}
+
 #[test]
 fn project_set_needs_at_least_one_change() {
     use clap::Parser;
     assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set"]).is_err());
+    assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "--php", "8.4"]).is_ok());
     assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "shop"]).is_err());
     assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "--no-ini", "memory_limit"]).is_ok());
     assert!(crate::cli::Cli::try_parse_from(["lampo", "project", "set", "--apache-directives", "-Indexes"]).is_ok());

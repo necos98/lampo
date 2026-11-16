@@ -223,6 +223,10 @@ pub struct UpdateProjectRequest {
 #[serde(rename_all = "camelCase", default)]
 pub struct ProjectPatchRequest {
     pub project_id: String,
+    /// PHP minor to switch to (`8.4`): it must be installed (`package-missing` otherwise), like
+    /// every add-on the project keeps. Applied before the other changes, so the extensions and
+    /// add-ons named in the same patch are checked against the new PHP.
+    pub php_version: Option<String>,
     /// Bundled extensions to enable (`intl`, `php_intl.dll`).
     pub extensions_add: Vec<String>,
     pub extensions_remove: Vec<String>,
@@ -265,6 +269,7 @@ impl ProjectPatchRequest {
     pub fn is_empty(&self) -> bool {
         let Self {
             project_id: _,
+            php_version,
             extensions_add,
             extensions_remove,
             addons_add,
@@ -280,7 +285,8 @@ impl ProjectPatchRequest {
             addresses_add,
             addresses_remove,
         } = self;
-        extensions_add.is_empty()
+        php_version.is_none()
+            && extensions_add.is_empty()
             && extensions_remove.is_empty()
             && addons_add.is_empty()
             && addons_remove.is_empty()

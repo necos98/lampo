@@ -112,7 +112,8 @@ You MUST ASK the user first, and wait for a clear yes, before:
 - using `--allow-elevation` (it opens a UAC prompt);
 - changing ports or other global settings with `lampo settings set` (Apache, MySQL, Redis, Mailpit
   ports, default PHP, loopback range): they affect every project and restart running services;
-- changing the PHP version of a main project (`lampo project set-php`), or with
+- changing the PHP version of a main project (`lampo project set --php 8.4`, or
+  `lampo project set-php 8.4 <id>`: version first), or with
   `lampo project set` removing a service, switching its MySQL series, or changing its database
   name, public folder or Apache directives;
 - removing a project (`lampo project remove <id> --yes`; its folder and databases stay) or
@@ -143,8 +144,8 @@ that is not Lampo (Laragon, XAMPP, Docker, IIS) without the user's explicit appr
   WordPress and generic PHP projects) send to SMTP `127.0.0.1:1025` (no auth, no TLS; PHP
   `mail()` already does through php.ini) and the mails show up at `http://127.0.0.1:8025`;
   nothing reaches real recipients. Read the ports from `mail` in `agent context`.
-- A project's environment is edited with `lampo project set` (extensions, add-ons, php.ini
-  values, services, database name, public folder, Apache directives; see
+- A project's environment is edited with `lampo project set` (PHP version `--php`, extensions,
+  add-ons, php.ini values, services, database name, public folder, Apache directives; see
   `lampo project set --help`). Only what you name changes; worktree environments follow the
   parent. Display name: `lampo project rename`; addresses: `lampo project set --address <address>` /
   `--no-address`; unregistering: `lampo project remove --yes`, with the user's yes (see

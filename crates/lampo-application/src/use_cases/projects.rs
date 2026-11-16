@@ -379,10 +379,7 @@ impl SetProjectPhp {
 
     pub async fn execute(&self, request: SetProjectPhpRequest, ctx: &CallContext) -> AppResult<ProjectDto> {
         let php = PhpMinor::parse(&request.php_version)?;
-        if newest_of(&self.installed.list()?, &PackageKind::PHP, Some(php.as_series()), None).is_none() {
-            self.writer.load(&request.project_id)?;
-            return Err(package_missing(format!("PHP {php}")));
-        }
+        require_php_installed(&self.writer, self.installed.as_ref(), &request.project_id, php)?;
         let project = self
             .writer
             .modify(&request.project_id, |project, _| {
@@ -397,6 +394,16 @@ impl SetProjectPhp {
             .await?;
         self.writer.finish(&project, ctx).await
     }
+}
+
+/// `PackageMissing` unless a build of PHP `php` is installed; `NotFound` first for an unknown
+/// project, so a mistyped id is not reported as a missing PHP.
+pub(super) fn require_php_installed(writer: &ProjectWriter, installed: &dyn InstalledPackageRegistry, project_id: &str, php: PhpMinor) -> AppResult<()> {
+    if newest_of(&installed.list()?, &PackageKind::PHP, Some(php.as_series()), None).is_some() {
+        return Ok(());
+    }
+    writer.load(project_id)?;
+    Err(package_missing(format!("PHP {php}")))
 }
 
 /// Points a project at a moved folder, keeping its id and config.

@@ -126,6 +126,43 @@ async fn a_php_switch_rechecks_the_add_ons_but_not_the_bundled_extensions() {
     assert_eq!((dto.environment.php_version.as_str(), dto.environment.extensions.as_slice()), ("8.4", ["gd2".to_string()].as_slice()));
 }
 
+/// `lampo project set --php` switches the minor in the same atomic patch as the other flags,
+/// with the checks of `set-php`: the PHP and the add-ons kept must be installed for it.
+#[tokio::test]
+async fn a_cli_patch_switches_php_with_the_checks_of_set_php() {
+    let w = World::with_basics();
+    w.project("shop", r"C:\sites\shop", false);
+    w.installed.add(PackageKind::XDEBUG, "3.3.2", Some("8.3"));
+    w.update_project("shop", |p| {
+        p.environment.addons.insert(PackageKind::XDEBUG);
+    });
+    w.hosts_in_sync();
+    let before = w.projects.list().unwrap();
+    let sync = Arc::new(CountingSync::default());
+    let patcher = w.patch_project_with(sync.clone());
+    let switch = |php: &str| ProjectPatchRequest { project_id: "shop".into(), php_version: Some(php.into()), ..Default::default() };
+
+    let err = patcher.execute(switch("7.4"), &cli()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::PackageMissing);
+    assert!(err.message.contains("PHP 7.4"), "{}", err.message);
+    let err = patcher.execute(ProjectPatchRequest { project_id: "nope".into(), ..switch("7.4") }, &cli()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::NotFound, "an unknown project is reported before the missing PHP");
+    assert_eq!(patcher.execute(switch("8"), &cli()).await.unwrap_err().code, ErrorCode::Validation);
+    let err = patcher.execute(switch("8.4"), &cli()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::PackageMissing);
+    assert!(err.message.contains("lampo package install xdebug --php 8.4"), "{}", err.message);
+    assert_eq!(w.projects.list().unwrap(), before, "nothing saved");
+    assert_eq!(sync.calls.load(Ordering::SeqCst), 0);
+
+    // Dropping the add-on in the same patch makes the switch valid.
+    let request = ProjectPatchRequest { addons_remove: vec!["xdebug".into()], extensions_add: vec!["intl".into()], ..switch("8.4") };
+    let dto = patcher.execute(request, &cli()).await.unwrap();
+    assert_eq!(dto.environment.php_version, "8.4");
+    assert!(dto.environment.addons.is_empty());
+    assert_eq!(dto.environment.extensions, ["intl"]);
+    assert_eq!(sync.calls.load(Ordering::SeqCst), 1, "one save, one sync");
+}
+
 #[tokio::test]
 async fn an_import_follows_the_same_rules() {
     let w = World::with_basics();

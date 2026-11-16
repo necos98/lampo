@@ -198,7 +198,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let set_project_active = Arc::new(SetProjectActive::new(project_writer.clone()));
     let set_project_php = Arc::new(SetProjectPhp::new(project_writer.clone(), installed.clone()));
     // CLI-only (`lampo project set`, via the control pipe): the GUI edits the full project.
-    let patch_project = Arc::new(PatchProjectEnvironment::new(project_writer.clone()));
+    let patch_project = Arc::new(PatchProjectEnvironment::new(project_writer.clone(), installed.clone()));
     // CLI-only (`lampo settings set`, via the control pipe): the GUI saves the full settings.
     let patch_settings = Arc::new(PatchSettings::new(settings_writer.clone(), env.clone()));
     let worktree_up = Arc::new(WorktreeUp::new(WorktreeUpDeps {

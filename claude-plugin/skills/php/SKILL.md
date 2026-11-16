@@ -86,8 +86,14 @@ last one a project, the default PHP or an always-on MySQL needs (`details.usedBy
 ### Switching a project's PHP
 
 ```powershell
+lampo project set --php 8.4
+lampo project set shop --php 8.4 --ext intl
 lampo project set-php 8.4 shop
 ```
+
+`lampo project set --php <x.y>` switches the PHP like the other `project set` flags, in the
+same atomic edit (the extensions and add-ons named with it are checked against the new PHP).
+`lampo project set-php` takes the version FIRST, then the optional project id.
 
 ASK the user before changing the PHP of a main project: it changes what every request and
 every shim call uses. Check first that the code supports it (`composer.json` `require.php`,

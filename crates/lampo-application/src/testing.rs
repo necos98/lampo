@@ -1141,7 +1141,7 @@ impl World {
 
     /// `lampo project set`, syncing through `env`.
     pub fn patch_project_with(&self, env: Arc<dyn EnvironmentSync>) -> PatchProjectEnvironment {
-        PatchProjectEnvironment::new(self.project_writer_with(env))
+        PatchProjectEnvironment::new(self.project_writer_with(env), self.installed.clone())
     }
 
     pub fn patch_project(&self) -> PatchProjectEnvironment {

@@ -1,6 +1,6 @@
-//! Partial edits of a project (`lampo project set`, `lampo project rename`): extensions,
-//! add-ons, php.ini overrides, services, database name, public folder, Apache directives, display
-//! name and addresses.
+//! Partial edits of a project (`lampo project set`, `lampo project rename`): PHP minor,
+//! extensions, add-ons, php.ini overrides, services, database name, public folder, Apache
+//! directives, display name and addresses.
 //!
 //! The patch is applied to the *stored* project inside [`ProjectWriter::modify`] (under the
 //! allocator lock), so it never overwrites a concurrent edit with stale data the way a
@@ -10,11 +10,13 @@
 //! `check_conflicts`) and the same sync afterwards.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use lampo_domain::address::SiteAddress;
 use lampo_domain::mysql::DatabaseName;
 use lampo_domain::package::PackageKind;
-use lampo_domain::php::{ExtensionName, IniKey, php_ini_overrides};
+use lampo_domain::php::{ExtensionName, IniKey, PhpMinor, php_ini_overrides};
+use lampo_domain::ports::InstalledPackageRegistry;
 use lampo_domain::project::{ApacheDirectives, DisplayName, Project, ProjectEnvironment, PublicDir};
 use lampo_domain::service::ServiceKind;
 use lampo_domain::settings::Settings;
@@ -24,7 +26,7 @@ use lampo_domain::version::VersionSeries;
 use super::allocation::SiteSnapshot;
 use super::project_policy::require_mysql_for_database;
 use super::project_writer::ProjectWriter;
-use super::projects::require_hosts_elevation;
+use super::projects::{require_hosts_elevation, require_php_installed};
 use super::service_catalog::ServiceCatalog;
 use super::support::validation;
 use crate::context::CallContext;
@@ -34,23 +36,29 @@ use crate::error::{AppError, AppResult};
 /// Applies a [`ProjectPatchRequest`].
 pub struct PatchProjectEnvironment {
     writer: ProjectWriter,
+    installed: Arc<dyn InstalledPackageRegistry>,
 }
 
 impl PatchProjectEnvironment {
-    pub fn new(writer: ProjectWriter) -> Self {
-        Self { writer }
+    pub fn new(writer: ProjectWriter, installed: Arc<dyn InstalledPackageRegistry>) -> Self {
+        Self { writer, installed }
     }
 
-    /// `NotFound` for an unknown project; `Validation` for malformed values, an item both added
+    /// `NotFound` for an unknown project; `PackageMissing` for a PHP minor that is not
+    /// installed; `Validation` for malformed values, an item both added
     /// and removed, a bundled extension the project's PHP does not ship, an unknown or
     /// unconfigured service (version), or a database name without MySQL; `PackageMissing` for
-    /// an add-on not installed for the project's PHP minor (the message names the install
+    /// an add-on (added, or kept across a PHP switch) not installed for the project's PHP minor
+    /// (the message names the install
     /// command). Display name and addresses: `Validation` for a malformed one or removing every
     /// address, `Conflict` for a hostname or port another site uses (`check_conflicts`),
     /// `ElevationRequired` when hosts-file names change without elevation. Nothing is saved on
     /// error. Then syncs like every project update.
     pub async fn execute(&self, request: ProjectPatchRequest, ctx: &CallContext) -> AppResult<ProjectDto> {
         let patch = Patch::parse(&request)?;
+        if let Some(php) = patch.php {
+            require_php_installed(&self.writer, self.installed.as_ref(), &request.project_id, php)?;
+        }
         let catalog = self.writer.services().clone();
         let change = |project: &mut Project, snap: &SiteSnapshot, free_port: Option<Port>| -> AppResult<bool> {
             let mut env = project.environment.clone();
@@ -86,6 +94,7 @@ impl PatchProjectEnvironment {
 
 /// The request, parsed and checked for contradictions before taking the lock.
 struct Patch {
+    php: Option<PhpMinor>,
     extensions_add: BTreeSet<ExtensionName>,
     extensions_remove: BTreeSet<ExtensionName>,
     addons_add: BTreeSet<PackageKind>,
@@ -149,6 +158,7 @@ impl Patch {
         let kinds = |list: &[String]| list.iter().map(|k| PackageKind::new(k.trim().to_ascii_lowercase())).collect::<Result<BTreeSet<_>, _>>();
         let services = |list: &[String]| list.iter().map(|k| ServiceKind::new(k.trim().to_ascii_lowercase())).collect::<Result<BTreeSet<_>, _>>();
         let patch = Self {
+            php: r.php_version.as_deref().map(PhpMinor::parse).transpose()?,
             extensions_add: extensions(&r.extensions_add)?,
             extensions_remove: extensions(&r.extensions_remove)?,
             addons_add: kinds(&r.addons_add)?,
@@ -181,8 +191,12 @@ impl Patch {
         Ok(patch)
     }
 
-    /// Removals first, then additions and replacements.
+    /// The PHP minor first (the save checks what follows against it), then removals, then
+    /// additions and replacements.
     fn apply(&self, env: &mut ProjectEnvironment, catalog: &ServiceCatalog, settings: &Settings) -> AppResult<()> {
+        if let Some(php) = self.php {
+            env.php = php;
+        }
         env.extensions.retain(|e| !self.extensions_remove.contains(e));
         env.extensions.extend(self.extensions_add.iter().cloned());
         env.addons.retain(|a| !self.addons_remove.contains(a));
