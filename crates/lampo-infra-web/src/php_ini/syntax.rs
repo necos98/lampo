@@ -17,8 +17,8 @@ pub fn ini_path(path: &Path) -> String {
 /// * plain tokens (`On`, `512M`, `Europe/Rome`, `debug,develop`, `127.0.0.1`) stay bare;
 /// * constant expressions (`E_ALL & ~E_DEPRECATED`) stay bare so PHP evaluates them;
 /// * anything else is quoted — double quotes unless that would change it (`"`, `$`, `\`),
-///   then single quotes (raw in PHP ≥ 5.3); a value with both quote kinds keeps double
-///   quotes with `\"` escapes.
+///   then single quotes (raw in PHP ≥ 5.3); a value that also holds `'` keeps double quotes
+///   with every character PHP unescapes there written as an escape (see [`escape_double_quoted`]).
 pub fn ini_value(value: &str) -> String {
     if value.is_empty() {
         return "\"\"".into();
@@ -36,8 +36,22 @@ pub fn ini_value(value: &str) -> String {
     } else if !value.contains('\'') {
         format!("'{value}'")
     } else {
-        format!("\"{}\"", value.replace('"', "\\\""))
+        format!("\"{}\"", escape_double_quoted(value))
     }
+}
+
+/// Inside double quotes the ini scanner turns `\\`, `\"` and `\$` into the bare character and
+/// expands `${…}`: escaping all three keeps the text verbatim, and a trailing `\` can no longer
+/// pair with the closing quote.
+fn escape_double_quoted(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        if matches!(c, '\\' | '"' | '$') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -58,6 +72,19 @@ mod tests {
         assert_eq!(ini_value(r"C:\tmp\x"), r"'C:\tmp\x'");
         assert_eq!(ini_value("${HOME}"), "'${HOME}'");
         assert_eq!(ini_value(r#"say "hi" it's"#), r#""say \"hi\" it's""#);
+    }
+
+    /// With both quote kinds, or `'` plus `\`/`$`, the value is double-quoted and every
+    /// character PHP unescapes there (`\`, `"`, `$`) is escaped, so a trailing backslash
+    /// cannot swallow the closing quote and `\\`/`${…}` reach PHP unchanged.
+    #[test]
+    fn escapes_double_quoted_values_with_apostrophes() {
+        assert_eq!(ini_value(r"it's C:\"), r#""it's C:\\""#);
+        assert_eq!(ini_value(r"it's C:\\"), r#""it's C:\\\\""#);
+        assert_eq!(ini_value(r"it's \\nas\share"), r#""it's \\\\nas\\share""#);
+        assert_eq!(ini_value("it's ${HOME}"), r#""it's \${HOME}""#);
+        assert_eq!(ini_value(r#"say "hi" it's C:\"#), r#""say \"hi\" it's C:\\""#);
+        assert_eq!(ini_value(r#"it's \""#), r#""it's \\\"""#);
     }
 
     #[test]
