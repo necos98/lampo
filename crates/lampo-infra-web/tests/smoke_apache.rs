@@ -233,7 +233,19 @@ fn site(data: &Path, id: &str, names: &[&str], port: Option<u16>, docroot: &Path
             document_root: docroot.to_path_buf(),
             php_cgi: php_dir.join("php-cgi.exe"),
             phprc_dir: phprc.clone(),
-            custom_directives: ApacheDirectives::new("Header set X-Lampo-Site \"yes\"").unwrap(),
+            // A representative set of legitimate custom directives (valid under the modules
+            // Lampo loads): real `httpd -t` must keep accepting them after the quoted-name and
+            // re-grant hardening. `php_value` is left out on purpose — Lampo runs PHP through
+            // mod_fcgid, not mod_php, so it is not a directive on this server.
+            custom_directives: ApacheDirectives::new(concat!(
+                "Header set X-Lampo-Site \"yes\"\n",
+                "RewriteEngine On\n",
+                "RewriteRule ^old$ /new [R=301,L]\n",
+                "SetEnvIf Request_URI \"^/api\" IS_API=1\n",
+                "<Location /admin>\n    Require ip 127.0.0.1\n</Location>\n",
+                "ErrorDocument 404 /404.php",
+            ))
+            .unwrap(),
             tls: TlsMode::Disabled,
             error_log: logs.join("error.log"),
             access_log: logs.join("access.log"),
