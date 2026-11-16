@@ -18,6 +18,7 @@ use lampo_domain::worktree::{WorktreeDatabase, WorktreeEnvironment};
 use lampo_domain::DomainError;
 
 use super::environment::EnvironmentSync;
+use super::service_catalog::ServiceCatalog;
 use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -238,12 +239,14 @@ pub(crate) fn project_dto(project: &Project, worktrees: &[WorktreeEnvironment], 
 // MySQL
 // ---------------------------------------------------------------------------------------------
 
-pub(crate) fn mysql_endpoint(installed: &dyn InstalledPackageRegistry, settings: &Settings, series: MysqlSeries) -> AppResult<MysqlEndpoint> {
+/// Where to reach the MySQL `series` instance with its clients, as the user its descriptor names.
+pub(crate) fn mysql_endpoint(installed: &dyn InstalledPackageRegistry, settings: &Settings, catalog: &ServiceCatalog, series: MysqlSeries) -> AppResult<MysqlEndpoint> {
     let port = settings.mysql_port(series).ok_or_else(|| DomainError::UnknownMysqlSeries(series.to_string()))?;
     let packages = installed.list()?;
     let package = newest_of(&packages, &PackageKind::MYSQL, Some(series.as_series()), None).ok_or_else(|| package_missing(format!("MySQL {series}")))?;
     let client_dir = package.entry(EntryRole::ClientDir).ok_or_else(|| package_part_missing(format!("MySQL {series}"), "clients"))?.to_path_buf();
-    Ok(MysqlEndpoint { series, client_dir, port, user: "root".into() })
+    let user = catalog.client_user(&ServiceKind::MYSQL).ok_or_else(|| AppError::internal("the MySQL service kind names no client user"))?;
+    Ok(MysqlEndpoint { series, client_dir, port, user: user.to_string() })
 }
 
 // ---------------------------------------------------------------------------------------------

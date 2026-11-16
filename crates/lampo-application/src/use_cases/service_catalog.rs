@@ -82,6 +82,12 @@ impl ServiceCatalog {
         env.service_ids().filter_map(|id| Some((self.descriptor(id.kind())?, self.port(&id, settings)?))).flat_map(|(d, port)| d.php_ini(port)).collect()
     }
 
+    /// Default client user of `kind` (`root` for MySQL), from its descriptor; `None` for an
+    /// unknown kind or a protocol without users.
+    pub fn client_user(&self, kind: &ServiceKind) -> Option<&'static str> {
+        self.descriptor(kind)?.client()?.user
+    }
+
     /// `MySQL 8.4`; the id itself for unknown kinds.
     pub fn label(&self, id: &ServiceId) -> String {
         self.descriptor(id.kind()).map(|d| d.label(id)).unwrap_or_else(|| id.to_string())

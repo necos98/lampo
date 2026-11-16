@@ -1055,7 +1055,7 @@ impl World {
     }
 
     pub fn worktree_databases(&self) -> Arc<WorktreeDatabases> {
-        Arc::new(WorktreeDatabases::new(self.projects.clone(), self.settings.clone(), self.installed.clone(), self.db.clone(), self.service_control.clone()))
+        Arc::new(WorktreeDatabases::new(self.projects.clone(), self.settings.clone(), self.installed.clone(), self.db.clone(), self.service_control.clone(), self.services.clone()))
     }
 
     pub fn worktree_queries(&self) -> Arc<WorktreeQueries> {
@@ -1085,7 +1085,15 @@ impl World {
     }
 
     pub fn database_service(&self) -> Arc<DatabaseService> {
-        Arc::new(DatabaseService::new(self.db.clone(), self.projects.clone(), self.worktrees.clone(), self.settings.clone(), self.installed.clone(), self.service_control.clone()))
+        Arc::new(DatabaseService::new(
+            self.db.clone(),
+            self.projects.clone(),
+            self.worktrees.clone(),
+            self.settings.clone(),
+            self.installed.clone(),
+            self.service_control.clone(),
+            self.services.clone(),
+        ))
     }
 
     pub fn presets(&self) -> Arc<PresetQueries> {

@@ -12,7 +12,8 @@ use lampo_domain::ports::{ControlFrameSink, ControlRequestHandler, SettingsRepos
 use lampo_domain::preset::builtin;
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::project::{ProjectId, ProjectRoot};
-use lampo_domain::service::{ServiceId, ServiceState};
+use lampo_domain::service::builtin as service_builtin;
+use lampo_domain::service::{ServiceClient, ServiceDescriptor, ServiceId, ServiceKind, ServiceState};
 use lampo_domain::worktree::{DatabaseMode, Occupancy, WorktreeEnvironment};
 use lampo_domain::PortError;
 use lampo_domain::tcp_port::Port;
@@ -300,14 +301,14 @@ async fn database_operations_target_the_sites_instance() {
     w.update_project("plain", |p| p.environment.set_mysql(None));
     w.update_project("shop", |p| p.environment.set_mysql(Some(MysqlSeries::LEGACY_5_7)));
     add_worktree(&w, "D:\\wt\\fix", "fix", 8100, DatabaseMode::Fresh);
-    let db = DatabaseService::new(w.db.clone(), w.projects.clone(), w.worktrees.clone(), w.settings.clone(), w.installed.clone(), w.service_control.clone());
+    let db = DatabaseService::new(w.db.clone(), w.projects.clone(), w.worktrees.clone(), w.settings.clone(), w.installed.clone(), w.service_control.clone(), w.services.clone());
 
     assert_eq!(db.create(&DatabaseRequest { site: "shop".into(), name: None }).await.unwrap(), "shop");
     assert_eq!(w.db.calls(), ["create:3307:shop"]);
     assert_eq!(w.mysql.state(&MysqlSeries::LEGACY_5_7.service_id()), ServiceState::Running, "started on demand");
     assert_eq!(db.create(&DatabaseRequest { site: "shop@fix".into(), name: None }).await.unwrap(), "shop_wt_fix");
     let list = db.list(&DatabaseListRequest { site: "shop@fix".into() }).await.unwrap();
-    assert_eq!((list.port, list.site_database.as_deref()), (3307, Some("shop_wt_fix")));
+    assert_eq!((list.port, list.user.as_str(), list.site_database.as_deref()), (3307, "root", Some("shop_wt_fix")));
     assert_eq!(list.databases, ["shop", "shop_wt_fix"]);
 
     assert_eq!(db.drop_database(&DatabaseRequest { site: "shop".into(), name: None }).await.unwrap_err().code, ErrorCode::Validation);
@@ -327,11 +328,60 @@ async fn database_operations_target_the_sites_instance() {
     assert_eq!(err.code, ErrorCode::Cancelled);
 }
 
+/// MySQL as a registered kind whose clients connect as `user`.
+struct MysqlConnectingAs(&'static str);
+
+impl ServiceDescriptor for MysqlConnectingAs {
+    fn kind(&self) -> ServiceKind {
+        service_builtin::Mysql.kind()
+    }
+    fn display_name(&self) -> &'static str {
+        service_builtin::Mysql.display_name()
+    }
+    fn package_kind(&self) -> PackageKind {
+        service_builtin::Mysql.package_kind()
+    }
+    fn versioned(&self) -> bool {
+        service_builtin::Mysql.versioned()
+    }
+    fn default_port(&self) -> Port {
+        service_builtin::Mysql.default_port()
+    }
+    fn has_data_dir(&self) -> bool {
+        service_builtin::Mysql.has_data_dir()
+    }
+    fn has_error_log(&self) -> bool {
+        service_builtin::Mysql.has_error_log()
+    }
+    fn client(&self) -> Option<ServiceClient> {
+        service_builtin::Mysql.client().map(|c| ServiceClient { user: Some(self.0), ..c })
+    }
+}
+
+#[test]
+fn the_catalog_names_each_kinds_client_user() {
+    let w = World::with_basics();
+    assert_eq!(w.services.client_user(&ServiceKind::MYSQL), Some("root"));
+    assert_eq!(w.services.client_user(&ServiceKind::REDIS), None, "Redis has no users");
+    assert_eq!(w.services.client_user(&ServiceKind::new("memcached").unwrap()), None, "unknown kind");
+}
+
+/// The user of a database endpoint is the one the MySQL descriptor names: one source of truth.
+#[tokio::test]
+async fn database_endpoints_connect_as_the_user_of_the_mysql_descriptor() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", false);
+    let catalog = Arc::new(ServiceCatalog::new(vec![Arc::new(MysqlConnectingAs("lampo"))]));
+    let db = DatabaseService::new(w.db.clone(), w.projects.clone(), w.worktrees.clone(), w.settings.clone(), w.installed.clone(), w.service_control.clone(), catalog);
+
+    assert_eq!(db.list(&DatabaseListRequest { site: "shop".into() }).await.unwrap().user, "lampo");
+}
+
 #[tokio::test]
 async fn database_operations_refuse_system_schemas_before_reaching_the_server() {
     let w = World::with_basics();
     w.project("shop", "C:\\sites\\shop", false);
-    let db = DatabaseService::new(w.db.clone(), w.projects.clone(), w.worktrees.clone(), w.settings.clone(), w.installed.clone(), w.service_control.clone());
+    let db = DatabaseService::new(w.db.clone(), w.projects.clone(), w.worktrees.clone(), w.settings.clone(), w.installed.clone(), w.service_control.clone(), w.services.clone());
     let progress = RecordingProgress::default();
 
     for name in ["mysql", "SYS", "Information_Schema", "performance_schema"] {
@@ -467,7 +517,15 @@ fn dispatcher(w: &World, quit: Arc<std::sync::atomic::AtomicBool>, gate: Arc<Shu
         environment: w.env.clone(),
         install_package: install,
         uninstall_package: Arc::new(w.uninstall_package()),
-        database: Arc::new(DatabaseService::new(w.db.clone(), w.projects.clone(), w.worktrees.clone(), w.settings.clone(), w.installed.clone(), w.service_control.clone())),
+        database: Arc::new(DatabaseService::new(
+            w.db.clone(),
+            w.projects.clone(),
+            w.worktrees.clone(),
+            w.settings.clone(),
+            w.installed.clone(),
+            w.service_control.clone(),
+            w.services.clone(),
+        )),
         worktree_up: Arc::new(w.worktree_up()),
         worktree_down: Arc::new(w.worktree_down()),
         prune_worktrees: Arc::new(w.prune_worktrees()),

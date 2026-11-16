@@ -179,10 +179,10 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         services: service_catalog.clone(),
     }));
     let worktree_queries = Arc::new(WorktreeQueries::new(worktrees.clone(), projects.clone(), settings.clone(), fs.clone()));
-    let worktree_databases = Arc::new(WorktreeDatabases::new(projects.clone(), settings.clone(), installed.clone(), db_admin.clone(), service_control.clone()));
+    let worktree_databases = Arc::new(WorktreeDatabases::new(projects.clone(), settings.clone(), installed.clone(), db_admin.clone(), service_control.clone(), service_catalog.clone()));
     let status = Arc::new(StatusQuery::new(project_queries.clone(), service_queries.clone(), Arc::new(|| true)));
     let app_info = Arc::new(AppInfoQuery::new(env!("CARGO_PKG_VERSION"), paths.clone()));
-    let database = Arc::new(DatabaseService::new(db_admin, projects.clone(), worktrees.clone(), settings.clone(), installed.clone(), service_control.clone()));
+    let database = Arc::new(DatabaseService::new(db_admin, projects.clone(), worktrees.clone(), settings.clone(), installed.clone(), service_control.clone(), service_catalog.clone()));
     let create_project = Arc::new(CreateProject::new(project_writer.clone(), preset_queries.clone(), detect_project.clone(), fs.clone(), database.clone()));
     let scaffold_project = Arc::new(ScaffoldProject::new(ScaffoldProjectDeps {
         files: Arc::new(store::LocalFileSystem),

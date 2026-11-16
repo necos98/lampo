@@ -7,6 +7,7 @@ use lampo_domain::progress::CancelFlag;
 use lampo_domain::project::Project;
 use lampo_domain::PortError;
 
+use super::service_catalog::ServiceCatalog;
 use super::service_leases::ServiceLease;
 use super::services::ServiceEnsurer;
 use super::support::{load_site, mysql_endpoint, validation};
@@ -31,6 +32,7 @@ pub struct DatabaseService {
     settings: Arc<dyn SettingsRepository>,
     installed: Arc<dyn InstalledPackageRegistry>,
     services: Arc<dyn ServiceEnsurer>,
+    catalog: Arc<ServiceCatalog>,
 }
 
 impl DatabaseService {
@@ -41,15 +43,16 @@ impl DatabaseService {
         settings: Arc<dyn SettingsRepository>,
         installed: Arc<dyn InstalledPackageRegistry>,
         services: Arc<dyn ServiceEnsurer>,
+        catalog: Arc<ServiceCatalog>,
     ) -> Self {
-        Self { admin, projects, worktrees, settings, installed, services }
+        Self { admin, projects, worktrees, settings, installed, services, catalog }
     }
 
     /// Resolves the site's instance and makes sure it runs (`Validation` if it uses no MySQL).
     async fn target(&self, site: &str) -> AppResult<Target> {
         let (site_id, project, worktree) = load_site(self.projects.as_ref(), self.worktrees.as_ref(), site)?;
         let series = project.environment.mysql().ok_or_else(|| validation(format!("`{site_id}` does not use MySQL")))?;
-        let endpoint = mysql_endpoint(self.installed.as_ref(), &self.settings.load()?, series)?;
+        let endpoint = mysql_endpoint(self.installed.as_ref(), &self.settings.load()?, &self.catalog, series)?;
         let lease = self.services.ensure_running(series.service_id()).await?;
         let site_database = match &worktree {
             Some(w) => w.database_name(&project).cloned(),
@@ -104,7 +107,7 @@ impl DatabaseService {
     pub async fn provision_project(&self, project: &Project) -> Option<DatabaseSetupDto> {
         let (series, name) = (project.environment.mysql()?, project.database().cloned()?);
         let outcome = |status, message: Option<String>| Some(DatabaseSetupDto { name: name.to_string(), status, message });
-        let endpoint = match self.settings.load().map_err(AppError::from).and_then(|s| mysql_endpoint(self.installed.as_ref(), &s, series)) {
+        let endpoint = match self.settings.load().map_err(AppError::from).and_then(|s| mysql_endpoint(self.installed.as_ref(), &s, &self.catalog, series)) {
             Ok(endpoint) => endpoint,
             Err(e) => {
                 tracing::warn!("database `{name}` of the new project `{}` not created: {e}", project.id);
