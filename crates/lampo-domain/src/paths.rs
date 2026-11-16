@@ -36,7 +36,7 @@
 //!                                  `claude_code`), registered in user scope only on request
 //! ```
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::php::PhpMinor;
 use crate::preset::PresetId;
@@ -149,11 +149,21 @@ impl LampoPaths {
     }
 
     pub fn shim_dir(&self) -> PathBuf {
-        self.data_root.join("bin")
+        Self::shim_dir_in(&self.data_root)
     }
 
     pub fn shim_index_file(&self) -> PathBuf {
-        self.shim_dir().join("shim-index.json")
+        Self::shim_index_file_in(&self.data_root)
+    }
+
+    /// [`Self::shim_dir`] from the data root alone.
+    pub fn shim_dir_in(data_root: &Path) -> PathBuf {
+        data_root.join("bin")
+    }
+
+    /// [`Self::shim_index_file`] from the data root alone: the shims never compute the config root.
+    pub fn shim_index_file_in(data_root: &Path) -> PathBuf {
+        Self::shim_dir_in(data_root).join("shim-index.json")
     }
 
     /// Folder of the running app (`lampo-desktop.exe` and its helper executables), recorded

@@ -438,7 +438,7 @@ async fn mailpit_runs_for_its_sites_and_feeds_php_mail() {
 
     // `lampo env` exports the SMTP endpoint (LAMPO_* only) and puts mailpit.exe on PATH.
     let tc = crate::use_cases::ToolchainQuery::new(w.resolver(), w.paths.clone());
-    let shop_dir = || crate::dto::ResolveRequestDto { cwd: r"C:\sites\shop".into(), explicit_site: None };
+    let shop_dir = || crate::dto::ResolveRequestDto { cwd: r"C:\sites\shop".into(), ..Default::default() };
     let env = tc.env(&shop_dir()).unwrap();
     assert_eq!(env.site.as_deref(), Some("shop"));
     assert_eq!((env.vars["LAMPO_MAIL_HOST"].as_str(), env.vars["LAMPO_MAIL_PORT"].as_str()), ("127.0.0.1", "1025"));

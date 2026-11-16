@@ -15,6 +15,7 @@
 //! | [`AppLocationFile`]        | `AppLocationRecorder`                   |
 //! | [`detectors`]              | `ProjectDetector` (one per framework)   |
 //! | [`FsGitInspector`]         | `GitInspector`                          |
+//! | [`FsPathCanonicalizer`]    | `PathCanonicalizer`                     |
 //! | [`LocalFileSystem`]        | `FileSystemInspector`, `ScaffoldFiles`, `AgentPluginFiles` |
 //! | [`WindowsUserPath`]        | `UserPathEditor`                        |
 //! | [`ProcessOnlyUserPath`]    | `UserPathEditor` (isolated `LAMPO_HOME`: registry untouched) |
@@ -28,6 +29,7 @@ pub mod app_location;
 pub mod atomic;
 pub mod clock;
 pub mod detectors;
+pub mod final_path;
 pub mod fs;
 pub mod git;
 pub mod locator;
@@ -49,6 +51,7 @@ mod testutil;
 
 pub use app_location::AppLocationFile;
 pub use clock::SystemClock;
+pub use final_path::FsPathCanonicalizer;
 pub use fs::LocalFileSystem;
 pub use git::FsGitInspector;
 pub use presets::TomlPresetRepository;

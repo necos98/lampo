@@ -389,7 +389,7 @@ fn listing(w: &World) -> PhpExtensionListing {
 }
 
 fn at(cwd: &str) -> ResolveRequestDto {
-    ResolveRequestDto { cwd: cwd.into(), explicit_site: None }
+    ResolveRequestDto { cwd: cwd.into(), ..Default::default() }
 }
 
 #[test]

@@ -7,14 +7,15 @@ use std::time::Duration;
 use lampo_application::dto::ResolveRequestDto;
 
 use crate::cli::GlobalArgs;
+use crate::inherited::InheritedEnv;
 use crate::ports::*;
 
 /// Process facts captured once at startup.
 #[derive(Debug, Clone)]
 pub struct CliEnv {
     pub cwd: String,
-    /// Value of `LAMPO_PROJECT`, if set and non-empty.
-    pub lampo_project: Option<String>,
+    /// `LAMPO_PROJECT`, `LAMPO_PROJECT_ROOT`, `LAMPO_QUIET`.
+    pub inherited: InheritedEnv,
     pub now_unix_ms: u64,
     /// Poll interval of `logs --follow`.
     pub follow_interval: Duration,
@@ -24,15 +25,16 @@ impl CliEnv {
     pub fn from_process() -> Self {
         Self {
             cwd: std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default(),
-            lampo_project: std::env::var("LAMPO_PROJECT").ok().filter(|v| !v.trim().is_empty()),
+            inherited: InheritedEnv::from_process(),
             now_unix_ms: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0),
             follow_interval: Duration::from_millis(500),
         }
     }
 
-    /// Resolution inputs: `--project` wins over `LAMPO_PROJECT`, which wins over the cwd.
+    /// Resolution inputs: `--project` always wins; `LAMPO_PROJECT` wins over the cwd only inside
+    /// `LAMPO_PROJECT_ROOT` or outside every project.
     pub fn resolve_request(&self, global: &GlobalArgs) -> ResolveRequestDto {
-        ResolveRequestDto { cwd: self.cwd.clone(), explicit_site: global.project.clone().or_else(|| self.lampo_project.clone()) }
+        ResolveRequestDto { cwd: self.cwd.clone(), explicit_site: global.project.clone(), inherited_site: self.inherited.site.clone(), inherited_root: self.inherited.root.clone() }
     }
 
     /// Makes `path` absolute against the cwd (the app runs elsewhere) and folds `.` / `..`
@@ -86,10 +88,21 @@ mod tests {
 
     #[test]
     fn absolute_paths_are_lexically_normalised() {
-        let env = CliEnv { cwd: r"C:\work\shop".into(), lampo_project: None, now_unix_ms: 0, follow_interval: Duration::ZERO };
+        let env = CliEnv { cwd: r"C:\work\shop".into(), inherited: InheritedEnv::default(), now_unix_ms: 0, follow_interval: Duration::ZERO };
         assert_eq!(env.absolute("."), r"C:\work\shop");
         assert_eq!(env.absolute(r".\wt\..\api"), r"C:\work\shop\api");
         assert_eq!(env.absolute(r"..\..\..\x"), r"C:\x");
         assert_eq!(env.absolute(r"D:\a\.\b"), r"D:\a\b");
+    }
+
+    #[test]
+    fn project_flag_and_inherited_variables_stay_apart() {
+        let inherited = InheritedEnv { site: Some("shop".into()), root: Some(r"C:\work\shop".into()), quiet: false };
+        let env = CliEnv { cwd: r"C:\work\blog".into(), inherited, now_unix_ms: 0, follow_interval: Duration::ZERO };
+        let global = |project: Option<&str>| GlobalArgs { json: false, project: project.map(Into::into), allow_elevation: false, no_start: false };
+        let request = env.resolve_request(&global(None));
+        assert_eq!(request.explicit_site, None);
+        assert_eq!((request.inherited_site.as_deref(), request.inherited_root.as_deref()), (Some("shop"), Some(r"C:\work\shop")));
+        assert_eq!(env.resolve_request(&global(Some("api"))).explicit_site.as_deref(), Some("api"));
     }
 }

@@ -401,7 +401,7 @@ pub fn cli_guide() -> serde_json::Value {
             "Nothing prompts. Destructive commands need an explicit flag (--yes, --drop-database).",
             "No UAC prompt unless --allow-elevation is given (exit code 7 tells you it is needed).",
             "Read-only commands work without the app; mutating ones start it headless unless --no-start (exit code 9).",
-            "Site resolution order: --project, LAMPO_PROJECT, current folder (project or git worktree), global default PHP.",
+            "Site resolution order: --project, LAMPO_PROJECT (only inside LAMPO_PROJECT_ROOT or outside every project), current folder (project or git worktree), global default PHP.",
             "php, composer, mysql, mysqldump and redis-cli on PATH are shims that already use this site's versions; no wrapper needed.",
             "Run commands in another toolchain with: lampo exec -- <command> [args...]."
         ],

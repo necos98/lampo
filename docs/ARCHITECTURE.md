@@ -318,15 +318,32 @@ its parent's; `None` for the default target and sites without MySQL):
   and no `-A`/`--all-databases`/`-B`/`--databases`; existing positionals are never touched.
 
 `lampo exec` and `lampo env` need nothing extra: the shim dir is first on their PATH and
-`LAMPO_PROJECT` is set, so `mysql` there is the shim with the same defaults. Lampo does not
-export `MYSQL_HOST`/`MYSQL_TCP_PORT` (only `PHPRC` and `LAMPO_*`), and no variable exists for
-the database anyway.
+`LAMPO_PROJECT`/`LAMPO_PROJECT_ROOT` are set, so `mysql` there is the shim with the same
+defaults. Lampo does not export `MYSQL_HOST`/`MYSQL_TCP_PORT` (only `PHPRC` and `LAMPO_*`), and
+no variable exists for the database anyway.
 
 ### Site resolution (shims and CLI)
 
-`LAMPO_PROJECT` (`shop` or `shop@feature-x`) → longest-prefix match of the cwd against project
-and worktree-environment folders → git worktree of a registered project (reads `.git` files,
-never spawns git) → global default PHP.
+`--project` (CLI only) → `LAMPO_PROJECT` (`shop` or `shop@feature-x`) → longest-prefix match of
+the cwd against project and worktree-environment folders → git worktree of a registered project
+(reads `.git` files, never spawns git) → the same two folder matches once more with the cwd's
+final path (`GetFinalPathNameByHandleW`: `subst` drives, junctions, 8.3 names; only when the
+textual match failed) → global default PHP. Verbatim paths (`\\?\C:\x`, `\\?\UNC\…`) are read in
+their plain form.
+
+`lampo exec`, `lampo env` and the app's "Apri terminale" export `LAMPO_PROJECT` together with
+`LAMPO_PROJECT_ROOT`, the folder it was resolved for. The variable outlives that folder (in the
+terminal of `shop`, `cd ..\blog`), so it holds only while the cwd is inside `LAMPO_PROJECT_ROOT`
+(or the site's registered folder when the root is not set) or outside every project; in the
+folder of another project that project wins, and the shim or `lampo` prints one line on stderr
+(`LAMPO_PROJECT=shop ignored: this folder belongs to blog`), hidden by `LAMPO_QUIET=1`.
+
+The shims read only `%LOCALAPPDATA%` (from the environment; the known folder is the fallback)
+and never compute the config root. The tool a shim or `lampo exec` starts is tied to it by a
+Job Object (`lampo_cli::job`): the launcher joins the job before the spawn, so if an IDE, Node or
+CI kills the launcher, the tool and everything it started (`php artisan serve` and its PHP
+server) die with it; when the tool exits on its own the job is disarmed first, so programs it
+detached keep running.
 
 ## Building
 
@@ -336,6 +353,11 @@ cargo check --workspace
 cargo test -p lampo-domain
 cd apps/desktop; pnpm check; pnpm tauri dev
 ```
+
+`.cargo/config.toml` links the C runtime statically (`+crt-static`) into every Windows binary:
+`lampo.exe`, the shims and the app start on a machine without the Visual C++ redistributable
+(check with `objdump -p <exe>` or `dumpbin /dependents <exe>`: no `VCRUNTIME140.dll`). A
+`RUSTFLAGS` variable replaces those flags, so CI must not set one.
 
 Data lives in `%APPDATA%\Lampo` (config, one TOML per project) and `%LOCALAPPDATA%\Lampo`
 (packages, MySQL data, logs, generated configs, shims). `LAMPO_HOME` overrides both (tests).

@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::DomainError;
 use crate::php::{ComposerChannel, PhpMinor};
 use crate::project::ProjectRoot;
+use crate::resolution::env_vars;
 use crate::service::{ServiceId, ServiceKind};
 use crate::site::SiteId;
 
@@ -252,13 +253,14 @@ pub struct ToolchainEnv {
 
 impl ShimTarget {
     /// Shim dir first (so nested `php`/`composer` calls resolve the same project thanks to
-    /// `LAMPO_PROJECT`), then the real tool dirs. Each service exports
-    /// `LAMPO_<prefix>_HOST`/`_PORT` (+ `_USER`, `_DATABASE` when known).
-    pub fn toolchain_env(&self, site: Option<&SiteId>, shim_dir: &Path) -> ToolchainEnv {
+    /// `LAMPO_PROJECT`, which holds inside `LAMPO_PROJECT_ROOT`), then the real tool dirs. Each
+    /// service exports `LAMPO_<prefix>_HOST`/`_PORT` (+ `_USER`, `_DATABASE` when known).
+    pub fn toolchain_env(&self, site: Option<(&SiteId, &ProjectRoot)>, shim_dir: &Path) -> ToolchainEnv {
         let mut path_prepend = vec![shim_dir.to_path_buf(), self.php_dir.clone()];
         let mut vars: Vec<(String, String)> = Vec::new();
-        if let Some(p) = site {
-            vars.push(("LAMPO_PROJECT".into(), p.to_string()));
+        if let Some((id, root)) = site {
+            vars.push((env_vars::PROJECT.into(), id.to_string()));
+            vars.push((env_vars::PROJECT_ROOT.into(), root.to_string()));
         }
         vars.push(("LAMPO_PHP_VERSION".into(), self.php.to_string()));
         if let Some(dir) = &self.phprc_dir {
@@ -446,10 +448,12 @@ pub(crate) mod tests {
     #[test]
     fn toolchain_env_never_sets_framework_variables() {
         let t = target("8.3");
-        let env = t.toolchain_env(Some(&"shop".parse().unwrap()), Path::new("C:\\lampo\\bin"));
+        let root = ProjectRoot::new(r"C:\sites\shop").unwrap();
+        let env = t.toolchain_env(Some((&"shop".parse().unwrap(), &root)), Path::new("C:\\lampo\\bin"));
         assert_eq!(env.path_prepend[0], PathBuf::from("C:\\lampo\\bin"));
         assert!(env.vars.iter().all(|(k, _)| k == "PHPRC" || k.starts_with("LAMPO_")));
         assert!(env.vars.contains(&("LAMPO_PROJECT".into(), "shop".into())));
+        assert!(env.vars.contains(&("LAMPO_PROJECT_ROOT".into(), r"C:\sites\shop".into())));
         assert!(env.vars.contains(&("LAMPO_DB_DATABASE".into(), "shop".into())));
     }
 }

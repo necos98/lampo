@@ -151,10 +151,12 @@ impl From<DisplayName> for String {
 pub struct ProjectRoot(String);
 
 impl ProjectRoot {
+    /// Verbatim paths (`\\?\C:\x`, `\\?\UNC\server\share\x`, as returned by
+    /// `GetFinalPathNameByHandleW` and some launchers) are accepted and stored in their plain form.
     pub fn new(path: impl AsRef<str>) -> Result<Self, DomainError> {
         let raw = path.as_ref().trim();
         let err = || DomainError::InvalidProjectRoot(raw.to_string());
-        let p = raw.replace('/', "\\");
+        let p = without_verbatim_prefix(&raw.replace('/', "\\"));
         let bytes = p.as_bytes();
         let (prefix, rest) = if bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\' {
             (format!("{}:", (bytes[0] as char).to_ascii_uppercase()), &p[3..])
@@ -206,6 +208,22 @@ impl ProjectRoot {
     /// Number of path segments, used for longest-prefix matching.
     pub fn depth(&self) -> usize {
         self.0.split('\\').filter(|s| !s.is_empty()).count()
+    }
+}
+
+/// Prefix of a verbatim (`\\?\`) path.
+const VERBATIM_PREFIX: &str = "\\\\?\\";
+/// What follows [`VERBATIM_PREFIX`] in a verbatim UNC path (`\\?\UNC\server\share`).
+const VERBATIM_UNC: &str = "UNC\\";
+
+/// `\\?\C:\x` → `C:\x`, `\\?\UNC\server\share` → `\\server\share`; other paths unchanged.
+/// Verbatim forms of anything else (`\\?\Volume{…}`) are left as they are and rejected later.
+fn without_verbatim_prefix(path: &str) -> String {
+    let Some(rest) = path.strip_prefix(VERBATIM_PREFIX) else { return path.to_string() };
+    match rest.get(..VERBATIM_UNC.len()) {
+        Some(unc) if unc.eq_ignore_ascii_case(VERBATIM_UNC) => format!("\\\\{}", &rest[VERBATIM_UNC.len()..]),
+        _ if rest.as_bytes().get(1) == Some(&b':') => rest.to_string(),
+        _ => path.to_string(),
     }
 }
 
@@ -638,6 +656,18 @@ pub(crate) mod tests {
             assert!(ProjectRoot::new(bad).is_err(), "{bad} should be rejected");
         }
         assert_eq!(ProjectRoot::new("C:\\Sites\\Shop").unwrap(), ProjectRoot::new("c:\\sites\\shop").unwrap());
+    }
+
+    #[test]
+    fn verbatim_prefixes_are_removed() {
+        assert_eq!(ProjectRoot::new(r"\\?\C:\sites\shop").unwrap().as_str(), r"C:\sites\shop");
+        assert_eq!(ProjectRoot::new(r"\\?\c:\").unwrap().as_str(), r"C:\");
+        assert_eq!(ProjectRoot::new(r"\\?\UNC\nas\www\shop").unwrap().as_str(), r"\\nas\www\shop");
+        assert_eq!(ProjectRoot::new(r"\\?\unc\nas\www").unwrap().as_str(), r"\\nas\www\");
+        assert!(ProjectRoot::new(r"C:\sites\shop").unwrap().contains(r"\\?\C:\sites\shop\app"));
+        for bad in [r"\\?\", r"\\?\Volume{0b1c}\x", r"\\?\UNC\nas", r"\\.\C:\x"] {
+            assert!(ProjectRoot::new(bad).is_err(), "{bad} should be rejected");
+        }
     }
 
     #[test]

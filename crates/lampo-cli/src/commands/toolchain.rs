@@ -11,6 +11,7 @@ use crate::{render, shell};
 /// output is the child's.
 pub fn exec(c: &Cmd<'_>, args: ExecArgs) -> AppResult<i32> {
     let plan = c.ctx.toolchain.exec_plan(&c.resolve_request(), &args.command)?;
+    print_notice(c, plan.env.notice.as_deref());
     let spec = SpawnSpec { program: plan.program, args: plan.args, path_prepend: plan.env.path_prepend, vars: plan.env.vars };
     c.ctx.runner.run(&spec).map_err(|e| match e {
         SpawnError::NotFound(program) => {
@@ -22,6 +23,7 @@ pub fn exec(c: &Cmd<'_>, args: ExecArgs) -> AppResult<i32> {
 
 pub fn env(c: &Cmd<'_>, args: EnvArgs) -> AppResult<i32> {
     let env = c.ctx.toolchain.env(&c.resolve_request())?;
+    print_notice(c, env.notice.as_deref());
     match args.shell {
         None => c.io.emit(&env, render::toolchain_env),
         Some(kind) => {
@@ -34,4 +36,11 @@ pub fn env(c: &Cmd<'_>, args: EnvArgs) -> AppResult<i32> {
         }
     }
     Ok(0)
+}
+
+/// The resolution's note (an ignored `LAMPO_PROJECT`) as one stderr line, unless `LAMPO_QUIET`.
+fn print_notice(c: &Cmd<'_>, notice: Option<&str>) {
+    if let Some(notice) = notice.filter(|_| !c.ctx.env.inherited.quiet) {
+        c.io.err_line(&format!("lampo: {notice}"));
+    }
 }

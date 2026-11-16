@@ -15,8 +15,12 @@ pub const AGENT_CONTEXT_SCHEMA_VERSION: u32 = 2;
 #[serde(rename_all = "camelCase", default)]
 pub struct ResolveRequestDto {
     pub cwd: String,
-    /// Value of `LAMPO_PROJECT` (`shop` or `shop@fix-1`).
+    /// `--project` (`shop` or `shop@fix-1`): always wins.
     pub explicit_site: Option<String>,
+    /// Value of `LAMPO_PROJECT`: holds inside `inherited_root` or outside every project.
+    pub inherited_site: Option<String>,
+    /// Value of `LAMPO_PROJECT_ROOT`.
+    pub inherited_root: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,6 +137,9 @@ pub struct ToolchainEnvDto {
     pub path_prepend: Vec<String>,
     /// `PHPRC` and `LAMPO_*` only.
     pub vars: BTreeMap<String, String>,
+    /// One line for stderr: `LAMPO_PROJECT` was ignored because the folder belongs to `site`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
 }
 
 /// `lampo exec -- <cmd> [args…]`: what the CLI must spawn.

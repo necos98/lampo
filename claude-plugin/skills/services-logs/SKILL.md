@@ -157,7 +157,8 @@ refused, exit 5). Then `lampo up`, and update `DB_PORT` / `REDIS_PORT` / `MAIL_P
 ### Wrong PHP version
 
 - `php -v` differs from `php.version` in `agent context`: another `php.exe` is earlier on PATH
-  (`where.exe php`, doctor `path-shadowing`) or `LAMPO_PROJECT` is set in the shell. See
+  (`where.exe php`, doctor `path-shadowing`) or `LAMPO_PROJECT` is set in the shell (it applies
+  outside every project folder). See
   `lampo:php`.
 - The project itself uses the wrong minor: `lampo project set-php <x.y> <id>` after asking.
 

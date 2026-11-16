@@ -292,11 +292,12 @@ impl ToolchainQuery {
     /// `ShimTarget::toolchain_env` of the resolved site (`ProjectNotResolved` if none).
     pub fn env(&self, request: &ResolveRequestDto) -> AppResult<ToolchainEnvDto> {
         let r = self.resolver.resolve(request)?.ok_or_else(|| AppError::new(ErrorCode::ProjectNotResolved, format!("no project for `{}` and no default PHP", request.cwd)))?;
-        let env = r.target.toolchain_env(r.site.as_ref(), &self.paths.shim_dir());
+        let env = r.target.toolchain_env(r.site.as_ref().zip(r.root.as_ref()), &self.paths.shim_dir());
         Ok(ToolchainEnvDto {
             site: r.site.as_ref().map(|s| s.to_string()),
             path_prepend: env.path_prepend.iter().map(|p| p.display().to_string()).collect(),
             vars: env.vars.into_iter().collect(),
+            notice: r.ignored_inherited_notice(),
         })
     }
 

@@ -91,6 +91,7 @@ mod tests {
             site: Some("shop".into()),
             path_prepend: vec![r"C:\Users\me\AppData\Local\Lampo\bin".into(), r"C:\php\8.3".into()],
             vars: BTreeMap::from([("LAMPO_PROJECT".to_string(), "shop".to_string()), ("PHPRC".to_string(), r"C:\ini dir\it's".to_string())]),
+            notice: None,
         }
     }
 
@@ -139,7 +140,7 @@ mod tests {
 
     #[test]
     fn empty_environment_renders_nothing() {
-        let empty = ToolchainEnvDto { site: None, path_prepend: vec![], vars: BTreeMap::new() };
+        let empty = ToolchainEnvDto { site: None, path_prepend: vec![], vars: BTreeMap::new(), notice: None };
         for shell in [ShellKind::Powershell, ShellKind::Cmd, ShellKind::Bash] {
             assert_eq!(render_env(shell, &empty), "");
         }

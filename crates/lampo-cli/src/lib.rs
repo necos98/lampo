@@ -15,7 +15,9 @@ pub mod console;
 pub mod context;
 pub mod error_doc;
 pub mod exit_code;
+pub mod inherited;
 pub mod io;
+pub mod job;
 pub mod local;
 pub mod ports;
 pub mod process;
@@ -37,10 +39,33 @@ use lampo_application::AppError;
 use crate::cli::Cli;
 use crate::io::Io;
 
+/// The subcommand whose arguments are another program's (`lampo exec php x --json`).
+const EXEC_SUBCOMMAND: &str = "exec";
+/// Global options followed by a separate value (`-p exec` names a site, not the subcommand).
+const GLOBAL_VALUE_OPTIONS: [&str; 2] = ["-p", "--project"];
+
 /// Whether the command line asks for JSON (so that even usage errors are JSON). Arguments after
-/// a bare `--` belong to `exec` and are not ours.
+/// a bare `--` or after the `exec` subcommand belong to the child and are not ours.
 pub fn wants_json(args: &[OsString]) -> bool {
-    args.iter().skip(1).take_while(|a| *a != "--").any(|a| a == "--json")
+    let mut rest = args.iter().skip(1);
+    let mut subcommand_seen = false;
+    while let Some(arg) = rest.next() {
+        if arg == "--" {
+            break;
+        }
+        if arg == "--json" {
+            return true;
+        }
+        if GLOBAL_VALUE_OPTIONS.iter().any(|o| arg == *o) {
+            rest.next();
+        } else if !subcommand_seen && !arg.to_string_lossy().starts_with('-') {
+            if arg == EXEC_SUBCOMMAND {
+                break;
+            }
+            subcommand_seen = true;
+        }
+    }
+    false
 }
 
 static PANIC_MESSAGE: Mutex<String> = Mutex::new(String::new());
@@ -87,4 +112,32 @@ fn execute(cli: Cli, io: &Io) -> Result<i32, AppError> {
         let ctx = composition::build()?;
         commands::run(cli, &ctx, io).await
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wants(args: &[&str]) -> bool {
+        let argv: Vec<OsString> = std::iter::once("lampo").chain(args.iter().copied()).map(OsString::from).collect();
+        wants_json(&argv)
+    }
+
+    #[test]
+    fn json_flag_of_lampo_itself() {
+        assert!(wants(&["--json", "status"]));
+        assert!(wants(&["status", "--json"]));
+        assert!(wants(&["project", "create", "exec", "--json"]), "`exec` as a value of another subcommand");
+        assert!(wants(&["-p", "exec", "env", "--json"]), "`exec` as a site id");
+        assert!(wants(&["--project", "shop", "--json", "exec", "php"]), "before the subcommand it is ours");
+        assert!(!wants(&["status"]));
+    }
+
+    #[test]
+    fn json_flag_of_the_child_is_not_ours() {
+        assert!(!wants(&["exec", "php", "x", "--json"]));
+        assert!(!wants(&["-p", "shop", "exec", "php", "--json"]));
+        assert!(!wants(&["exec", "--", "php", "--json"]));
+        assert!(!wants(&["env", "--", "--json"]));
+    }
 }

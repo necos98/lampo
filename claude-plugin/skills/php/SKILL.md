@@ -31,7 +31,9 @@ mysql -e "SHOW DATABASES"
   other entry or installing the shims from the Lampo app ("Impostazioni" > "Strumenti da riga
   di comando" > "Installa nel PATH", or `lampo shims install`). A new terminal is needed after
   PATH changes.
-- A stale `LAMPO_PROJECT` variable in the shell overrides the folder: check `$env:LAMPO_PROJECT`.
+- A `LAMPO_PROJECT` variable left in the shell still applies outside every project folder (and
+  inside its `LAMPO_PROJECT_ROOT`): check `$env:LAMPO_PROJECT` when a folder outside projects
+  gets a project's PHP.
 
 ## `lampo exec` and `lampo env`
 
@@ -45,7 +47,7 @@ lampo exec -- composer run-script post-install-cmd
 
 Everything after `--` is the command line; stdio is inherited; the exit code is the child's
 (`--json` is ignored). `lampo env` prints the same environment (PATH additions, `PHPRC`,
-`LAMPO_PROJECT`, `LAMPO_PHP_VERSION`, `LAMPO_DB_HOST`, `LAMPO_DB_PORT`, `LAMPO_MAIL_HOST`,
+`LAMPO_PROJECT`, `LAMPO_PROJECT_ROOT`, `LAMPO_PHP_VERSION`, `LAMPO_DB_HOST`, `LAMPO_DB_PORT`, `LAMPO_MAIL_HOST`,
 `LAMPO_MAIL_PORT`...). To load it into
 the current shell:
 

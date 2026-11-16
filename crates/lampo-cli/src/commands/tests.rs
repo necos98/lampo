@@ -437,6 +437,25 @@ async fn env_renders_per_shell_and_as_json() {
 }
 
 #[tokio::test]
+async fn an_ignored_lampo_project_is_one_stderr_line_unless_quiet() {
+    let fake = Fake::new();
+    let note = "LAMPO_PROJECT=blog ignored: this folder belongs to shop (set LAMPO_QUIET=1 to hide this note)";
+    let mut toolchain = toolchain_json();
+    toolchain["notice"] = note.into();
+    *fake.toolchain.lock().unwrap() = toolchain;
+
+    let (_, out, err) = run_cli(&fake, &["env", "--shell", "bash"]).await;
+    assert_eq!(err, format!("lampo: {note}\n"));
+    assert!(out.starts_with("export PATH="), "stdout stays a script: {out}");
+    let (code, _, err) = run_cli(&fake, &["exec", "php", "-v"]).await;
+    assert_eq!((code, err), (0, format!("lampo: {note}\n")));
+
+    fake.quiet.store(true, Ordering::SeqCst);
+    let (_, _, err) = run_cli(&fake, &["exec", "php", "-v"]).await;
+    assert_eq!(err, "");
+}
+
+#[tokio::test]
 async fn doctor_exits_14_when_there_are_problems() {
     let fake = Fake::new();
     let (code, _, _) = run_cli(&fake, &["doctor", "--json"]).await;

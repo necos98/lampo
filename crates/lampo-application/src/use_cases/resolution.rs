@@ -7,7 +7,8 @@ use crate::dto::{ResolveRequestDto, ResolvedKind, ResolvedSiteDto};
 use crate::error::{AppError, AppResult, ErrorCode};
 
 /// Resolves which site a front-end call is about, through the domain [`ResolverChain`]
-/// (`LAMPO_PROJECT` → directory → git worktree → global default). File-based, works without the app.
+/// (`--project` → `LAMPO_PROJECT` → directory → git worktree → global default). File-based,
+/// works without the app.
 pub struct SiteResolver {
     index: Arc<dyn ShimIndexReader>,
     chain: ResolverChain,
@@ -21,7 +22,12 @@ impl SiteResolver {
     /// Domain resolution; `Ok(None)` when nothing matched and there is no default PHP.
     pub fn resolve(&self, request: &ResolveRequestDto) -> AppResult<Option<Resolution>> {
         let index = self.index.read()?;
-        let req = ResolveRequest { cwd: request.cwd.clone(), explicit_site: request.explicit_site.clone() };
+        let req = ResolveRequest {
+            cwd: request.cwd.clone(),
+            explicit_site: request.explicit_site.clone(),
+            inherited_site: request.inherited_site.clone(),
+            inherited_root: request.inherited_root.clone(),
+        };
         Ok(self.chain.resolve(&req, &index)?)
     }
 

@@ -219,3 +219,89 @@ fn mysql_gets_the_sites_instance_and_database_and_forwards_stdin_and_exit_code()
     let echoed: Vec<String> = serde_json::from_str(out.trim()).unwrap();
     assert!(!echoed.iter().any(|a| a == "--database=shop_feature"), "an explicit (empty) database wins: {echoed:?}");
 }
+
+/// A second project, `blog`, next to `shop`, with its own php.ini dir (echoed as `phprc=`).
+fn add_blog(sb: &Sandbox) -> PathBuf {
+    let blog = sb.project.parent().unwrap().join("blog");
+    std::fs::create_dir_all(&blog).unwrap();
+    let index_file = sb.home.join("data").join("bin").join("shim-index.json");
+    let mut index: ShimIndex = serde_json::from_str(&std::fs::read_to_string(&index_file).unwrap()).unwrap();
+    let target = ShimTarget { phprc_dir: Some(PathBuf::from(r"C:\blog-test-ini")), ..target(&sb.php_dir) };
+    index.projects.push(ShimEntry { site: "blog".parse().unwrap(), root: ProjectRoot::new(blog.to_str().unwrap()).unwrap(), target });
+    std::fs::write(index_file, serde_json::to_string(&index).unwrap()).unwrap();
+    blog
+}
+
+/// In the terminal of `blog` (`LAMPO_PROJECT=blog`), `cd ..\shop; php ...` runs with shop's
+/// settings and says so in one line.
+#[test]
+fn lampo_project_of_another_project_gives_way_to_the_folder() {
+    let sb = Sandbox::new(true);
+    let blog = add_blog(&sb);
+    let shim = sb.install_shim("php.exe");
+    let inherited = |command: &mut Command| {
+        command.env("LAMPO_PROJECT", "blog").env("LAMPO_PROJECT_ROOT", &blog).env_remove("LAMPO_QUIET");
+    };
+
+    let mut command = sb.command(&shim, &sb.project);
+    inherited(&mut command);
+    let (code, _, err) = run(command, b"");
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains(r"phprc=C:\lampo-test-ini"), "shop's settings: {err}");
+    assert!(err.starts_with("lampo-shim: LAMPO_PROJECT=blog ignored: this folder belongs to shop"), "{err}");
+
+    let mut command = sb.command(&shim, &blog);
+    inherited(&mut command);
+    let (_, _, err) = run(command, b"");
+    assert!(err.contains(r"phprc=C:\blog-test-ini") && !err.contains("ignored"), "inside its root it holds: {err}");
+
+    let mut command = sb.command(&shim, &sb.project);
+    inherited(&mut command);
+    command.env("LAMPO_QUIET", "1");
+    let (_, _, err) = run(command, b"");
+    assert!(!err.contains("lampo-shim:"), "LAMPO_QUIET hides the note: {err}");
+}
+
+#[test]
+fn a_junction_to_the_project_resolves_the_project() {
+    let sb = Sandbox::new(true);
+    let shim = sb.install_shim("php.exe");
+    let link = sb.home.parent().unwrap().join("shop-link");
+    let made = Command::new("cmd").arg("/C").arg("mklink").arg("/J").arg(&link).arg(&sb.project).output().unwrap();
+    assert!(made.status.success(), "mklink /J: {}", String::from_utf8_lossy(&made.stderr));
+    let (code, _, err) = run(sb.command(&shim, &link), b"");
+    assert_eq!(code, 0, "the final path of the junction is the project: {err}");
+    assert!(err.contains(r"phprc=C:\lampo-test-ini"), "{err}");
+}
+
+/// An IDE or CI runner that stops `php artisan serve` kills the shim, not PHP: the tool must die
+/// with it instead of running on, orphaned.
+#[test]
+fn killing_the_shim_kills_the_tool() {
+    use std::io::{BufRead, BufReader, Read};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let sb = Sandbox::new(true);
+    let shim = sb.install_shim("php.exe");
+    let mut command = sb.command(&shim, &sb.project);
+    let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    // Held open until the end: the tool blocks reading it, like a server that never returns.
+    let stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut first = String::new();
+    stdout.read_line(&mut first).unwrap();
+    assert_eq!(first.trim(), "[]", "the tool is running");
+
+    child.kill().unwrap();
+    child.wait().unwrap();
+    // The tool writes to the same stdout pipe: the pipe reaches EOF only once the tool is gone.
+    let (gone, closed) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = stdout.read_to_end(&mut Vec::new());
+        let _ = gone.send(());
+    });
+    let tool_died = closed.recv_timeout(Duration::from_secs(10)).is_ok();
+    drop(stdin);
+    assert!(tool_died, "the tool outlived the shim");
+}

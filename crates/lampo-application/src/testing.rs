@@ -231,6 +231,14 @@ impl GitInspector for FakeGit {
     }
 }
 
+/// A file system without aliases: every folder's final path is the folder itself.
+pub struct SameNamePaths;
+impl PathCanonicalizer for SameNamePaths {
+    fn canonicalize(&self, folder: &str) -> Option<String> {
+        Some(folder.to_string())
+    }
+}
+
 #[derive(Default)]
 pub struct FakeDetector(pub Option<DetectionHint>, pub bool);
 impl ProjectDetector for FakeDetector {
@@ -1140,7 +1148,7 @@ impl World {
     }
 
     pub fn resolver(&self) -> Arc<SiteResolver> {
-        Arc::new(SiteResolver::new(self.shim_index.clone(), ResolverChain::standard(self.git.clone())))
+        Arc::new(SiteResolver::new(self.shim_index.clone(), ResolverChain::standard(self.git.clone(), Arc::new(SameNamePaths))))
     }
 
     pub fn runners(&self) -> Vec<Arc<dyn ServiceRunner>> {

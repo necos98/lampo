@@ -54,7 +54,7 @@ pub fn build() -> AppResult<CliContext> {
     let channel: Arc<dyn ControlChannelClient> = Arc::new(NamedPipeControlClient::new(instance_pipe_name(&user, isolated_home.as_deref())));
     let launcher = Arc::new(HeadlessAppLauncher::new(app_dir.join(store::app_location::APP_EXE_NAME)));
 
-    let resolver = Arc::new(SiteResolver::new(index, ResolverChain::standard(git.clone())));
+    let resolver = Arc::new(SiteResolver::new(index, ResolverChain::standard(git.clone(), Arc::new(store::FsPathCanonicalizer))));
     let projects = Arc::new(ProjectQueries::new(projects_repo.clone(), worktrees_repo.clone(), settings_repo.clone(), fs.clone()));
     // `package extensions`: the same `ext` folder scan as the app's project editor.
     let php_extensions = Arc::new(PhpExtensionListing::new(

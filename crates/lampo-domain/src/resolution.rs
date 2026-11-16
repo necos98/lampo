@@ -3,14 +3,19 @@
 //! Resolution is an open chain of [`ProjectResolver`]s tried in order; the first answer wins.
 //! The default chain ([`ResolverChain::standard`]) is:
 //!
-//! 1. [`ExplicitSiteResolver`] — the `LAMPO_PROJECT` environment variable (`shop` or
-//!    `shop@feature-x`). An unknown value is an error, never silently ignored.
-//! 2. [`DirectoryResolver`] — longest-prefix match of the current directory against registered
+//! 1. [`ExplicitSiteResolver`] — `--project` (`shop` or `shop@feature-x`). An unknown value is an
+//!    error, never silently ignored.
+//! 2. [`InheritedSiteResolver`] — `LAMPO_PROJECT` (with `LAMPO_PROJECT_ROOT`), exported by
+//!    `lampo exec`, `lampo env` and the app's terminal. It holds only while the cwd is inside that
+//!    root or outside every project: after `cd ..\blog` in the terminal of `shop`, the folder wins.
+//! 3. [`DirectoryResolver`] — longest-prefix match of the current directory against registered
 //!    project folders *and* worktree-environment folders.
-//! 3. [`GitWorktreeResolver`] — the cwd is inside a git worktree without an environment: walk up
+//! 4. [`GitWorktreeResolver`] — the cwd is inside a git worktree without an environment: walk up
 //!    to the `.git` *file*, follow `gitdir:` to the main repository, and match that path (plus the
 //!    cwd's relative path) against projects. Reads files only (via [`GitInspector`]), never spawns git.
-//! 4. [`GlobalDefaultResolver`] — the global default PHP.
+//! 5. [`CanonicalPathResolver`] — only when 3 and 4 found nothing: one retry of both with the
+//!    cwd's final path (`subst` drives, junctions, 8.3 names), through a [`PathCanonicalizer`].
+//! 6. [`GlobalDefaultResolver`] — the global default PHP.
 //!
 //! A new strategy is a new `ProjectResolver` inserted in the chain by the composition root.
 
@@ -20,22 +25,47 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{PortError, PortResult};
 use crate::project::ProjectRoot;
-use crate::shim::{ShimIndex, ShimTarget};
+use crate::shim::{ShimEntry, ShimIndex, ShimTarget};
 use crate::site::SiteId;
+
+mod canonical;
+mod inherited;
+
+pub use canonical::{CanonicalPathResolver, PathCanonicalizer};
+pub use inherited::InheritedSiteResolver;
+
+/// Environment variables of site resolution, read by the shims and `lampo`.
+pub mod env_vars {
+    /// The site a parent `lampo exec`/`lampo env` resolved (`shop`, `shop@feature-x`).
+    pub const PROJECT: &str = "LAMPO_PROJECT";
+    /// The folder [`PROJECT`] was exported for: the variable holds only inside it.
+    pub const PROJECT_ROOT: &str = "LAMPO_PROJECT_ROOT";
+    /// Any non-empty value other than `0` hides Lampo's notes on stderr (an ignored [`PROJECT`]).
+    pub const QUIET: &str = "LAMPO_QUIET";
+
+    /// Whether a [`QUIET`] value asks for silence.
+    pub fn is_quiet(value: Option<&str>) -> bool {
+        value.map(str::trim).is_some_and(|v| !v.is_empty() && v != "0")
+    }
+}
 
 /// Inputs captured by the caller (CLI composition root / shim) from its process environment.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ResolveRequest {
     /// Absolute current directory.
     pub cwd: String,
-    /// Value of `LAMPO_PROJECT`, if set and non-empty.
+    /// `--project`: always wins.
     pub explicit_site: Option<String>,
+    /// Value of `LAMPO_PROJECT`, if set and non-empty.
+    pub inherited_site: Option<String>,
+    /// Value of `LAMPO_PROJECT_ROOT`: the folder `LAMPO_PROJECT` was exported for.
+    pub inherited_root: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "via", rename_all = "kebab-case")]
 pub enum ResolutionSource {
-    /// `LAMPO_PROJECT`.
+    /// `--project`, or `LAMPO_PROJECT` while it holds.
     Explicit,
     /// The cwd is inside a registered project or worktree-environment folder.
     Directory,
@@ -53,6 +83,21 @@ pub struct Resolution {
     pub root: Option<ProjectRoot>,
     pub target: ShimTarget,
     pub source: ResolutionSource,
+    /// `LAMPO_PROJECT` named this site, but the cwd belongs to the resolved one instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ignored_inherited_site: Option<SiteId>,
+}
+
+impl Resolution {
+    /// The resolution of a registered site.
+    pub fn of(entry: &ShimEntry, source: ResolutionSource) -> Self {
+        Self { site: Some(entry.site.clone()), root: Some(entry.root.clone()), target: entry.target.clone(), source, ignored_inherited_site: None }
+    }
+
+    /// The one-line note for stderr when the folder's site won over `LAMPO_PROJECT`.
+    pub fn ignored_inherited_notice(&self) -> Option<String> {
+        self.ignored_inherited_site.as_ref().zip(self.site.as_ref()).map(|(ignored, used)| inherited::ignored_notice(ignored, used))
+    }
 }
 
 /// One resolution strategy.
@@ -73,20 +118,36 @@ impl ResolverChain {
         Self { resolvers }
     }
 
-    /// Explicit → directory → git worktree → global default.
-    pub fn standard(git: Arc<dyn GitInspector>) -> Self {
-        Self::new(vec![Arc::new(ExplicitSiteResolver), Arc::new(DirectoryResolver), Arc::new(GitWorktreeResolver::new(git)), Arc::new(GlobalDefaultResolver)])
+    /// Explicit → inherited → directory → git worktree → canonical-path retry → global default.
+    pub fn standard(git: Arc<dyn GitInspector>, canonicalizer: Arc<dyn PathCanonicalizer>) -> Self {
+        let textual: Vec<Arc<dyn ProjectResolver>> = vec![Arc::new(DirectoryResolver), Arc::new(GitWorktreeResolver::new(git))];
+        let mut by_folder = textual.clone();
+        by_folder.push(Arc::new(CanonicalPathResolver::new(canonicalizer, textual)));
+        let mut resolvers: Vec<Arc<dyn ProjectResolver>> = vec![Arc::new(ExplicitSiteResolver), Arc::new(InheritedSiteResolver::new(by_folder.clone()))];
+        resolvers.extend(by_folder);
+        resolvers.push(Arc::new(GlobalDefaultResolver));
+        Self::new(resolvers)
     }
 
     /// `Ok(None)` only when nothing matched and there is no global default.
     pub fn resolve(&self, request: &ResolveRequest, index: &ShimIndex) -> PortResult<Option<Resolution>> {
-        for r in &self.resolvers {
-            if let Some(found) = r.resolve(request, index)? {
-                return Ok(Some(found));
-            }
-        }
-        Ok(None)
+        first_match(&self.resolvers, request, index)
     }
+}
+
+/// The first answer of `resolvers`, in order.
+fn first_match(resolvers: &[Arc<dyn ProjectResolver>], request: &ResolveRequest, index: &ShimIndex) -> PortResult<Option<Resolution>> {
+    for r in resolvers {
+        if let Some(found) = r.resolve(request, index)? {
+            return Ok(Some(found));
+        }
+    }
+    Ok(None)
+}
+
+/// A site id from an environment variable or flag: `None` when absent or blank.
+fn non_blank(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|s| !s.is_empty())
 }
 
 pub struct ExplicitSiteResolver;
@@ -95,10 +156,10 @@ impl ProjectResolver for ExplicitSiteResolver {
         "explicit"
     }
     fn resolve(&self, request: &ResolveRequest, index: &ShimIndex) -> PortResult<Option<Resolution>> {
-        let Some(raw) = request.explicit_site.as_deref().map(str::trim).filter(|s| !s.is_empty()) else { return Ok(None) };
+        let Some(raw) = non_blank(request.explicit_site.as_deref()) else { return Ok(None) };
         let site: SiteId = raw.parse()?;
         let entry = index.by_site(&site).ok_or_else(|| PortError::not_found("site", raw))?;
-        Ok(Some(Resolution { site: Some(entry.site.clone()), root: Some(entry.root.clone()), target: entry.target.clone(), source: ResolutionSource::Explicit }))
+        Ok(Some(Resolution::of(entry, ResolutionSource::Explicit)))
     }
 }
 
@@ -108,7 +169,7 @@ impl ProjectResolver for DirectoryResolver {
         "directory"
     }
     fn resolve(&self, request: &ResolveRequest, index: &ShimIndex) -> PortResult<Option<Resolution>> {
-        Ok(index.by_path(&request.cwd).map(|e| Resolution { site: Some(e.site.clone()), root: Some(e.root.clone()), target: e.target.clone(), source: ResolutionSource::Directory }))
+        Ok(index.by_path(&request.cwd).map(|e| Resolution::of(e, ResolutionSource::Directory)))
     }
 }
 
@@ -118,7 +179,7 @@ impl ProjectResolver for GlobalDefaultResolver {
         "global-default"
     }
     fn resolve(&self, _request: &ResolveRequest, index: &ShimIndex) -> PortResult<Option<Resolution>> {
-        Ok(index.default.clone().map(|target| Resolution { site: None, root: None, target, source: ResolutionSource::GlobalDefault }))
+        Ok(index.default.clone().map(|target| Resolution { site: None, root: None, target, source: ResolutionSource::GlobalDefault, ignored_inherited_site: None }))
     }
 }
 
@@ -158,12 +219,8 @@ impl ProjectResolver for GitWorktreeResolver {
         let Some(checkout) = self.git.inspect(&request.cwd)? else { return Ok(None) };
         let Some(main) = checkout.main_root else { return Ok(None) };
         let Some(mapped) = git::map_into(&request.cwd, &checkout.worktree_root, &main) else { return Ok(None) };
-        Ok(index.by_path(&mapped).map(|e| Resolution {
-            site: Some(e.site.clone()),
-            root: Some(e.root.clone()),
-            target: e.target.clone(),
-            source: ResolutionSource::GitWorktree { worktree_root: checkout.worktree_root.to_string(), main_root: main.to_string() },
-        }))
+        let source = ResolutionSource::GitWorktree { worktree_root: checkout.worktree_root.to_string(), main_root: main.to_string() };
+        Ok(index.by_path(&mapped).map(|e| Resolution::of(e, source)))
     }
 }
 
@@ -225,7 +282,9 @@ pub mod git {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::shim::tests::{entry, target};
 
@@ -233,14 +292,27 @@ mod tests {
         ProjectRoot::new(s).unwrap()
     }
 
-    struct FakeGit(Option<GitCheckout>);
+    pub(crate) struct FakeGit(pub(crate) Option<GitCheckout>);
     impl GitInspector for FakeGit {
         fn inspect(&self, _folder: &str) -> PortResult<Option<GitCheckout>> {
             Ok(self.0.clone())
         }
     }
 
-    fn index() -> ShimIndex {
+    /// Final paths by folder; a folder it does not know cannot be opened.
+    pub(crate) struct FakeCanonical(HashMap<String, String>);
+    impl FakeCanonical {
+        pub(crate) fn new(names: &[(&str, &str)]) -> Self {
+            Self(names.iter().map(|(from, to)| (from.to_string(), to.to_string())).collect())
+        }
+    }
+    impl PathCanonicalizer for FakeCanonical {
+        fn canonicalize(&self, folder: &str) -> Option<String> {
+            self.0.get(folder).cloned()
+        }
+    }
+
+    pub(crate) fn index() -> ShimIndex {
         ShimIndex {
             default: Some(target("8.4")),
             projects: vec![entry("shop", "C:\\sites\\shop", "8.2"), entry("api", "C:\\sites\\mono\\api", "8.3"), entry("shop@fix-1", "D:\\wt\\fix-1", "8.2")],
@@ -248,12 +320,25 @@ mod tests {
         }
     }
 
-    fn chain(git: Option<GitCheckout>) -> ResolverChain {
-        ResolverChain::standard(Arc::new(FakeGit(git)))
+    pub(crate) fn chain(git: Option<GitCheckout>) -> ResolverChain {
+        chain_with(git, FakeCanonical::new(&[]))
     }
 
-    fn req(cwd: &str, explicit: Option<&str>) -> ResolveRequest {
-        ResolveRequest { cwd: cwd.into(), explicit_site: explicit.map(Into::into) }
+    pub(crate) fn chain_with(git: Option<GitCheckout>, canonical: FakeCanonical) -> ResolverChain {
+        ResolverChain::standard(Arc::new(FakeGit(git)), Arc::new(canonical))
+    }
+
+    pub(crate) fn req(cwd: &str, explicit: Option<&str>) -> ResolveRequest {
+        ResolveRequest { cwd: cwd.into(), explicit_site: explicit.map(Into::into), ..Default::default() }
+    }
+
+    #[test]
+    fn quiet_values() {
+        assert!(env_vars::is_quiet(Some("1")));
+        assert!(env_vars::is_quiet(Some("yes")));
+        for loud in [None, Some(""), Some(" "), Some("0")] {
+            assert!(!env_vars::is_quiet(loud), "{loud:?}");
+        }
     }
 
     #[test]

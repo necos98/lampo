@@ -14,6 +14,7 @@ use lampo_application::{AppError, AppResult, CallContext, ErrorCode};
 use serde_json::{Value, json};
 
 use crate::context::{CliContext, CliEnv};
+use crate::inherited::InheritedEnv;
 use crate::io::{Capture, Io, captured};
 use crate::ports::*;
 
@@ -108,6 +109,10 @@ pub struct Fake {
     pub extensions_result: Mutex<Option<AppResult<Value>>>,
     /// The `php` argument of every extension listing.
     pub extensions_php: Mutex<Vec<Option<String>>>,
+    /// What `env`/`exec` resolve to (default: [`toolchain_json`]).
+    pub toolchain: Mutex<Value>,
+    /// `LAMPO_QUIET` of the context.
+    pub quiet: AtomicBool,
 }
 
 impl Fake {
@@ -137,6 +142,8 @@ impl Fake {
             detect_folders: Mutex::new(Vec::new()),
             extensions_result: Mutex::new(None),
             extensions_php: Mutex::new(Vec::new()),
+            toolchain: Mutex::new(toolchain_json()),
+            quiet: AtomicBool::new(false),
         })
     }
 
@@ -155,7 +162,12 @@ impl Fake {
     /// A context whose every port is this fake; `cwd` is `C:\work\shop`.
     pub fn context(self: &Arc<Self>) -> CliContext {
         CliContext {
-            env: CliEnv { cwd: r"C:\work\shop".into(), lampo_project: None, now_unix_ms: 1_000_000, follow_interval: Duration::from_millis(1) },
+            env: CliEnv {
+                cwd: r"C:\work\shop".into(),
+                inherited: InheritedEnv { quiet: self.quiet.load(Ordering::SeqCst), ..InheritedEnv::default() },
+                now_unix_ms: 1_000_000,
+                follow_interval: Duration::from_millis(1),
+            },
             sites: self.clone(),
             projects: self.clone(),
             detection: self.clone(),
@@ -246,10 +258,10 @@ impl PhpExtensionReader for Fake {
 
 impl ToolchainReader for Fake {
     fn env(&self, _: &ResolveRequestDto) -> AppResult<ToolchainEnvDto> {
-        Ok(dto(toolchain_json()))
+        Ok(dto(self.toolchain.lock().unwrap().clone()))
     }
     fn exec_plan(&self, _: &ResolveRequestDto, command: &[String]) -> AppResult<ExecPlanDto> {
-        Ok(ExecPlanDto { program: command[0].clone(), args: command[1..].to_vec(), env: dto(toolchain_json()) })
+        Ok(ExecPlanDto { program: command[0].clone(), args: command[1..].to_vec(), env: dto(self.toolchain.lock().unwrap().clone()) })
     }
 }
 

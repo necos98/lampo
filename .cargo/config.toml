@@ -1,0 +1,5 @@
+# Static C runtime for every Windows binary of the workspace (lampo.exe, lampo-shim.exe, the app):
+# without it they import VCRUNTIME140.dll and fail to start on a machine without the Visual C++
+# redistributable, `lampo doctor` and the Claude Code hook included.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

@@ -33,7 +33,7 @@ fn add_worktree(w: &World, root: &str, branch: &str, port: u16, mode: DatabaseMo
 }
 
 fn resolve(cwd: &str) -> ResolveRequestDto {
-    ResolveRequestDto { cwd: cwd.into(), explicit_site: None }
+    ResolveRequestDto { cwd: cwd.into(), ..Default::default() }
 }
 
 // --- presets ---------------------------------------------------------------------------------
@@ -172,13 +172,36 @@ async fn toolchain_env_and_exec_plan() {
     assert_eq!((plan.program.as_str(), plan.args.clone()), ("php", vec!["artisan".to_string(), "migrate".to_string()]));
     assert_eq!(tc.exec_plan(&resolve("C:\\sites\\shop"), &[]).unwrap_err().code, ErrorCode::Validation);
 
-    let explicit = ResolveRequestDto { cwd: "E:\\x".into(), explicit_site: Some("nope".into()) };
+    let explicit = ResolveRequestDto { cwd: "E:\\x".into(), explicit_site: Some("nope".into()), ..Default::default() };
     assert_eq!(tc.env(&explicit).unwrap_err().code, ErrorCode::NotFound);
+    assert_eq!(env.vars["LAMPO_PROJECT_ROOT"], "C:\\sites\\shop");
+    assert_eq!(env.notice, None);
 
     // Nothing installed: no default PHP, nothing resolves.
     let empty = World::new();
     empty.env.write_generated_files().unwrap();
     assert_eq!(empty.resolver().resolve_dto(&resolve("E:\\x")).unwrap_err().code, ErrorCode::ProjectNotResolved);
+}
+
+/// In the terminal of `shop`, `cd ..\blog`: blog's toolchain, with a note about the variable.
+#[tokio::test]
+async fn inherited_project_gives_way_to_the_folder_of_another_project() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", false);
+    w.project("blog", "C:\\sites\\blog", false);
+    w.env.write_generated_files().unwrap();
+    let tc = ToolchainQuery::new(w.resolver(), w.paths.clone());
+    let inherited = |cwd: &str| ResolveRequestDto { cwd: cwd.into(), inherited_site: Some("shop".into()), inherited_root: Some("C:\\sites\\shop".into()), ..Default::default() };
+
+    let env = tc.env(&inherited("C:\\sites\\blog")).unwrap();
+    assert_eq!(env.site.as_deref(), Some("blog"));
+    assert_eq!(env.vars["LAMPO_PROJECT"], "blog");
+    assert_eq!(env.vars["LAMPO_PROJECT_ROOT"], "C:\\sites\\blog");
+    assert_eq!(env.notice.as_deref(), Some("LAMPO_PROJECT=shop ignored: this folder belongs to blog (set LAMPO_QUIET=1 to hide this note)"));
+
+    let inside = tc.env(&inherited("C:\\sites\\shop\\app")).unwrap();
+    assert_eq!((inside.site.as_deref(), inside.notice), (Some("shop"), None));
+    assert_eq!(tc.env(&inherited("E:\\scratch")).unwrap().site.as_deref(), Some("shop"));
 }
 
 // --- logs ------------------------------------------------------------------------------------

@@ -43,7 +43,10 @@ registering it), `lampo worktree list`, `lampo logs`, `lampo doctor`, `lampo env
 Resolution order, for both the CLI and the shims:
 
 1. `--project <site>` (global flag: `shop` or `shop@feature-x`);
-2. the `LAMPO_PROJECT` environment variable (same syntax);
+2. the `LAMPO_PROJECT` environment variable (same syntax), set by `lampo exec`, `lampo env` and
+   the app's terminal together with `LAMPO_PROJECT_ROOT`: it holds inside that folder or
+   outside every project, while the folder of another project wins (one `LAMPO_PROJECT=...
+   ignored` line on stderr; `LAMPO_QUIET=1` hides it);
 3. the current folder: the longest match among project folders and worktree-environment
    folders;
 4. a git worktree of a registered project (read from `.git`): without its own environment it

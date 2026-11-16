@@ -3,7 +3,7 @@
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
-use crate::console;
+use crate::{console, job};
 use crate::ports::{ProgramRunner, SpawnError, SpawnSpec};
 
 /// Finds `program` the way `cmd.exe` does: a path with a separator is used as given, a bare name
@@ -38,7 +38,8 @@ pub fn pathext_from(value: Option<&str>) -> Vec<String> {
     raw.split(';').filter(|s| !s.is_empty()).map(str::to_string).collect()
 }
 
-/// Real process runner: inherited stdio, Ctrl+C goes to the child, its exit code is returned.
+/// Real process runner: inherited stdio, Ctrl+C goes to the child, the child is tied to this
+/// process ([`job::run_tied`]), its exit code is returned.
 pub struct SystemRunner;
 
 impl ProgramRunner for SystemRunner {
@@ -54,7 +55,7 @@ impl ProgramRunner for SystemRunner {
         command.args(&spec.args).env("PATH", path).envs(&spec.vars);
 
         console::survive_ctrl_c();
-        let status = command.status().map_err(|e| SpawnError::Failed(format!("cannot start {}: {e}", program.display())))?;
+        let status = job::run_tied(&mut command).map_err(|e| SpawnError::Failed(format!("cannot start {}: {e}", program.display())))?;
         Ok(status.code().unwrap_or(1))
     }
 }

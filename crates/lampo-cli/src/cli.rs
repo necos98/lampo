@@ -25,8 +25,9 @@ stderr. Errors in JSON mode are a JSON document too: {\"error\": {\"code\", \"me
   * Never triggers a UAC prompt unless `--allow-elevation` is given (exit code 7 otherwise).
   * Read-only commands run in-process (the app need not be running). Commands that change state \
 go to the Lampo app, which is started headless when needed (disable with `--no-start`).
-  * The site is resolved from --project, then LAMPO_PROJECT, then the current folder (including \
-git worktrees), then the global default PHP.";
+  * The site is resolved from --project, then LAMPO_PROJECT (only inside LAMPO_PROJECT_ROOT or \
+outside every project), then the current folder (including git worktrees), then the global \
+default PHP.";
 
 #[derive(Debug, Parser)]
 #[command(name = "lampo", version, about = ABOUT, long_about = LONG_ABOUT, propagate_version = true, arg_required_else_help = true)]

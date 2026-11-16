@@ -5,7 +5,9 @@
 
 use std::sync::Arc;
 
-use lampo_cli::shim::{self, ShimRequest};
+use lampo_cli::inherited::InheritedEnv;
+use lampo_cli::shim::{self, ShimFacts, ShimRequest};
+use lampo_domain::paths::LampoPaths;
 
 fn main() {
     std::process::exit(run());
@@ -21,20 +23,29 @@ fn run() -> i32 {
             Err(arg) => return shim::fail(format!("argument {arg:?} is not valid Unicode")),
         }
     }
-    let paths = match lampo_infra_store::paths::resolve_lampo_paths() {
-        Ok(paths) => paths,
+    // Only the data root: the shim never needs the config root.
+    let data_root = match lampo_infra_store::paths::resolve_data_root() {
+        Ok(root) => root,
         Err(e) => return shim::fail(e),
     };
+    let inherited = InheritedEnv::from_process();
     let request = ShimRequest {
         exe: shim::own_name(&argv0),
         args: tool_args,
         cwd: std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default(),
-        explicit_site: std::env::var("LAMPO_PROJECT").ok().filter(|v| !v.trim().is_empty()),
+        inherited_site: inherited.site,
+        inherited_root: inherited.root,
     };
-    let index = lampo_infra_store::JsonShimIndex::new(paths.shim_index_file());
+    let index = lampo_infra_store::JsonShimIndex::new(LampoPaths::shim_index_file_in(&data_root));
     let tools = lampo_domain::shim::tools::all();
-    match shim::plan(&request, &tools, &index, Arc::new(lampo_infra_store::FsGitInspector)) {
-        Ok(invocation) => shim::launch(&invocation),
+    let facts = ShimFacts { git: Arc::new(lampo_infra_store::FsGitInspector), canonicalizer: Arc::new(lampo_infra_store::FsPathCanonicalizer) };
+    match shim::plan(&request, &tools, &index, facts) {
+        Ok(planned) => {
+            if let Some(notice) = planned.notice.filter(|_| !inherited.quiet) {
+                shim::note(&notice);
+            }
+            shim::launch(&planned.invocation)
+        }
         Err(reason) => shim::fail(reason),
     }
 }
