@@ -2,19 +2,24 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import type { AppError, ScaffoldProjectRequest, TaskOutcome } from '../api/index.js';
-import { ScaffoldSession, scaffoldViewOf, type FinishedTask, type TaskEvents } from './scaffoldSession.ts';
+import { ScaffoldSession, scaffoldViewOf, type FinishedTask, type SessionTasks } from './scaffoldSession.ts';
 
-/** A tasks store reduced to its finished events, fired by hand. */
+/** A tasks store reduced to its finished events, fired by hand, and the tasks it is asked to keep. */
 function fakeTasks() {
 	const listeners = new Set<(task: FinishedTask) => void>();
-	const events: TaskEvents = {
+	const retained = new Set<string>();
+	const events: SessionTasks = {
 		onFinished(listener) {
 			listeners.add(listener);
 			return () => void listeners.delete(listener);
+		},
+		retain(taskId) {
+			retained.add(taskId);
+			return () => void retained.delete(taskId);
 		}
 	};
 	const finish = (taskId: string, outcome: TaskOutcome) => listeners.forEach((l) => l({ taskId, outcome }));
-	return { events, finish, listeners };
+	return { events, finish, listeners, retained };
 }
 
 const CLONE: ScaffoldProjectRequest = { parentDir: 'C:\\Dev', folderName: 'shop', source: { kind: 'git-clone', url: 'https://example.test/shop.git', branch: null } };
@@ -120,4 +125,24 @@ test('the step shown for a resumed task follows its outcome', () => {
 	assert.deepEqual(scaffoldViewOf(SUCCEEDED), { phase: 'done', cancelled: false, error: null });
 	assert.deepEqual(scaffoldViewOf({ status: 'cancelled' }), { phase: 'form', cancelled: true, error: null });
 	assert.deepEqual(scaffoldViewOf({ status: 'failed', error }), { phase: 'failed', cancelled: false, error });
+});
+
+test('the task of a started setup is kept until the folder is registered', async () => {
+	const { session, tasks } = await startedSession();
+	session.began(CLONE, 'task-1');
+
+	tasks.finish('task-1', SUCCEEDED);
+	assert.deepEqual([...tasks.retained], ['task-1'], 'a later visit resumes it');
+
+	session.registered();
+	assert.equal(tasks.retained.size, 0);
+});
+
+test('a newer setup lets the store forget the earlier task', async () => {
+	const { session, tasks } = await startedSession();
+	session.began(CLONE, 'task-1');
+
+	session.began(CLONE, 'task-2');
+
+	assert.deepEqual([...tasks.retained], ['task-2']);
 });

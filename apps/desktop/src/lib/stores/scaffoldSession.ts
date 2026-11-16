@@ -30,14 +30,18 @@ export interface FinishedTask {
 	outcome: TaskOutcome | null;
 }
 
-/** Where the session hears about finished tasks (the tasks store). */
-export interface TaskEvents {
+/** The part of the tasks store the session uses: finished events, and keeping its task. */
+export interface SessionTasks {
 	onFinished(listener: (task: FinishedTask) => void): () => void;
+	/** Keeps the task in the store until the returned function is called. */
+	retain(taskId: string): () => void;
 }
 
 interface Pending {
 	request: ScaffoldProjectRequest;
 	taskId: string;
+	/** Lets the store forget the task once there is nothing left to resume. */
+	release: () => void;
 }
 
 /**
@@ -51,10 +55,10 @@ export class ScaffoldSession {
 	/** Create screens on display: they handle the end of the task themselves. */
 	#viewers = 0;
 
-	readonly #tasks: TaskEvents;
+	readonly #tasks: SessionTasks;
 	readonly #onReadyElsewhere: () => void;
 
-	constructor(tasks: TaskEvents, onReadyElsewhere: () => void) {
+	constructor(tasks: SessionTasks, onReadyElsewhere: () => void) {
 		this.#tasks = tasks;
 		this.#onReadyElsewhere = onReadyElsewhere;
 	}
@@ -64,13 +68,15 @@ export class ScaffoldSession {
 		return this.#pending?.request ?? null;
 	}
 
-	/** A setup task was started (it replaces any earlier one). */
+	/** A setup task was started (it replaces any earlier one); its task stays resumable until registered. */
 	began(request: ScaffoldProjectRequest, taskId: string): void {
-		this.#pending = { request, taskId };
+		this.#pending?.release();
+		this.#pending = { request, taskId, release: this.#tasks.retain(taskId) };
 	}
 
 	/** The folder became a project: nothing left to resume. */
 	registered(): void {
+		this.#pending?.release();
 		this.#pending = null;
 	}
 
