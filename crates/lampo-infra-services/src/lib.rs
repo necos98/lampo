@@ -9,6 +9,7 @@
 //! | [`MysqlRunner`]              | `ServiceRunner` for `ServiceKind::Mysql`     |
 //! | [`RedisRunner`]              | `ServiceRunner` for `ServiceKind::Redis`     |
 //! | [`MailpitRunner`]            | `ServiceRunner` for `ServiceKind::MAILPIT`   |
+//! | [`ServiceHost`]              | what every `ServiceRunner` shares; a runner describes its service with a [`ServiceDriver`] (also used by `lampo-infra-web` for Apache) |
 //! | [`TcpPortProbe`]             | `PortProbe`                                  |
 //! | [`FileLogReader`]            | `LogFileReader`                              |
 //! | [`SizeLogRotator`]           | `LogRotator`                                 |
@@ -21,7 +22,7 @@
 //! | [`WindowsExternalAppLauncher`] | `ExternalAppLauncher` (PowerShell, Explorer, VS Code) |
 //!
 //! Internal modules: `process` (process creation inside the job, IOCP stdio pipes),
-//! `service_host` (what every supervised runner shares; runners only describe their service),
+//! `service_host` (behind [`ServiceHost`]),
 //! `rotating_log` (captured service output, rotated by size while it is written),
 //! `startup_deadline` (when a slow but progressing start gives up), `last_resort` (synchronous
 //! clean MySQL shutdown when the app goes away without the graceful stop),
@@ -64,5 +65,6 @@ pub use mysql::MysqlRunner;
 pub use ports::TcpPortProbe;
 pub use redis::RedisRunner;
 pub use rotating_log::SizeLogRotator;
+pub use service_host::{ServiceDriver, ServiceHost};
 pub use supervisor::JobObjectSupervisor;
 pub use timer::TokioTimer;

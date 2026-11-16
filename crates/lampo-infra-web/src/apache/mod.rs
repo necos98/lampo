@@ -15,10 +15,12 @@
 //!
 //! Responsibilities are split: [`render`] (pure text), [`staging`] (files on disk),
 //! [`validation`] (`httpd -t` via `CommandRunner`), [`config`] (the `WebServerConfigurator`
-//! adapter composing them), [`runner`] + [`signal`] (process control, readiness on every port
+//! adapter composing them), [`runner`] (the `ServiceRunner`: `lampo-infra-services`' shared
+//! `ServiceHost` sequence) + `driver` + [`signal`] (process control, readiness on every port
 //! `listen` reads back from the live `httpd.conf`).
 
 pub mod config;
+mod driver;
 mod listen;
 pub mod render;
 pub mod runner;

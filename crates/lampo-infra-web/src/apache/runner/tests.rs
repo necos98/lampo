@@ -2,12 +2,25 @@
 //! listened port", checked on tokio's paused clock where timing matters.
 
 use std::collections::HashSet;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
+
+use lampo_domain::PortError;
+use lampo_domain::events::DomainEvent;
+use lampo_domain::ports::{ChildId, CommandSpec, ProcessObserver, SpawnedChild};
+use lampo_domain::service::{LogStream, ServiceState};
 
 use super::*;
+use crate::apache::driver::START_TIMEOUT;
+use crate::apache::signal::HttpdSignal;
 
-const SHARED_PORT: u16 = 8080;
 const LOOPBACK_PORT: u16 = 8101;
+
+/// A port nobody listens on: the host checks the real TCP table before spawning.
+fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+}
 
 /// Owns every port while alive, except those in `unowned` (another server holds them, or
 /// httpd has not bound them yet).
@@ -90,6 +103,11 @@ impl Fixture {
     fn write_conf(&self, text: &str) {
         std::fs::write(self.launch.config_dir.join("httpd.conf"), text).unwrap();
     }
+
+    /// A configuration listening on the shared port and on a vhost's dedicated port.
+    fn listen_on_the_loopback_port_too(&self) {
+        self.write_conf(&format!("Listen 127.0.0.1:{}\nListen 127.0.0.1:{LOOPBACK_PORT}\n", self.launch.port));
+    }
 }
 
 /// A fake Apache install whose configuration listens on the shared port only.
@@ -102,8 +120,9 @@ fn fixture() -> Fixture {
     }
     let config_dir = dir.path().join("generated").join("apache");
     std::fs::create_dir_all(&config_dir).unwrap();
-    std::fs::write(config_dir.join("httpd.conf"), format!("Listen 127.0.0.1:{SHARED_PORT}\nListen [::1]:{SHARED_PORT}\n")).unwrap();
-    let launch = ServiceLaunch { service: ServiceId::apache(), install_dir: install, port: SHARED_PORT, ui_port: None, config_dir, data_dir: None, log_dir: dir.path().join("logs") };
+    let port = free_port();
+    std::fs::write(config_dir.join("httpd.conf"), format!("Listen 127.0.0.1:{port}\nListen [::1]:{port}\n")).unwrap();
+    let launch = ServiceLaunch { service: ServiceId::apache(), install_dir: install, port, ui_port: None, config_dir, data_dir: None, log_dir: dir.path().join("logs") };
     let supervisor = Arc::new(FakeSupervisor::default());
     let events = Arc::new(Events::default());
     let signals = Arc::new(Signals::default());
@@ -190,7 +209,7 @@ async fn missing_rotatelogs_is_reported_before_spawning() {
 async fn bind_failure_maps_to_port_in_use() {
     let f = fixture();
     // httpd never gets the port, and dies complaining about the bind.
-    f.supervisor.disown(SHARED_PORT);
+    f.supervisor.disown(f.launch.port);
     let launch = f.launch.clone();
     let sup = f.supervisor.clone();
     let killer = tokio::spawn(async move {
@@ -207,14 +226,14 @@ async fn bind_failure_maps_to_port_in_use() {
     });
     let err = f.runner.start(&launch).await.unwrap_err();
     killer.await.unwrap();
-    assert_eq!(err, PortError::PortInUse { port: SHARED_PORT, owner: None });
+    assert_eq!(err, PortError::PortInUse { port: f.launch.port, owner: None });
     assert_eq!(f.runner.status(&ServiceId::apache()).state, ServiceState::Failed);
 }
 
 #[tokio::test(start_paused = true)]
 async fn start_waits_until_httpd_listens_on_every_configured_port() {
     let f = fixture();
-    f.write_conf(&format!("Listen 127.0.0.1:{SHARED_PORT}\nListen 127.0.0.1:{LOOPBACK_PORT}\n"));
+    f.listen_on_the_loopback_port_too();
     f.supervisor.own_after(LOOPBACK_PORT, Duration::from_secs(3));
     let started = tokio::time::Instant::now();
     f.runner.start(&f.launch).await.unwrap();
@@ -225,7 +244,7 @@ async fn start_waits_until_httpd_listens_on_every_configured_port() {
 #[tokio::test(start_paused = true)]
 async fn a_port_held_by_another_server_fails_the_start() {
     let f = fixture();
-    f.write_conf(&format!("Listen 127.0.0.1:{SHARED_PORT}\nListen 127.0.0.1:{LOOPBACK_PORT}\n"));
+    f.listen_on_the_loopback_port_too();
     // Something answers on the dedicated port, but it is not httpd.
     f.supervisor.disown(LOOPBACK_PORT);
     let err = f.runner.start(&f.launch).await.unwrap_err();
@@ -243,7 +262,7 @@ async fn graceful_restart_is_ready_as_soon_as_every_port_is_httpds() {
     assert!(restarted.elapsed() < Duration::from_millis(500), "no fixed settle time: {:?}", restarted.elapsed());
 
     // The new configuration adds a dedicated port: the restart waits for httpd to bind it.
-    f.write_conf(&format!("Listen 127.0.0.1:{SHARED_PORT}\nListen 127.0.0.1:{LOOPBACK_PORT}\n"));
+    f.listen_on_the_loopback_port_too();
     f.supervisor.own_after(LOOPBACK_PORT, Duration::from_secs(2));
     let restarted = tokio::time::Instant::now();
     f.runner.restart(&f.launch).await.unwrap();
@@ -256,10 +275,23 @@ async fn graceful_restart_is_ready_as_soon_as_every_port_is_httpds() {
 async fn a_restart_that_never_binds_a_new_port_falls_back_to_stop_and_start() {
     let f = fixture();
     f.runner.start(&f.launch).await.unwrap();
-    f.write_conf(&format!("Listen 127.0.0.1:{SHARED_PORT}\nListen 127.0.0.1:{LOOPBACK_PORT}\n"));
+    f.listen_on_the_loopback_port_too();
     f.supervisor.own_after(LOOPBACK_PORT, START_TIMEOUT + Duration::from_secs(5));
     f.runner.restart(&f.launch).await.unwrap();
     assert_eq!(f.supervisor.specs.lock().unwrap().len(), 2, "a fresh httpd after the failed graceful restart");
     assert_eq!(f.signals.0.lock().unwrap().as_slice(), &[(1000, HttpdSignal::Restart), (1000, HttpdSignal::Shutdown)]);
     assert_eq!(f.runner.status(&ServiceId::apache()).state, ServiceState::Running);
+}
+
+#[tokio::test]
+async fn a_new_shared_port_restarts_httpd_from_scratch() {
+    let f = fixture();
+    f.runner.start(&f.launch).await.unwrap();
+    let moved = ServiceLaunch { port: free_port(), ..f.launch.clone() };
+    f.write_conf(&format!("Listen 127.0.0.1:{}\n", moved.port));
+    f.runner.restart(&moved).await.unwrap();
+    assert_eq!(f.signals.0.lock().unwrap().as_slice(), &[(1000, HttpdSignal::Shutdown)], "no graceful restart onto another port");
+    assert_eq!(f.supervisor.specs.lock().unwrap().len(), 2);
+    let status = f.runner.status(&ServiceId::apache());
+    assert_eq!((status.state, status.port), (ServiceState::Running, Some(moved.port)));
 }

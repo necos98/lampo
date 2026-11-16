@@ -1,6 +1,6 @@
-//! [`ServiceHost`] start/stop sequence against a scripted supervisor and driver, on tokio's
+//! [`ServiceHost`] start/stop/restart sequence against a scripted supervisor and driver, on tokio's
 //! paused clock: slow starts that keep making progress, starts that give up, a stop arriving
-//! while a start waits.
+//! while a start waits, restarts in place or through stop and start.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -61,6 +61,8 @@ impl ProcessSupervisor for FakeSupervisor {
 struct FakeDriver {
     t0: Instant,
     grows_for: Option<Duration>,
+    /// Whether `reload` applies a new configuration in place.
+    reloads: bool,
     calls: Calls,
 }
 
@@ -94,6 +96,12 @@ impl ServiceDriver for FakeDriver {
         true
     }
 
+    async fn reload(&self, _launch: &ServiceLaunch, pid: u32) -> bool {
+        assert_eq!(pid, PID);
+        self.calls.lock().unwrap().push("reload");
+        self.reloads
+    }
+
     async fn request_shutdown(&self, _launch: &ServiceLaunch, pid: u32) {
         assert_eq!(pid, PID);
         self.calls.lock().unwrap().push("request_shutdown");
@@ -119,6 +127,7 @@ struct Fixture {
     _dir: tempfile::TempDir,
     launch: ServiceLaunch,
     host: ServiceHost,
+    supervisor: Arc<FakeSupervisor>,
     driver: FakeDriver,
     statuses: Arc<Statuses>,
     calls: Calls,
@@ -141,8 +150,8 @@ fn fixture(grows_for: Option<Duration>, listen_after: Option<Duration>) -> Fixtu
     let (t0, calls) = (Instant::now(), Calls::default());
     let supervisor = Arc::new(FakeSupervisor { t0, listen_after, alive: AtomicBool::new(false), observer: Mutex::default(), calls: calls.clone() });
     let statuses = Arc::new(Statuses::default());
-    let host = ServiceHost::new(supervisor, statuses.clone());
-    Fixture { _dir: dir, launch, host, driver: FakeDriver { t0, grows_for, calls: calls.clone() }, statuses, calls, t0 }
+    let host = ServiceHost::new(supervisor.clone(), statuses.clone());
+    Fixture { _dir: dir, launch, host, supervisor, driver: FakeDriver { t0, grows_for, reloads: false, calls: calls.clone() }, statuses, calls, t0 }
 }
 
 impl Fixture {
@@ -152,6 +161,11 @@ impl Fixture {
 
     fn state(&self) -> ServiceState {
         self.host.status(&self.launch.service).state
+    }
+
+    /// The observer of the last spawned process.
+    fn supervisor_observer(&self) -> Arc<dyn ProcessObserver> {
+        self.supervisor.observer.lock().unwrap().clone().expect("spawned")
     }
 }
 
@@ -199,5 +213,43 @@ async fn a_stop_during_a_slow_start_shuts_the_server_down_cleanly() {
     stopped.unwrap();
     assert!(f.t0.elapsed() < Duration::from_secs(31), "the stop did not wait for the start to time out");
     assert_eq!(f.calls(), ["request_shutdown", "terminate"]);
+    assert_eq!(f.state(), ServiceState::Stopped);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_restart_reloads_a_running_server_in_place_when_the_driver_can() {
+    let mut f = fixture(None, Some(Duration::ZERO));
+    f.driver.reloads = true;
+    f.host.start(&f.driver, &f.launch).await.unwrap();
+    f.host.restart(&f.driver, &f.launch).await.unwrap();
+    assert_eq!(f.calls(), ["reload"], "no stop, no new process");
+    assert_eq!(f.state(), ServiceState::Running);
+    assert_eq!(f.host.status(&f.launch.service).pid, Some(PID));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_restart_without_reload_stops_and_starts() {
+    let f = fixture(None, Some(Duration::ZERO));
+    f.host.start(&f.driver, &f.launch).await.unwrap();
+    f.host.restart(&f.driver, &f.launch).await.unwrap();
+    assert_eq!(f.calls(), ["reload", "request_shutdown", "terminate"]);
+    assert_eq!(f.state(), ServiceState::Running);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_restart_of_a_stopped_server_starts_it() {
+    let f = fixture(None, Some(Duration::ZERO));
+    f.host.restart(&f.driver, &f.launch).await.unwrap();
+    assert!(f.calls().is_empty(), "nothing to reload or stop");
+    assert_eq!(f.state(), ServiceState::Running);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_exit_reported_after_a_stop_is_not_a_failure() {
+    let f = fixture(None, Some(Duration::ZERO));
+    f.host.start(&f.driver, &f.launch).await.unwrap();
+    let observer = f.supervisor_observer();
+    f.host.stop(&f.driver, &f.launch.service).await.unwrap();
+    observer.on_exit(Some(0));
     assert_eq!(f.state(), ServiceState::Stopped);
 }

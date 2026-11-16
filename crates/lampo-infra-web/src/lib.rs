@@ -6,7 +6,7 @@
 //! | Adapter                  | Ports                                   |
 //! |--------------------------|-----------------------------------------|
 //! | [`ApacheConfigurator`]   | `WebServerConfigurator` (templates + `httpd -t` via `CommandRunner`) |
-//! | [`ApacheRunner`]         | `ServiceRunner` for `ServiceKind::APACHE` (via `ProcessSupervisor`)  |
+//! | [`ApacheRunner`]         | `ServiceRunner` for `ServiceKind::APACHE` (`lampo_infra_services::ServiceHost` with an httpd driver, via `ProcessSupervisor`) |
 //! | [`PhpIniRenderer`]       | `PhpIniWriter`                          |
 //! | [`ElevatedHostsFile`]    | `HostsFileReader`, `HostsFileWriter` (UAC via `lampo-hosts-helper.exe`) |
 //!

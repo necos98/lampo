@@ -2253,6 +2253,7 @@ dependencies = [
  "async-trait",
  "lampo-domain",
  "lampo-infra-fs",
+ "lampo-infra-services",
  "minijinja",
  "serde",
  "serde_json",
