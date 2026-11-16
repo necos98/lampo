@@ -400,10 +400,9 @@ export const it = {
 		source: 'Sorgente',
 		pickSource: 'Scegli un log',
 		groups: { services: 'Servizi', error: 'Errori dei siti', access: 'Accessi dei siti', php: 'PHP dei siti' },
-		pause: 'Pausa',
-		resume: 'Riprendi',
 		clear: 'Svuota',
-		follow: 'Segui in coda',
+		follow: 'Segui',
+		newLines: (n: number) => `Nuove righe (${n})`,
 		wrap: 'A capo',
 		filter: 'Filtra le righe…',
 		empty: 'Il log è vuoto.',
@@ -412,7 +411,6 @@ export const it = {
 		noSources: 'Nessuna sorgente di log disponibile.',
 		missingFile: 'file non ancora creato',
 		lines: (shown: number, total: number) => (shown === total ? `${total} righe` : `${shown} di ${total} righe`),
-		livePaused: 'In pausa',
 		live: 'In diretta'
 	},
 	settings: {

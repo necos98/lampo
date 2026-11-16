@@ -6,6 +6,7 @@ Tauri 2 (`src-tauri/`, the desktop composition root).
 ```powershell
 pnpm install
 pnpm check        # svelte-check
+pnpm test         # node --test: scripts/*.test.mjs and src/**/*.test.ts
 pnpm build        # static build into build/ (needed before `cargo check` of src-tauri)
 pnpm tauri dev    # run the app (Tauri CLI is a dev dependency)
 ```
@@ -16,3 +17,7 @@ pnpm tauri dev    # run the app (Tauri CLI is a dev dependency)
 
 SvelteKit 3 note: config lives in `vite.config.ts` (no `svelte.config.js`), and the lib alias is
 `#lib` (package.json `imports`), with explicit `.js` extensions in imports.
+
+Unit tests (`*.test.ts`) run on Node's native TypeScript support, so the modules they cover must be
+plain TypeScript without runes or runtime imports, and the tests import them with a `.ts`
+extension (e.g. `src/lib/logs/`).
