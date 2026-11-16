@@ -10,6 +10,7 @@ import {
 	type TestingFramework
 } from '../api/index.js';
 import type { Backend } from '../backend/ports.js';
+import { effectiveAddressing } from '../projects/addressing.js';
 import type { ProjectsStore } from './projects.svelte.js';
 import { scaffoldViewOf, type ScaffoldPhase, type ScaffoldSession } from './scaffoldSession.js';
 import { scaffoldTaskKey, type TaskState, type TasksStore } from './tasks.svelte.js';
@@ -71,9 +72,6 @@ export class CreateProjectFlow {
 	presetId = $state(GENERIC_PRESET);
 	phpVersion = $state<string | null>(null);
 	name = $state('');
-	/** Same default as the CLI: `.localhost` + a loopback port, never a UAC prompt. The hosts-file
-	 * name stays available as an explicit option. */
-	addressing = $state<Addressing>('no-elevation');
 	creating = $state(false);
 
 	// --- new folder (git / Laravel) ---
@@ -98,17 +96,32 @@ export class CreateProjectFlow {
 	readonly #projects: ProjectsStore;
 	readonly #tasks: TasksStore;
 	readonly #session: ScaffoldSession;
+	readonly #defaultAddressing: () => Addressing | undefined;
+	/** The mode picked on this screen; `null` follows the global default. */
+	#chosenAddressing = $state<Addressing | null>(null);
 	#generation = 0;
 	/** The folder name follows the repository URL until the user types one. */
 	#folderNameTouched = false;
 	#stopListening: (() => void) | null = null;
 	#detach: (() => void) | null = null;
 
-	constructor(backend: Backend, projects: ProjectsStore, tasks: TasksStore, session: ScaffoldSession) {
+	/** `defaultAddressing` reads the `default_addressing` setting (`undefined` while not loaded). */
+	constructor(backend: Backend, projects: ProjectsStore, tasks: TasksStore, session: ScaffoldSession, defaultAddressing: () => Addressing | undefined) {
 		this.#backend = backend;
 		this.#projects = projects;
 		this.#tasks = tasks;
 		this.#session = session;
+		this.#defaultAddressing = defaultAddressing;
+	}
+
+	/** Same rule as the CLI: the user's choice, else the `default_addressing` setting. Settings
+	 * that load (or change) later still preselect, until the user picks a mode. */
+	get addressing(): Addressing {
+		return effectiveAddressing(this.#chosenAddressing, this.#defaultAddressing());
+	}
+
+	set addressing(mode: Addressing) {
+		this.#chosenAddressing = mode;
 	}
 
 	get canCreate(): boolean {

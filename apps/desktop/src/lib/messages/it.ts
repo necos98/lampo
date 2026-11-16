@@ -2,7 +2,7 @@
  * Italian UI strings. All user-facing text lives here (one module per language) so i18n can be
  * added later by adding another file with the same shape.
  */
-import type { CheckStatus, ErrorCode, ProgressStage, ServiceState, StepOutcome } from '../api/types.js';
+import type { Addressing, CheckStatus, ErrorCode, ProgressStage, ServiceState, StepOutcome } from '../api/types.js';
 import type { SettingsSectionId, SettingsSectionKind } from '../settings/sections.js';
 
 export const it = {
@@ -83,6 +83,24 @@ export const it = {
 		applying: 'Applicazione…',
 		applied: 'File hosts aggiornato.',
 		savedPending: 'Salvato. Il file hosts va aggiornato: usa «Applica modifiche».'
+	},
+	/** The ways a new project gets its addresses (`Addressing`), shared by the create page and Settings. */
+	addressing: {
+		modes: {
+			'no-elevation': {
+				title: '.localhost e porta locale',
+				description: 'Consigliato. Indirizzi come shop.localhost e 127.0.0.1:8101, che funzionano senza toccare il file hosts.'
+			},
+			standard: {
+				title: 'Nome host e .localhost',
+				description: 'Il nome host (shop.test) nel file hosts, più l’indirizzo .localhost.'
+			},
+			'hosts-only': {
+				title: 'Solo nome host',
+				description: 'Soltanto il nome host (shop.test) nel file hosts, senza indirizzi .localhost né porte locali.'
+			}
+		} satisfies Record<Addressing, { title: string; description: string }>,
+		needsAdmin: 'Richiede il permesso di amministratore'
 	},
 	projects: {
 		title: 'Progetti',
@@ -272,8 +290,7 @@ export const it = {
 		phpDefault: 'Predefinita',
 		name: 'Nome del progetto',
 		addressing: 'Indirizzo',
-		addressingStandard: 'Anche un nome host nel file hosts (richiede il permesso di amministratore)',
-		addressingNoElevation: '.localhost e porta locale (consigliato, nessun permesso di amministratore)',
+		addressingHelp: 'Preselezionato dalle Impostazioni. Gli indirizzi si possono cambiare anche dopo, nel progetto.',
 		alreadyRegistered: (id: string) => `Questa cartella è già il progetto «${id}».`,
 		openExisting: 'Apri il progetto',
 		confirm: 'Crea progetto',
@@ -492,6 +509,7 @@ export const it = {
 		defaultPhpHelp: 'Usata fuori dai progetti (shim php).',
 		tld: 'Dominio dei nuovi progetti',
 		tldHelp: 'Estensione dei nomi host, per esempio shop.test.',
+		defaultAddressing: 'Indirizzi dei nuovi progetti',
 		ports: 'Porte',
 		apachePort: 'Porta di Apache',
 		serviceInstances: 'Servizi',

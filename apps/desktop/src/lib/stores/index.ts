@@ -55,7 +55,7 @@ export const unsavedChanges = new UnsavedChanges();
 
 /** Per-visit objects are created through factories so they get the shared backend and stores. */
 export const createLogSession = () => new LogSession(backend);
-export const createProjectFlow = () => new CreateProjectFlow(backend, projects, tasks, scaffoldSession);
+export const createProjectFlow = () => new CreateProjectFlow(backend, projects, tasks, scaffoldSession, () => settings.value.data?.defaultAddressing);
 
 interface Startable {
 	start(): Promise<() => void>;

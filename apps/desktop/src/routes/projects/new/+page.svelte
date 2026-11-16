@@ -8,7 +8,7 @@
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import { onMount, tick } from 'svelte';
 
-	import type { Addressing, StarterKit, TestingFramework } from '#lib/api/index.js';
+	import type { StarterKit, TestingFramework } from '#lib/api/index.js';
 
 	import { goto } from '$app/navigation';
 
@@ -18,6 +18,7 @@
 	import SelectField from '#lib/components/common/SelectField.svelte';
 	import PathInput from '#lib/components/common/PathInput.svelte';
 	import TaskProgress from '#lib/components/common/TaskProgress.svelte';
+	import AddressingChoice from '#lib/components/projects/AddressingChoice.svelte';
 	import PhpVersionSelect from '#lib/components/projects/PhpVersionSelect.svelte';
 	import { Badge } from '#lib/components/ui/badge/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
@@ -41,10 +42,6 @@
 	});
 
 	const presetOptions = $derived((presets.list.data ?? []).map((p) => ({ value: p.id, label: presets.label(p).name })));
-	const addressingOptions = [
-		{ value: 'no-elevation', label: m.create.addressingNoElevation },
-		{ value: 'standard', label: m.create.addressingStandard }
-	];
 	const sourceCards: { id: ProjectSource; icon: typeof FolderOpen }[] = [
 		{ id: 'existing', icon: FolderOpen },
 		{ id: 'git', icon: GitBranch },
@@ -342,11 +339,7 @@
 						<PhpVersionSelect {...field} bind:value={flow.phpVersion} allowDefault />
 					{/snippet}
 				</FormRow>
-				<FormRow label={m.create.addressing}>
-					{#snippet children(field)}
-						<SelectField {...field} value={flow.addressing} options={addressingOptions} class="w-full max-w-md" onchange={(v) => (flow.addressing = v as Addressing)} />
-					{/snippet}
-				</FormRow>
+				<AddressingChoice legend={m.create.addressing} help={m.create.addressingHelp} value={flow.addressing} disabled={flow.creating} onchange={(mode) => (flow.addressing = mode)} />
 			</Card.Content>
 			<Card.Footer class="justify-end">
 				<Button type="submit" size="sm" disabled={!flow.canCreate}>{flow.creating ? m.create.creating : m.create.confirm}</Button>
