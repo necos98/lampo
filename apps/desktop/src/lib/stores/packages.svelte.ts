@@ -4,6 +4,7 @@ import { messages as m } from '../messages/index.js';
 import { buildRows, installTaskKey, uninstallTaskKey, type PackageRow } from '../packages/grouping.js';
 import { describeError } from '../services/errors.js';
 import type { Notifier } from '../services/notifier.js';
+import { InFlight } from './inFlight.js';
 import { Resource } from './resource.svelte.js';
 import type { CommandRunner, Outcome } from './runner.js';
 import type { TasksStore } from './tasks.svelte.js';
@@ -77,7 +78,8 @@ export class PackagesStore {
 	taskKey = installTaskKey;
 
 	/** Task keys whose start command is in flight: the task is not tracked yet, but a second click must not start another. */
-	#starting = $state<Record<string, true>>({});
+	#startingKeys = $state<Record<string, true>>({});
+	readonly #starting = new InFlight(this.#startingKeys);
 
 	/** True from the click that starts the install until its task finishes. */
 	isInstalling(row: Pick<PackageRow, 'kind' | 'series' | 'phpVersion'>): boolean {
@@ -101,19 +103,16 @@ export class PackagesStore {
 	}
 
 	#isBusy(key: string): boolean {
-		return key in this.#starting || this.#tasks.isRunning(key);
+		return this.#starting.has(key) || this.#tasks.isRunning(key);
 	}
 
-	async #startTask(kind: 'install' | 'uninstall', key: string, op: () => Promise<TaskStarted>): Promise<Outcome<TaskStarted> | null> {
-		if (this.#isBusy(key)) return null;
-		this.#starting[key] = true;
-		try {
+	#startTask(kind: 'install' | 'uninstall', key: string, op: () => Promise<TaskStarted>): Promise<Outcome<TaskStarted> | null> {
+		if (this.#tasks.isRunning(key)) return Promise.resolve(null);
+		return this.#starting.run(key, async () => {
 			const result = await this.#runner.run(op);
 			if (result.ok) this.#tasks.track(result.value.taskId, { kind, key });
 			return result;
-		} finally {
-			delete this.#starting[key];
-		}
+		});
 	}
 
 	#announceUninstall(outcome: TaskOutcome | null): void {
