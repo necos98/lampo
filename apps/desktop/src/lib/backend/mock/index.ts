@@ -7,6 +7,7 @@ import type { AppError } from '../../api/types.js';
 import type * as T from '../../api/types.js';
 import type { Backend, Commands, Platform, Updater } from '../ports.js';
 import { MockEmitter } from './emitter.js';
+import { checkEnvVars } from './envVars.js';
 import { MockLogs } from './logs.js';
 import { connection, mysqlOf, packageKey, seedCatalog, seedPresets, seedProjects, seedWorktrees, seriesOf } from './seed.js';
 
@@ -340,6 +341,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 			await sleep(350);
 			const cur = find(r.projectId);
 			if (r.environment.apacheDirectives.includes('!!')) fail('config-rejected', 'httpd -t failed', { output: 'AH00526: Syntax error on line 3 of vhost.conf:\nInvalid command \'!!\', perhaps misspelled or defined by a module not included in the server configuration' });
+			const refusedEnvVars = checkEnvVars(r.environment.envVars);
+			if (refusedEnvVars) fail('validation', refusedEnvVars.message, refusedEnvVars.details);
 			const next = rebuild({ ...cur, name: r.name, addresses: r.addresses, environment: r.environment, databaseName: r.databaseName, tls: r.tls });
 			if (JSON.stringify(cur.addresses) !== JSON.stringify(next.addresses) && hasHostname(next)) hostsInSync = false;
 			const out = replace(next);

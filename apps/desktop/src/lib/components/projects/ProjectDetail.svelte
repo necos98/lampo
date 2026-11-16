@@ -19,6 +19,7 @@
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import * as Tabs from '#lib/components/ui/tabs/index.js';
 	import { messages as m } from '#lib/messages/index.js';
+	import { envVarRefusal } from '#lib/projects/envVarRefusal.js';
 	import { refusedDirectivesReason } from '#lib/services/errors.js';
 	import { projects, unsavedChanges } from '#lib/stores/index.js';
 	import { ProjectDraft } from '#lib/stores/projectDraft.svelte.js';
@@ -29,6 +30,7 @@
 	import AddressesSection from './sections/AddressesSection.svelte';
 	import ApacheSection from './sections/ApacheSection.svelte';
 	import DataSection from './sections/DataSection.svelte';
+	import EnvVarsSection from './sections/EnvVarsSection.svelte';
 	import GeneralSection from './sections/GeneralSection.svelte';
 	import PhpSection from './sections/PhpSection.svelte';
 
@@ -76,6 +78,7 @@
 		else {
 			saveError = result.error;
 			if (result.error.code === 'config-rejected' || refusedDirectivesReason(result.error) !== null) tab = 'apache';
+			else if (envVarRefusal(result.error) !== null) tab = 'env';
 		}
 	}
 
@@ -124,6 +127,7 @@
 		<Tabs.Trigger value="php">{t.tabs.php}</Tabs.Trigger>
 		<Tabs.Trigger value="addresses">{t.tabs.addresses}</Tabs.Trigger>
 		<Tabs.Trigger value="data">{t.tabs.data}</Tabs.Trigger>
+		<Tabs.Trigger value="env">{t.tabs.envVars}</Tabs.Trigger>
 		<Tabs.Trigger value="apache">{t.tabs.apache}</Tabs.Trigger>
 		<Tabs.Trigger value="worktrees">{t.tabs.worktrees}{project.worktrees.length ? ` (${project.worktrees.length})` : ''}</Tabs.Trigger>
 	</Tabs.List>
@@ -137,6 +141,7 @@
 		<Tabs.Content value="php"><PhpSection {draft} /></Tabs.Content>
 		<Tabs.Content value="addresses"><AddressesSection {draft} /></Tabs.Content>
 		<Tabs.Content value="data"><DataSection {draft} {project} /></Tabs.Content>
+		<Tabs.Content value="env"><EnvVarsSection {draft} rejected={saveError} /></Tabs.Content>
 		<Tabs.Content value="apache"><ApacheSection {draft} rejected={saveError} /></Tabs.Content>
 		<Tabs.Content value="worktrees"><WorktreePanel projectId={project.id} /></Tabs.Content>
 	</div>

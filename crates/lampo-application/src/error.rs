@@ -3,7 +3,7 @@
 //! `code` is stable (GUI messages and CLI exit codes are keyed by it); `message` is English,
 //! developer-facing; `details` carries structured extras (e.g. `httpd -t` output).
 
-use lampo_domain::{DomainError, PortError};
+use lampo_domain::{DomainError, PortError, env_var};
 use serde::{Deserialize, Serialize};
 
 /// Stable error categories. Adding a variant is a contract change: regenerate the TS bindings
@@ -56,7 +56,9 @@ pub struct AppError {
     /// output) for `config-rejected` and a failed `process-failed` step, plus `excludedSites` when
     /// some sites were left out; `{ port, owner }` for `port-in-use`; `{ entity, id }` for
     /// `not-found`; `{ package, php? }`, `{ tool }` or `{ redistributable }` for
-    /// `package-missing`; `{ package, usedBy }` for a package still in use (`conflict`).
+    /// `package-missing`; `{ package, usedBy }` for a package still in use (`conflict`);
+    /// `{ field: "envVars", reason, name?, part?, reserved? }` for a refused environment variable
+    /// (`validation`; never its value).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(type = "unknown"))]
     pub details: Option<serde_json::Value>,
@@ -104,10 +106,20 @@ impl From<DomainError> for AppError {
         match e {
             // The GUI shows the reason next to the directives editor.
             DomainError::InvalidApacheDirectives(reason) => error.with_details(serde_json::json!({ "field": APACHE_DIRECTIVES_FIELD, "reason": reason })),
+            // The GUI shows it on the variable's row: the name and which part, never the value.
+            DomainError::InvalidEnvVarName { name, reason } => {
+                let reserved = env_var::is_reserved(&name);
+                error.with_details(serde_json::json!({ "field": ENV_VARS_FIELD, "name": name, "part": "name", "reserved": reserved, "reason": reason }))
+            }
+            DomainError::InvalidEnvVarValue { name, reason } => error.with_details(serde_json::json!({ "field": ENV_VARS_FIELD, "name": name, "part": "value", "reason": reason })),
+            DomainError::InvalidEnvVars(reason) => error.with_details(serde_json::json!({ "field": ENV_VARS_FIELD, "reason": reason })),
             _ => error,
         }
     }
 }
+
+/// `details.field` of a validation error about the project's environment variables.
+pub const ENV_VARS_FIELD: &str = "envVars";
 
 /// `details.field` of a validation error about the project's custom Apache directives.
 pub const APACHE_DIRECTIVES_FIELD: &str = "apacheDirectives";
@@ -180,5 +192,45 @@ mod tests {
         let details = e.details.unwrap();
         assert_eq!(details["field"], APACHE_DIRECTIVES_FIELD);
         assert!(details["reason"].as_str().unwrap().starts_with("line 1: `Include` is not allowed"), "{details}");
+    }
+
+    fn env_error(pairs: impl IntoIterator<Item = (String, String)>) -> AppError {
+        env_var::ProjectEnvVars::from_pairs(pairs).unwrap_err().into()
+    }
+
+    fn pair(name: &str, value: &str) -> [(String, String); 1] {
+        [(name.to_string(), value.to_string())]
+    }
+
+    #[test]
+    fn refused_environment_variable_names_point_at_their_row() {
+        let e = env_error(pair("lampo_project", "x"));
+        assert_eq!(e.code, ErrorCode::Validation);
+        let details = e.details.unwrap();
+        assert_eq!(details["field"], ENV_VARS_FIELD);
+        assert_eq!(details["name"], "lampo_project");
+        assert_eq!(details["part"], "name");
+        assert_eq!(details["reserved"], true);
+
+        let details = env_error(pair("1BAD", "x")).details.unwrap();
+        assert_eq!(details["part"], "name");
+        assert_eq!(details["reserved"], false);
+    }
+
+    #[test]
+    fn refused_environment_variable_values_are_never_repeated() {
+        let e = env_error(pair("API_KEY", "s3cret${HOME}"));
+        let details = e.details.unwrap();
+        assert_eq!(details["name"], "API_KEY");
+        assert_eq!(details["part"], "value");
+        assert!(!details.to_string().contains("s3cret") && !e.message.contains("s3cret"), "{details}");
+    }
+
+    #[test]
+    fn too_many_environment_variables_name_no_row() {
+        let many = (0..=env_var::ProjectEnvVars::MAX_COUNT).map(|i| (format!("V{i}"), String::new()));
+        let details = env_error(many).details.unwrap();
+        assert_eq!(details["field"], ENV_VARS_FIELD);
+        assert!(details.get("name").is_none(), "{details}");
     }
 }

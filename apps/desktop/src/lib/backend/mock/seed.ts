@@ -66,7 +66,7 @@ function project(id: string, name: string, root: string, host: string, e: T.Proj
 
 export function seedProjects(): T.Project[] {
 	return [
-		project('shop', 'Shop', 'C:\\Dev\\shop', 'shop.test', env({ addons: ['xdebug'], redis: true, mail: true }), { originPreset: 'laravel' }),
+		project('shop', 'Shop', 'C:\\Dev\\shop', 'shop.test', env({ addons: ['xdebug'], redis: true, mail: true, envVars: { APP_ENV: 'local', STRIPE_SECRET: 'sk_test_mock' } }), { originPreset: 'laravel' }),
 		project('blog', 'Blog aziendale', 'C:\\Dev\\blog', 'blog.test', env({ phpVersion: '8.3', publicDir: '', extensions: ['curl', 'mbstring', 'mysqli', 'gd', 'zip'] }), { originPreset: 'wordpress' }),
 		project('crm-legacy', 'CRM legacy', 'C:\\Dev\\crm-legacy', 'crm.test', env({ phpVersion: '5.6', publicDir: '', mysql: '5.7', extensions: ['mysqli', 'mbstring'] }), { originPreset: 'legacy' }),
 		project('api-symfony', 'API Symfony', 'D:\\Work\\api-symfony', 'api.test', env({ phpVersion: '8.4', extensions: ['intl', 'pdo_mysql', 'xml'] }), { active: false, originPreset: 'symfony' }),

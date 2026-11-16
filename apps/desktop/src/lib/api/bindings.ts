@@ -20,7 +20,9 @@ message: string,
  * output) for `config-rejected` and a failed `process-failed` step, plus `excludedSites` when
  * some sites were left out; `{ port, owner }` for `port-in-use`; `{ entity, id }` for
  * `not-found`; `{ package, php? }`, `{ tool }` or `{ redistributable }` for
- * `package-missing`; `{ package, usedBy }` for a package still in use (`conflict`).
+ * `package-missing`; `{ package, usedBy }` for a package still in use (`conflict`);
+ * `{ field: "envVars", reason, name?, part?, reserved? }` for a refused environment variable
+ * (`validation`; never its value).
  */
 details?: unknown, };
 

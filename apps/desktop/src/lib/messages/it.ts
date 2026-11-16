@@ -147,6 +147,7 @@ export const it = {
 			php: 'PHP',
 			addresses: 'Indirizzi',
 			data: 'Database, cache e posta',
+			envVars: 'Variabili d’ambiente',
 			apache: 'Apache',
 			worktrees: 'Worktree'
 		},
@@ -203,6 +204,23 @@ export const it = {
 			openWebUi: 'Apri Mailpit',
 			copyMailEnv: 'Copia variabili MAIL_',
 			noMail: 'Questo progetto non usa Mailpit: attivalo qui sopra per raccogliere la posta.'
+		},
+		envVars: {
+			help: 'Valgono per il PHP del progetto, sul web e da riga di comando (lampo exec, php, composer). Le variabili gestite da Lampo (PATH, PHPRC, LAMPO_…) non si possono impostare.',
+			add: 'Aggiungi variabile',
+			name: 'Nome della variabile',
+			value: 'Valore della variabile',
+			empty: 'Nessuna variabile: il progetto usa solo quelle di Lampo.',
+			problems: {
+				'name-required': 'Serve un nome.',
+				'name-syntax': 'Usa lettere, cifre e _, senza iniziare con una cifra.',
+				duplicate: 'Nome già usato in un’altra riga (maiuscole e minuscole non contano).',
+				multiline: 'Il valore deve stare su una sola riga.'
+			},
+			reserved: 'Questa variabile è gestita da Lampo: non si può impostare.',
+			nameRefused: (reason: string) => `Nome non accettato: ${reason}`,
+			valueRefused: (reason: string) => `Valore non accettato: ${reason}`,
+			refused: (reason: string) => `Variabili non accettate: ${reason}`
 		},
 		apache: {
 			title: 'Direttive Apache personalizzate',
