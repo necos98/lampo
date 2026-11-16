@@ -1,4 +1,5 @@
-//! Launching external desktop apps (PowerShell, Explorer, VS Code) on a project folder.
+//! Launching external desktop apps (PowerShell, Explorer, VS Code, the web browser) on a site
+//! folder or URL.
 //!
 //! These are ordinary child processes of the caller: the desktop app process itself is not in
 //! the services Job Object (services are created *inside* the job via
@@ -11,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use lampo_domain::ports::ExternalAppLauncher;
-use lampo_domain::project::ProjectId;
+use lampo_domain::site::SiteId;
 use lampo_domain::{PortError, PortResult};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -26,6 +27,8 @@ const VSCODE_CMD: &str = "code.cmd";
 const VSCODE_ENTITY: &str = "Visual Studio Code";
 /// `cmd.exe` expands `%VAR%` even inside quotes, so such a folder cannot be passed through it safely.
 const CMD_EXPANSION_CHAR: char = '%';
+/// The only URL schemes handed to the browser (lowercase, compared case-insensitively).
+const WEB_SCHEMES: [&str; 2] = ["http://", "https://"];
 
 /// [`ExternalAppLauncher`] for Windows: Explorer, VS Code (`Code.exe`, or `code.cmd` from PATH)
 /// and a PowerShell console through `lampo exec`.
@@ -76,16 +79,37 @@ impl ExternalAppLauncher for WindowsExternalAppLauncher {
     }
 
     /// `lampo.exe` sits next to the caller's executable (the desktop app or the CLI itself).
-    fn open_terminal(&self, project: &ProjectId, folder: &Path) -> PortResult<()> {
+    fn open_terminal(&self, site: &SiteId, folder: &Path) -> PortResult<()> {
         let lampo = std::env::current_exe().map_err(|e| PortError::io("locating the lampo CLI", e))?.with_file_name(LAMPO_EXE);
+        let site = site.to_string();
         Command::new(lampo)
-            .args(["-p", project.as_str(), "exec", "--", POWERSHELL_EXE, "-NoLogo", "-NoExit"])
+            .args(["-p", site.as_str(), "exec", "--", POWERSHELL_EXE, "-NoLogo", "-NoExit"])
             .current_dir(folder)
             .creation_flags(CREATE_NEW_CONSOLE)
             .spawn()
             .map_err(|e| PortError::process(LAMPO_EXE, e))?;
         Ok(())
     }
+
+    /// Explorer hands a web URL to the default browser, without a shell parsing it; like
+    /// `open_folder`, it is not waited on.
+    fn open_url(&self, url: &str) -> PortResult<()> {
+        ensure_web_url(url)?;
+        Command::new(EXPLORER_EXE).arg(url).spawn().map_err(|e| PortError::process(EXPLORER_EXE, e))?;
+        Ok(())
+    }
+}
+
+/// Accepts only an `http://` or `https://` URL with a host and no whitespace, control
+/// characters or quotes: Explorer would start whatever handler another scheme names.
+fn ensure_web_url(url: &str) -> PortResult<()> {
+    let lower = url.to_ascii_lowercase();
+    let rest = WEB_SCHEMES.iter().find_map(|scheme| lower.strip_prefix(scheme));
+    let has_host = rest.is_some_and(|r| !r.is_empty() && !r.starts_with('/'));
+    if has_host && !url.chars().any(|c| c.is_whitespace() || c.is_control() || c == '"') {
+        return Ok(());
+    }
+    Err(PortError::Unsupported(format!("only http:// and https:// addresses can be opened in the browser (got `{}`)", url.escape_debug())))
 }
 
 /// How VS Code can be started.
@@ -197,6 +221,16 @@ mod tests {
         let err = ensure_cmd_safe(Path::new(r"C:\www\%USERPROFILE%\app")).unwrap_err();
         assert!(matches!(&err, PortError::Unsupported(reason) if reason.ends_with(r"(C:\www\%USERPROFILE%\app)")), "{err:?}");
         assert!(ensure_cmd_safe(Path::new(r"C:\www\my app (1) & co")).is_ok());
+    }
+
+    #[test]
+    fn only_web_urls_reach_the_browser() {
+        for ok in ["http://127.0.0.1:8101", "https://shop.test/", "HTTP://shop.localhost:8101/a?b=c"] {
+            assert!(ensure_web_url(ok).is_ok(), "{ok}");
+        }
+        for bad in ["file:///C:/Windows/System32/calc.exe", "ms-settings:", "javascript:alert(1)", "http://", "http:///x", "http://a b", "http://a\"b", "http://a\nb", "C:\\www", ""] {
+            assert!(matches!(ensure_web_url(bad), Err(PortError::Unsupported(_))), "{bad:?}");
+        }
     }
 
     #[test]

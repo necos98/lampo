@@ -59,6 +59,12 @@ pub trait ShimToolReader: Send + Sync {
     fn which(&self, request: &ResolveRequestDto, tool: &str) -> AppResult<WhichDto>;
 }
 
+/// Starts a desktop app of the user on a site (`open`); runs on this machine, never in the app.
+pub trait SiteOpener: Send + Sync {
+    /// `site`: `shop` or `shop@feature-x`.
+    fn open(&self, site: &str, app: ExternalApp) -> AppResult<OpenedInDto>;
+}
+
 #[async_trait]
 pub trait DoctorRunner: Send + Sync {
     async fn run(&self) -> AppResult<DoctorReportDto>;

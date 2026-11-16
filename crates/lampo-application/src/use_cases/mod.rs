@@ -63,7 +63,7 @@ pub use diagnostics::{
     StandardChecksDeps, VcRuntimeCheck, standard_checks,
 };
 pub use environment::{ApplyEnvironment, ApplyEnvironmentDeps, EnvironmentSync, ServiceLifecycle};
-pub use external_apps::{ExternalApp, OpenProjectIn};
+pub use external_apps::{ExternalApp, OpenProjectIn, OpenProjectInDeps};
 pub use hosts_sync::{HostsSyncQuery, hosts_block_in_sync};
 pub use lifecycle::{FirstRunDeps, FirstRunSetup, Shutdown, ShutdownGate, Startup};
 pub use log_files::{ExportLogLines, LogTarget, OpenLog};

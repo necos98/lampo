@@ -194,6 +194,13 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
             false,
         ),
         c("lampo completions", "lampo completions <powershell|bash|zsh|fish>", "Print the shell completion script for lampo.", false, false),
+        c(
+            "lampo open",
+            "lampo open [--code|--explorer|--terminal|--browser] [--json]",
+            "Open the current site in VS Code, Explorer (default), a PowerShell console with its toolchain, or its URL in the browser; returns at once.",
+            false,
+            false,
+        ),
         c("lampo project list", "lampo project list [--json]", "List projects.", false, false),
         c("lampo project info", "lampo project info [<id>] [--json]", "Show one project.", false, false),
         c(

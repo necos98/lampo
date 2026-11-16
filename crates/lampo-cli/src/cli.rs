@@ -7,7 +7,9 @@ use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 
 use crate::exit_code::ExitCode;
 
+mod desktop;
 mod introspection;
+pub use desktop::OpenArgs;
 pub use introspection::{CompletionShell, CompletionsArgs, WhichArgs};
 
 const ABOUT: &str = "Lampo: local PHP environments for Windows (CLI for coding agents and terminals)";
@@ -115,6 +117,22 @@ pub enum Command {
     ///   Git Bash:   eval "$(lampo env --shell bash)"
     ///   cmd:        lampo env --shell cmd > %TEMP%\lampo-env.cmd & call %TEMP%\lampo-env.cmd
     Env(EnvArgs),
+    /// Open the site in VS Code, Explorer, a terminal or the browser
+    ///
+    /// The site is resolved as for every command (`--project`, `LAMPO_PROJECT`, the current
+    /// folder or git worktree); a worktree environment opens its own folder and URL. Without a
+    /// flag the folder opens in Explorer. `--terminal` is a PowerShell console with the site's
+    /// toolchain on PATH (`lampo exec -- powershell`); `--browser` opens the site's primary URL.
+    /// Returns as soon as the app is started; nothing prompts and the Lampo app need not run. Exit 6
+    /// outside every project, 4 when the folder is missing (Explorer, VS Code), 10 when VS Code
+    /// is not installed, 12 when the app cannot be started.
+    ///
+    /// Examples:
+    ///   lampo open
+    ///   lampo open --code
+    ///   lampo open --browser --project shop --json
+    #[command(verbatim_doc_comment)]
+    Open(OpenArgs),
     /// Show which site and binary the shim of a tool would run here, and why
     ///
     /// Runs the shims' own resolution without starting anything: `--project`, then

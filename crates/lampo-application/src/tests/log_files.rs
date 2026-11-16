@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use lampo_domain::ports::{ExternalAppLauncher, LogExportWriter};
-use lampo_domain::project::ProjectId;
+use lampo_domain::site::SiteId;
 use lampo_domain::{PortError, PortResult};
 
 use crate::dto::LogExportRequest;
@@ -41,8 +41,11 @@ impl ExternalAppLauncher for RecordingLauncher {
     fn open_in_vscode(&self, _folder: &Path) -> PortResult<()> {
         unreachable!("a log is never opened in VS Code")
     }
-    fn open_terminal(&self, _project: &ProjectId, _folder: &Path) -> PortResult<()> {
+    fn open_terminal(&self, _site: &SiteId, _folder: &Path) -> PortResult<()> {
         unreachable!("a log is never opened in a terminal")
+    }
+    fn open_url(&self, url: &str) -> PortResult<()> {
+        unreachable!("a log is never opened in the browser ({url})")
     }
 }
 

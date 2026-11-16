@@ -5,6 +5,7 @@
 
 mod addressing;
 mod db;
+mod desktop;
 mod diagnostics;
 mod introspection;
 mod packages;
@@ -15,6 +16,8 @@ mod settings;
 mod toolchain;
 mod worktrees;
 
+#[cfg(test)]
+mod desktop_tests;
 #[cfg(test)]
 mod introspection_tests;
 #[cfg(test)]
@@ -109,6 +112,7 @@ pub async fn run(cli: Cli, ctx: &CliContext, io: &Io) -> AppResult<i32> {
         Command::Db(c) => db::run(&cmd, c).await,
         Command::Exec(a) => toolchain::exec(&cmd, a),
         Command::Env(a) => toolchain::env(&cmd, a),
+        Command::Open(a) => desktop::open(&cmd, a),
         Command::Which(a) => introspection::which(&cmd, a),
         Command::Completions(a) => introspection::completions(&cmd, a),
         Command::Doctor => diagnostics::doctor(&cmd).await,

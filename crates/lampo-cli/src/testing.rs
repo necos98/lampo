@@ -117,6 +117,10 @@ pub struct Fake {
     pub quiet: AtomicBool,
     /// The request and tool of every `which`.
     pub which_requests: Mutex<Vec<(ResolveRequestDto, String)>>,
+    /// The site and app of every `open`.
+    pub opened: Mutex<Vec<(String, ExternalApp)>>,
+    /// Replaces the canned `open` answer (`None`: [`opened_json`], served).
+    pub open_result: Mutex<Option<AppResult<Value>>>,
 }
 
 impl Fake {
@@ -150,6 +154,8 @@ impl Fake {
             settings: Mutex::new(settings_json()),
             quiet: AtomicBool::new(false),
             which_requests: Mutex::new(Vec::new()),
+            opened: Mutex::new(Vec::new()),
+            open_result: Mutex::new(None),
         })
     }
 
@@ -183,6 +189,7 @@ impl Fake {
             php_extensions: self.clone(),
             toolchain: self.clone(),
             shim_tools: self.clone(),
+            opener: self.clone(),
             doctor: self.clone(),
             agent: self.clone(),
             hook_input: self.clone(),
@@ -288,6 +295,22 @@ impl ShimToolReader for Fake {
         match tool {
             "php" | "mysql" => Ok(dto(which_json(tool))),
             other => Err(AppError::new(ErrorCode::PackageMissing, format!("{other} is not available: not installed for this project"))),
+        }
+    }
+}
+
+/// `site` opened in `app`: its folder, or its URL for the browser.
+pub fn opened_json(site: &str, app: ExternalApp) -> Value {
+    let target = if app == ExternalApp::Browser { "http://127.0.0.1:8101" } else { r"C:\work\shop" };
+    json!({"site": site, "app": app, "target": target, "served": true})
+}
+
+impl SiteOpener for Fake {
+    fn open(&self, site: &str, app: ExternalApp) -> AppResult<OpenedInDto> {
+        self.opened.lock().unwrap().push((site.to_string(), app));
+        match self.open_result.lock().unwrap().clone() {
+            Some(result) => result.map(dto),
+            None => Ok(dto(opened_json(site, app))),
         }
     }
 }

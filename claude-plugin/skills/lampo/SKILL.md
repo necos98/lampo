@@ -40,6 +40,12 @@ registering it), `lampo worktree list`, `lampo logs`, `lampo doctor`, `lampo env
 `lampo which php` (which site and binary a shim would run here, and why; also `composer`,
 `mysql`, `mysqldump`, `redis-cli`).
 
+When the user asks to see the site or the code, `lampo open --browser` opens the site's URL in
+their browser, `lampo open --code` the folder in VS Code (`--explorer`, the default, in Explorer;
+`--terminal` a PowerShell console with the site's toolchain). It returns at once and prints what
+it opened (`--json`: `site`, `app`, `target`, `served`); exit 6 outside every project. Run it
+only on request: it opens windows on the user's desktop.
+
 ## 2. Which site a command acts on
 
 Resolution order, for both the CLI and the shims:
@@ -100,6 +106,7 @@ You MAY, without asking:
   `project detect`, `worktree list`, `logs`, `doctor`, `env`, `which`, `package list`, `package extensions`, `db list`, `db export`, `shims status`);
 - start or restart services: `lampo up`, `lampo restart`;
 - read the global settings (ports, default PHP): `lampo settings`;
+- open the site in the user's apps when they ask to see it: `lampo open --browser`, `lampo open --code`;
 - create databases (`lampo db create`) and worktree environments (`lampo worktree up` with any
   `--db` mode);
 - run `php`, `composer`, `php artisan`, `mysql`, `redis-cli` through the shims or `lampo exec`;

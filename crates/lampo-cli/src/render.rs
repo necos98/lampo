@@ -6,6 +6,8 @@ use lampo_application::dto::*;
 use crate::cli::ShellKind;
 use crate::exit_code::ExitCode;
 
+mod desktop;
+pub use desktop::opened;
 mod detection;
 pub use detection::detection;
 mod which;

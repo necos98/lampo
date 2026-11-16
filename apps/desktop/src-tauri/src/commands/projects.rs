@@ -75,7 +75,7 @@ pub async fn open_in_vscode(state: State<'_, AppState>, project_id: String) -> A
 
 async fn open_project_in(state: &AppState, project_id: String, app: ExternalApp) -> AppResult<()> {
     let open = state.open_project_in.clone();
-    run_blocking(move || open.execute(&project_id, app)).await
+    run_blocking(move || open.execute(&project_id, app).map(|_| ())).await
 }
 
 #[tauri::command]

@@ -15,6 +15,7 @@
 pub mod agent;
 pub mod app;
 pub mod database;
+pub mod desktop;
 pub mod diagnostics;
 pub mod integrations;
 pub mod logs;
@@ -29,6 +30,7 @@ pub mod worktree;
 pub use agent::*;
 pub use app::*;
 pub use database::*;
+pub use desktop::*;
 pub use diagnostics::*;
 pub use integrations::*;
 pub use logs::*;

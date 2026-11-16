@@ -80,6 +80,12 @@ impl ShimToolReader for ShimToolQuery {
     }
 }
 
+impl SiteOpener for OpenProjectIn {
+    fn open(&self, site: &str, app: ExternalApp) -> AppResult<OpenedInDto> {
+        self.execute(site, app)
+    }
+}
+
 #[async_trait]
 impl DoctorRunner for Doctor {
     async fn run(&self) -> AppResult<DoctorReportDto> {

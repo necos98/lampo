@@ -93,6 +93,7 @@ lampo settings set --apache-port 8080 --mysql-port 8.4=3310   # cambia le porte 
 lampo worktree up --db clone:shop     # ambiente per il git worktree corrente
 lampo exec -- composer install        # comando con il PHP e il Composer del progetto
 lampo which php                       # quale PHP (o composer, mysql...) userebbe lo shim qui, e perché
+lampo open --code                     # apre il sito in VS Code (o --explorer, --terminal, --browser)
 lampo logs error -f                   # log degli errori del sito, in tempo reale
 lampo doctor                          # diagnostica (exit code 14 se trova problemi)
 lampo completions powershell | Out-String | Invoke-Expression   # completamento dei comandi

@@ -14,7 +14,7 @@ use lampo_domain::ports::{
     WorktreeRepository,
 };
 use lampo_domain::resolution::ResolverChain;
-use lampo_infra_services::{FileLogReader, HeadlessAppLauncher, NamedPipeControlClient, TcpPortProbe, TokioTimer};
+use lampo_infra_services::{FileLogReader, HeadlessAppLauncher, NamedPipeControlClient, TcpPortProbe, TokioTimer, WindowsExternalAppLauncher};
 use lampo_infra_store as store;
 use lampo_infra_web::ElevatedHostsFile;
 use lampo_infra_web::hosts::elevation::RunAsLauncher;
@@ -100,6 +100,14 @@ pub fn build() -> AppResult<CliContext> {
         hook_input: Arc::new(crate::local::StdinHookInput),
         // `which`: the shims' own tools and folder probe (the site's database in the data dir).
         shim_tools: Arc::new(ShimToolQuery::new(resolver.clone(), shim_tools.clone(), Arc::new(store::LocalFileSystem))),
+        // `open`: the user's apps, started from this process (the app need not run).
+        opener: Arc::new(OpenProjectIn::new(OpenProjectInDeps {
+            projects: projects_repo.clone(),
+            worktrees: worktrees_repo.clone(),
+            settings: settings_repo.clone(),
+            fs: fs.clone(),
+            launcher: Arc::new(WindowsExternalAppLauncher),
+        })),
         toolchain: Arc::new(ToolchainQuery::new(resolver, paths.clone())),
         logs: Arc::new(LogQueries::new(Arc::new(FileLogReader), projects_repo.clone(), settings_repo.clone(), services.clone(), paths.clone())),
         doctor: Arc::new(Doctor::new(DoctorDeps {

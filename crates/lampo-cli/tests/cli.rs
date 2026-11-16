@@ -56,6 +56,7 @@ fn every_subcommand_renders_help() {
         &["db", "export"],
         &["exec"],
         &["env"],
+        &["open"],
         &["which"],
         &["completions"],
         &["doctor"],

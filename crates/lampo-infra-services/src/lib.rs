@@ -20,7 +20,7 @@
 //! | [`HeadlessAppLauncher`]      | `AppLauncher`                                |
 //! | [`TokioTimer`]               | `Timer`                                      |
 //! | [`ClaudeCliRunner`]          | `ClaudeCodeCli` (`claude` via the `CommandRunner`) |
-//! | [`WindowsExternalAppLauncher`] | `ExternalAppLauncher` (PowerShell, Explorer, VS Code) |
+//! | [`WindowsExternalAppLauncher`] | `ExternalAppLauncher` (PowerShell, Explorer, VS Code, browser) |
 //!
 //! [`ClientOptionFile`] hands a stored password to the MySQL clients (a user-only temporary
 //! option file, never the command line): `MysqlCliAdmin`, `mysqladmin shutdown` and the shims.

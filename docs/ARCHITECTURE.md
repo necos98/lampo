@@ -260,7 +260,9 @@ CLI runs read-only, file-based commands itself (status offline, project/worktree
 `project detect`, `package extensions`, `settings get`, logs,
 `env`, `exec`, `agent context`, `doctor`) and sends mutating ones to the app over a per-user
 named pipe (`lampo_application::control`), starting the app headless (`--headless`, tray only)
-when needed. Shims never talk to the app.
+when needed. Shims never talk to the app. `lampo open` (`OpenProjectIn`, the same use case as
+the GUI's buttons) also runs in the CLI: the apps it starts (Explorer, VS Code, the browser, a
+console) are the user's own processes, never supervised by Lampo.
 
 The services are stopped gracefully however the app goes away, since the Job Object would
 otherwise kill mysqld (InnoDB crash recovery, corrupted MyISAM `mysql.*` tables on 5.7): the
