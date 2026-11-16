@@ -31,13 +31,15 @@
 	<span class="text-xs text-muted-foreground">
 		{project.database ? `MySQL ${project.database.mysqlVersion}` : ''}
 	</span>
-	<div class="relative z-10">
+	<label class="relative z-10 flex items-center gap-2 text-xs text-muted-foreground" title={m.projects.servedHelp}>
+		{m.projects.served}
 		<Switch
 			size="sm"
 			checked={project.active}
 			disabled={projects.toggling[project.id] || !project.folderExists}
 			onCheckedChange={(v) => projects.setActive(project.id, v)}
 			aria-label={m.projects.toggle(project.name)}
+			title={m.projects.servedHelp}
 		/>
-	</div>
+	</label>
 </li>

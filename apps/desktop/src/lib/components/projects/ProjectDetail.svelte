@@ -2,9 +2,9 @@
 	import BookmarkPlus from '@lucide/svelte/icons/bookmark-plus';
 	import Code from '@lucide/svelte/icons/code';
 	import FileUp from '@lucide/svelte/icons/file-up';
+	import ListX from '@lucide/svelte/icons/list-x';
 	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
 	import ScrollText from '@lucide/svelte/icons/scroll-text';
-	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import { onMount, untrack } from 'svelte';
 
 	import { goto } from '$app/navigation';
@@ -107,7 +107,10 @@
 		<Button variant="ghost" size="sm" href="/logs?source=error:{project.id}"><ScrollText />{m.nav.logs}</Button>
 		<Button variant="ghost" size="sm" onclick={() => (exportOpen = true)}><FileUp />{t.export}</Button>
 		<Button variant="ghost" size="sm" onclick={() => (presetOpen = true)}><BookmarkPlus />{t.saveAsPreset}</Button>
-		<Switch checked={project.active} disabled={projects.toggling[project.id] || !project.folderExists} onCheckedChange={(v) => projects.setActive(project.id, v)} aria-label={t.toggle(project.name)} />
+		<label class="flex items-center gap-2 text-sm" title={t.servedHelp}>
+			{t.served}
+			<Switch checked={project.active} disabled={projects.toggling[project.id] || !project.folderExists} onCheckedChange={(v) => projects.setActive(project.id, v)} title={t.servedHelp} />
+		</label>
 	{/snippet}
 </PageHeader>
 
@@ -128,7 +131,7 @@
 		<Tabs.Content value="general">
 			<GeneralSection {draft} {project} onrelink={() => (relinkOpen = true)} />
 			<div class="mt-6 border-t pt-4">
-				<Button variant="destructive" size="sm" onclick={() => (deleteOpen = true)}><Trash2 />{m.common.delete}</Button>
+				<Button variant="destructive" size="sm" onclick={() => (deleteOpen = true)}><ListX />{t.remove}</Button>
 			</div>
 		</Tabs.Content>
 		<Tabs.Content value="php"><PhpSection {draft} /></Tabs.Content>
@@ -163,4 +166,4 @@
 	onsubmit={async (file) => (await projects.export({ projectId: project.id, file })).ok}
 />
 <SavePresetDialog bind:open={presetOpen} projectId={project.id} defaultName={project.name} />
-<ConfirmDialog bind:open={deleteOpen} title={t.deleteTitle} body={t.deleteBody(project.name)} confirmLabel={m.common.delete} destructive onconfirm={remove} />
+<ConfirmDialog bind:open={deleteOpen} title={t.deleteTitle} body={t.deleteBody(project.name)} confirmLabel={t.remove} destructive onconfirm={remove} />
