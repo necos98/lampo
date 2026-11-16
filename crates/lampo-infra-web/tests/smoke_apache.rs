@@ -29,7 +29,7 @@ use lampo_domain::php::{ExtensionName, PhpMinor, php_ini_overrides};
 use lampo_domain::ports::{
     ChildId, CommandOutput, CommandRunner, CommandSpec, EventPublisher, PhpIniWriter, ProcessObserver, ProcessSupervisor, ServiceRunner, SpawnedChild, WebServerConfigurator,
 };
-use lampo_domain::project::{ApacheDirectives, TlsMode};
+use lampo_domain::project::{ApacheDirectives, ProjectEnvVars, TlsMode};
 use lampo_domain::service::{LogStream, ServiceId, ServiceLaunch, ServiceState};
 use lampo_domain::site::SiteId;
 use lampo_domain::tcp_port::Port;
@@ -234,6 +234,8 @@ fn site(data: &Path, id: &str, names: &[&str], port: Option<u16>, docroot: &Path
             document_root: docroot.to_path_buf(),
             php_cgi: php_dir.join("php-cgi.exe"),
             phprc_dir: phprc.clone(),
+            // Quotes and backslashes must reach `getenv()` verbatim through `SetEnv`.
+            env_vars: ProjectEnvVars::from_pairs([("APP_NAME", r#"My "Shop" C:\data\"#)]).unwrap(),
             // A representative set of legitimate custom directives (valid under the modules
             // Lampo loads): real `httpd -t` must keep accepting them after the quoted-name and
             // re-grant hardening. `php_value` is left out on purpose — Lampo runs PHP through
@@ -273,6 +275,7 @@ echo "memory_limit=", ini_get('memory_limit'), "\n";
 echo "auth=", isset($_SERVER['HTTP_AUTHORIZATION']) ? $_SERVER['HTTP_AUTHORIZATION'] : '-', "\n";
 echo "temp=", str_replace('\\', '/', sys_get_temp_dir()), "\n";
 echo "systemroot=", getenv('SystemRoot'), "\n";
+echo "app_name=", getenv('APP_NAME'), "\n";
 $srv = @stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
 $cli = $srv ? @stream_socket_client('tcp://' . stream_socket_get_name($srv, false), $errno, $errstr, 2) : false;
 echo "socket=", $cli ? 'ok' : "fail $errno $errstr", "\n";
@@ -376,6 +379,7 @@ async fn real_apache_serves_php_sites() {
         assert!(body.contains("generated/php/shop/tmp"));
         assert!(body.contains("socket=ok"), "Winsock works (SystemRoot passed)");
         assert!(body.contains("session=ok"));
+        assert!(body.contains(r#"app_name=My "Shop" C:\data\"#), "SetEnv values keep quotes and backslashes");
         let (status, body) = http_get(shared, "shop.localhost", "/static.txt", "");
         assert_eq!((status, body.as_str()), (200, "static file"));
 

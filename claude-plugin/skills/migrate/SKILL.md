@@ -57,6 +57,7 @@ Write the inventory down for the user in a short table before changing anything.
 | Redis / Valkey | Redis, optional per project |
 | Apache + `.htaccess` | identical: Apache 2.4 with `AllowOverride All` and mod_rewrite |
 | nginx-only rules | translate to `.htaccess` or to the project's Apache directives (`lampo project set --apache-directives "<rules>"`) |
+| `environment:` of the PHP container read with `getenv()` | the project's environment variables (`lampo project set --env KEY=VALUE`): set for the site and for `php`/`composer`/`lampo exec`. Values pointing at other containers (`DB_HOST=mysql`) become `127.0.0.1` and the port in `agent context` |
 | Mailpit, MailHog, Herd/Laragon mail catchers | Mailpit, shared and per project (`--service mailpit`; new Laravel/Symfony/WordPress projects have it): SMTP `127.0.0.1:1025`, web UI `http://127.0.0.1:8025`. MailHog's SMTP side is a drop-in; its UI/API differ |
 | Meilisearch, Elasticsearch, OpenSearch, Typesense, MinIO, RabbitMQ, Memcached | not provided: keep running them where they are (Docker, native) and point `.env` at them |
 | HTTPS (`herd secure`, Laragon SSL) | not available yet: use `http://` |

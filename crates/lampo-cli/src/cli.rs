@@ -210,7 +210,7 @@ pub enum ProjectCommand {
         /// Project id (default: resolved from the current folder).
         id: Option<String>,
     },
-    /// Change the project's PHP version, extensions, add-ons (Xdebug), php.ini values, services (MySQL/Redis), database name, public folder, Apache directives, display name or addresses
+    /// Change the project's PHP version, extensions, add-ons (Xdebug), php.ini values, environment variables, services (MySQL/Redis), database name, public folder, Apache directives, display name or addresses
     ///
     /// Only what is named changes, in one atomic edit of the stored project (no lost update
     /// with the GUI); then Apache, php.ini, services and the hosts file are regenerated as after
@@ -224,6 +224,7 @@ pub enum ProjectCommand {
     ///   lampo project set --ext intl,gd --ini memory_limit=512M
     ///   lampo project set --addon xdebug --ini xdebug.mode=debug,develop
     ///   lampo project set --no-addon xdebug --no-ini xdebug.mode
+    ///   lampo project set --env APP_ENV=local --env "MAIL_FROM=Shop <shop@example.test>" --no-env DEBUGBAR_ENABLED
     ///   lampo project set --service redis --service mysql@5.7 --database shop_legacy
     ///   lampo project set shop --public-dir public --json
     ///   lampo project set --address api.shop.localhost --address loopback
@@ -262,10 +263,11 @@ pub enum ProjectCommand {
     /// Register a project exported from Lampo (a `.lampo.toml` file, e.g. from another machine)
     ///
     /// The imported project is inactive and uses HTTP. The file may come from someone else, so
-    /// what could run code on this machine is NEVER imported: its custom Apache directives and
-    /// the php.ini keys auto_prepend_file, auto_append_file, extension, zend_extension,
-    /// extension_dir, open_basedir, disable_functions and include_path. They are listed in the
-    /// output (`--json`: `droppedApacheDirectives`, `droppedPhpIniKeys`) with a warning on
+    /// what could run code on this machine is NEVER imported: its custom Apache directives, its
+    /// environment variables and the php.ini keys auto_prepend_file, auto_append_file,
+    /// extension, zend_extension, extension_dir, open_basedir, disable_functions and
+    /// include_path. They are listed in the output (`--json`: `droppedApacheDirectives`,
+    /// `droppedPhpIniKeys`, `droppedEnvVars` with the variable names only) with a warning on
     /// stderr: review them, then add back what you trust with `lampo project set`. An id
     /// already in use gets a numeric suffix and new addresses. A hosts-file name (`shop.test`)
     /// needs `--allow-elevation` (exit 7, nothing imported, otherwise).
@@ -282,7 +284,7 @@ pub enum ProjectCommand {
 
 #[derive(Debug, Args)]
 #[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args([
-    "php", "ext", "no_ext", "addon", "no_addon", "ini", "no_ini", "service", "no_service", "database", "public_dir", "apache_directives",
+    "php", "ext", "no_ext", "addon", "no_addon", "ini", "no_ini", "env", "no_env", "service", "no_service", "database", "public_dir", "apache_directives",
     "name", "address", "no_address",
 ])))]
 pub struct ProjectSetArgs {
@@ -316,6 +318,17 @@ pub struct ProjectSetArgs {
     /// Remove a php.ini override (back to Lampo's default for that key).
     #[arg(long, value_name = "KEY", value_delimiter = ',')]
     pub no_ini: Vec<String>,
+    /// Set an environment variable of the project, `KEY=VALUE`, for its PHP on the web
+    /// (`SetEnv`: getenv(), $_SERVER) and on the command line (`lampo env`, `lampo exec`, the
+    /// php/composer shims), like `environment:` in Docker Compose. The value is taken verbatim
+    /// (commas included, one line, no `${`); a name differing only by case replaces the
+    /// existing one. Names Lampo manages are refused: PATH, PHPRC, PHP_INI_SCAN_DIR, TEMP, TMP,
+    /// PHP_FCGI_* and LAMPO_*.
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub env: Vec<String>,
+    /// Remove an environment variable of the project (case-insensitive).
+    #[arg(long, value_name = "KEY", value_delimiter = ',')]
+    pub no_env: Vec<String>,
     /// Use a service: `redis`, `mysql` (the default MySQL instance), `mysql@5.7` or `mysql-5.7`
     /// (a configured series; switches series if MySQL is already used). Adding MySQL also
     /// assigns the project's database name; create the database with `lampo db create`.
@@ -382,6 +395,10 @@ pub struct ProjectCreateArgs {
     /// MySQL instance if needed; an existing database is kept).
     #[arg(long)]
     pub no_database: bool,
+    /// Set an environment variable of the project, `KEY=VALUE` (repeatable; same rules as
+    /// `lampo project set --env`).
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub env: Vec<String>,
 }
 
 #[derive(Debug, Args)]

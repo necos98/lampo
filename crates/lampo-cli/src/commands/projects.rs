@@ -1,5 +1,7 @@
 //! `project ...`.
 
+use std::collections::BTreeMap;
+
 use lampo_application::control::ControlRequest;
 use lampo_application::dto::*;
 use lampo_application::AppResult;
@@ -121,7 +123,7 @@ fn reject_swapped_set_php_args(php_version: &str, id: Option<&str>) -> AppResult
 /// `project set` flags → a [`ProjectPatchRequest`]. Values are validated by the app; only the
 /// command-line syntax (`KEY=VALUE`, `KIND[@VERSION]`) is parsed here.
 fn patch_request(project_id: String, args: ProjectSetArgs) -> AppResult<ProjectPatchRequest> {
-    let mut ini_set = std::collections::BTreeMap::new();
+    let mut ini_set = BTreeMap::new();
     for pair in &args.ini {
         let (key, value) = pair.split_once('=').filter(|(k, _)| !k.trim().is_empty()).ok_or_else(|| validation(format!("--ini expects KEY=VALUE, got `{pair}`")))?;
         ini_set.insert(key.trim().to_string(), value.to_string());
@@ -135,6 +137,8 @@ fn patch_request(project_id: String, args: ProjectSetArgs) -> AppResult<ProjectP
         addons_remove: args.no_addon,
         ini_set,
         ini_unset: args.no_ini,
+        env_set: env_assignments(&args.env)?,
+        env_unset: args.no_env,
         services_add: args.service.iter().map(|s| service_use(s)).collect(),
         services_remove: args.no_service,
         database_name: args.database,
@@ -144,6 +148,20 @@ fn patch_request(project_id: String, args: ProjectSetArgs) -> AppResult<ProjectP
         addresses_add: args.address,
         addresses_remove: args.no_address,
     })
+}
+
+/// `--env KEY=VALUE` flags → name → value, the value verbatim (the app validates both). A
+/// malformed flag is reported without echoing it: the value may be a secret. A name given twice is
+/// refused, never silently overwritten (here when identical, by the app when only the case differs).
+fn env_assignments(pairs: &[String]) -> AppResult<BTreeMap<String, String>> {
+    let mut vars = BTreeMap::new();
+    for pair in pairs {
+        let (name, value) = pair.split_once('=').filter(|(name, _)| !name.trim().is_empty()).ok_or_else(|| validation("--env expects KEY=VALUE (an empty value is `KEY=`)"))?;
+        if vars.insert(name.trim().to_string(), value.to_string()).is_some() {
+            return Err(validation(format!("--env names `{}` twice", name.trim())));
+        }
+    }
+    Ok(vars)
 }
 
 /// `redis`, `mysql`, `mysql@5.7`, `mysql-5.7` (the service id form `lampo up` uses).
@@ -169,6 +187,7 @@ fn create_request(c: &Cmd<'_>, args: ProjectCreateArgs) -> AppResult<CreateProje
         addressing: addressing::for_new_project(c, args.addressing, args.hosts_name)?,
         activate: args.activate,
         create_database: !args.no_database,
+        env_vars: env_assignments(&args.env)?,
         ..Default::default()
     })
 }

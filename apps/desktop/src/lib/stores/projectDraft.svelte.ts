@@ -26,7 +26,8 @@ export class ProjectDraft {
 		phpIni: {},
 		publicDir: '',
 		services: [],
-		apacheDirectives: ''
+		apacheDirectives: '',
+		envVars: {}
 	});
 	databaseName = $state<string | null>(null);
 	tls = $state<TlsMode>('disabled');

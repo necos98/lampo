@@ -163,6 +163,7 @@ mod tests {
             composer_phar: composer.then(|| PathBuf::from(r"C:\composer\composer.phar")),
             composer_channel: ComposerChannel::for_php(php),
             services: Default::default(),
+            env_vars: Default::default(),
         }
     }
 

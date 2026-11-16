@@ -8,7 +8,7 @@ use lampo_domain::hostname::{Hostname, Tld};
 use lampo_domain::mysql::DatabaseConnection;
 use lampo_domain::package::{PackageId, PackageKind};
 use lampo_domain::php::{ExtensionName, PhpMinor, php_ini_overrides};
-use lampo_domain::project::{ApacheDirectives, ProjectEnvironment, PublicDir, TlsMode};
+use lampo_domain::project::{ApacheDirectives, ProjectEnvVars, ProjectEnvironment, PublicDir, TlsMode};
 use lampo_domain::service::{ServiceId, ServiceKind};
 use lampo_domain::settings::{MailConnection, ServiceInstanceSettings, Settings};
 use lampo_domain::version::{PackageVersion, VersionSeries};
@@ -28,6 +28,7 @@ pub fn environment_to_dto(env: &ProjectEnvironment) -> ProjectEnvironmentDto {
         public_dir: env.public_dir.as_str().to_string(),
         services: env.services.iter().map(|(kind, u)| ServiceUseDto { kind: kind.to_string(), version: u.version.map(|v| v.to_string()) }).collect(),
         apache_directives: env.apache_directives.as_str().to_string(),
+        env_vars: env.env_vars.iter().map(|(name, value)| (name.to_string(), value.as_str().to_string())).collect(),
     }
 }
 
@@ -42,6 +43,7 @@ pub fn environment_from_dto(dto: &ProjectEnvironmentDto) -> Result<ProjectEnviro
         public_dir: PublicDir::new(&dto.public_dir)?,
         services: Default::default(),
         apache_directives: ApacheDirectives::new(dto.apache_directives.clone())?,
+        env_vars: ProjectEnvVars::from_pairs(dto.env_vars.iter().map(|(name, value)| (name.as_str(), value.clone())))?,
     };
     for s in &dto.services {
         env.use_service(ServiceKind::new(s.kind.trim())?, s.version.as_deref().map(VersionSeries::parse).transpose()?);

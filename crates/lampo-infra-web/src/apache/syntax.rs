@@ -38,6 +38,17 @@ pub fn quoted(value: &str) -> String {
     format!("\"{value}\"")
 }
 
+/// `"<value>"` for any text Apache must read back verbatim (`SetEnv NAME "<value>"`): `\` and `"`
+/// are escaped the way `ap_getword_conf` unescapes them inside double quotes. Refused when the
+/// value contains a control character (a line break would end the directive) or `${`, which
+/// Apache expands on every line with no escape for it.
+pub fn quoted_text(value: &str) -> PortResult<String> {
+    if value.chars().any(|c| c.is_control() && c != '\t') || value.contains("${") {
+        return Err(PortError::invalid_data("Apache configuration", "a value contains a control character or `${`"));
+    }
+    Ok(quoted(&value.replace('\\', "\\\\").replace('"', "\\\"")))
+}
+
 /// The argument of `FcgidWrapper`: mod_fcgid splits it with `apr_tokenize_to_argv`, so a path
 /// containing spaces needs its own inner quotes, escaped for Apache's quoted-argument parser:
 /// `"\"C:/Program Files/php/php-cgi.exe\""`.
@@ -91,6 +102,18 @@ mod tests {
         assert!(apache_path(Path::new("C:\\a${SRVROOT}")).is_err());
         assert!(apache_path(Path::new("C:\\a\nb")).is_err());
         assert!(apache_path(Path::new("")).is_err());
+    }
+
+    #[test]
+    fn text_quoting_escapes_backslashes_and_quotes() {
+        assert_eq!(quoted_text("local").unwrap(), r#""local""#);
+        // A trailing backslash is doubled, so it cannot escape the closing quote.
+        assert_eq!(quoted_text(r#"a "b" C:\x\"#).unwrap(), r#""a \"b\" C:\\x\\""#);
+        assert_eq!(quoted_text("tab\there").unwrap(), "\"tab\there\"");
+        assert_eq!(quoted_text("").unwrap(), r#""""#);
+        for bad in ["a\nb", "a\rb", "${SRVROOT}", "a\0b"] {
+            assert!(quoted_text(bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

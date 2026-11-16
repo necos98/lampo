@@ -74,7 +74,7 @@ pub(crate) mod tests_support {
     use std::path::PathBuf;
 
     use lampo_domain::hostname::Hostname;
-    use lampo_domain::project::{ApacheDirectives, TlsMode};
+    use lampo_domain::project::{ApacheDirectives, ProjectEnvVars, TlsMode};
     use lampo_domain::site::SiteId;
     use lampo_domain::tcp_port::Port;
     use lampo_domain::web::{VirtualHost, WebServerConfig};
@@ -91,6 +91,7 @@ pub(crate) mod tests_support {
             document_root: PathBuf::from(root).join("public"),
             php_cgi: PathBuf::from(r"C:\Lampo Data\packages\php-8.3.14\php-cgi.exe"),
             phprc_dir: PathBuf::from(format!(r"C:\Lampo Data\generated\php\{key}")),
+            env_vars: ProjectEnvVars::default(),
             custom_directives: ApacheDirectives::default(),
             tls: TlsMode::Disabled,
             error_log: PathBuf::from(format!(r"C:\Lampo Data\logs\projects\{key}\error.log")),
@@ -102,6 +103,7 @@ pub(crate) mod tests_support {
     pub fn sample_config() -> WebServerConfig {
         let mut shop = vhost("shop", &["shop.test", "shop.localhost"], None, r"C:\Sites\My Shop");
         shop.custom_directives = ApacheDirectives::new("Header set X-Shop \"1\"\r\n<Location /admin>\r\n    Require ip 127.0.0.1\r\n</Location>").unwrap();
+        shop.env_vars = ProjectEnvVars::from_pairs([("APP_ENV", "local"), ("APP_NAME", r#"My "Shop""#), ("STORAGE_DIR", r"D:\shop data\")]).unwrap();
         let mut legacy = vhost("legacy", &["legacy.test"], Some(8080), r"D:\legacy");
         legacy.php_cgi = PathBuf::from(r"C:\Lampo\php-5.6.40\php-cgi.exe");
         legacy.document_root = PathBuf::from(r"D:\legacy");

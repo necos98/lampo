@@ -47,6 +47,13 @@ pub enum DomainError {
     InvalidIniKey(String),
     #[error("invalid php.ini value for `{key}`: {reason}")]
     InvalidIniValue { key: String, reason: String },
+    #[error("invalid environment variable name `{name}`: {reason}")]
+    InvalidEnvVarName { name: String, reason: String },
+    /// Never carries the value, which may be a secret.
+    #[error("invalid value of the environment variable `{name}`: {reason}")]
+    InvalidEnvVarValue { name: String, reason: String },
+    #[error("invalid environment variables: {0}")]
+    InvalidEnvVars(String),
     #[error("invalid Apache directives: {0}")]
     InvalidApacheDirectives(String),
     #[error("invalid database name `{0}`: use 1-64 letters, digits and underscores")]

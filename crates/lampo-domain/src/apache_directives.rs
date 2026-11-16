@@ -9,6 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::env_var;
 use crate::error::DomainError;
 
 /// Why a directive is refused, keyed by its lower-case name. Sections keep their `<`.
@@ -34,9 +35,6 @@ const LOG_DIRECTIVES: &[&str] = &["customlog", "errorlog", "transferlog", "globa
 
 /// Directives mapping a URL to a folder (target = second argument).
 const ALIAS_DIRECTIVES: &[&str] = &["alias", "aliasmatch"];
-
-/// Environment variables Lampo sets for the site's PHP; a directive must not override them.
-const RESERVED_ENV_VARS: &[&str] = &["path", "phprc"];
 
 /// Free-text Apache directives appended inside the project's `<VirtualHost>`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
@@ -187,7 +185,7 @@ fn check_statement(statement: &str) -> Result<(), String> {
     if reads_files_in_expression(&statement.to_ascii_lowercase()) {
         return refuse("its expression reads files on disk (`file`)");
     }
-    if let Some(var) = env_vars_set(&name, args).find(|v| RESERVED_ENV_VARS.contains(&v.to_ascii_lowercase().as_str())) {
+    if let Some(var) = env_vars_set(&name, args).find(|v| env_var::is_reserved(v)) {
         return refuse(&format!("`{var}` is managed by Lampo"));
     }
     Ok(())
@@ -388,7 +386,17 @@ mod tests {
 
     #[test]
     fn reserved_environment_variables_are_refused() {
-        for text in ["SetEnv PATH C:/evil", "SetEnv PHPRC C:/evil", "SetEnvIf Request_URI . PHPRC=C:/evil", "SetEnvIfNoCase Host . !Path", "SetEnvIfExpr \"true\" path=x"] {
+        for text in [
+            "SetEnv PATH C:/evil",
+            "SetEnv PHPRC C:/evil",
+            "SetEnvIf Request_URI . PHPRC=C:/evil",
+            "SetEnvIfNoCase Host . !Path",
+            "SetEnvIfExpr \"true\" path=x",
+            // The same names a project's own variables may not use (`env_var::is_reserved`).
+            "SetEnv PHP_INI_SCAN_DIR C:/evil",
+            "SetEnv LAMPO_PROJECT other",
+            "UnsetEnv TEMP",
+        ] {
             assert!(refused(text).contains("managed by Lampo"), "{text}");
         }
         assert!(ApacheDirectives::new("SetEnv APP_PATH C:/sites/shop").is_ok());

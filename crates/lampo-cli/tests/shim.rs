@@ -33,6 +33,7 @@ fn target(php_dir: &Path) -> ShimTarget {
         composer_phar: None,
         composer_channel: ComposerChannel::for_php(php),
         services: Default::default(),
+        env_vars: Default::default(),
     }
 }
 

@@ -63,6 +63,11 @@ pub struct ProjectEnvironmentDto {
     /// `{ "kind": "redis", "version": null }`). The MySQL entry also holds its database.
     pub services: Vec<ServiceUseDto>,
     pub apache_directives: String,
+    /// Variables set for the site's PHP on the web (`SetEnv`) and on the command line (`lampo
+    /// env`, `lampo exec`, the `php`/`composer` shims). Names managed by Lampo (`PATH`, `PHPRC`,
+    /// `LAMPO_*`, …) are refused. Omitted = none.
+    #[serde(default)]
+    pub env_vars: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,6 +170,10 @@ pub struct CreateProjectRequest {
     /// is reported in [`CreateProjectResultDto::database_setup`].
     #[cfg_attr(test, ts(optional = nullable))]
     pub create_database: bool,
+    /// Environment variables added to the environment (the preset's or `environment`), each
+    /// replacing one with the same name (`lampo project create --env KEY=VALUE`).
+    #[cfg_attr(test, ts(optional = nullable))]
+    pub env_vars: BTreeMap<String, String>,
 }
 
 impl Default for CreateProjectRequest {
@@ -180,6 +189,7 @@ impl Default for CreateProjectRequest {
             addressing: AddressingDto::default(),
             activate: false,
             create_database: true,
+            env_vars: BTreeMap::new(),
         }
     }
 }
@@ -255,6 +265,10 @@ pub struct ProjectPatchRequest {
     pub public_dir: Option<String>,
     /// Extra directives inside the project's `<VirtualHost>` (replaces them; `""` clears).
     pub apache_directives: Option<String>,
+    /// Environment variables to set (name → value), replacing one with the same name in any case.
+    pub env_set: BTreeMap<String, String>,
+    /// Environment variables to remove (case-insensitive); removing one that is absent is a no-op.
+    pub env_unset: Vec<String>,
     /// New display name (`lampo project rename`); the id, URLs and database stay.
     pub name: Option<String>,
     /// Addresses to add, in their displayed form: `shop.test` (hosts file: needs elevation),
@@ -287,6 +301,8 @@ impl ProjectPatchRequest {
             database_name,
             public_dir,
             apache_directives,
+            env_set,
+            env_unset,
             name,
             addresses_add,
             addresses_remove,
@@ -303,6 +319,8 @@ impl ProjectPatchRequest {
             && database_name.is_none()
             && public_dir.is_none()
             && apache_directives.is_none()
+            && env_set.is_empty()
+            && env_unset.is_empty()
             && name.is_none()
             && addresses_add.is_empty()
             && addresses_remove.is_empty()
@@ -366,6 +384,10 @@ pub struct ImportProjectResultDto {
     /// php.ini keys left out (`auto_prepend_file`, `extension`, …), as written in the file.
     #[serde(default)]
     pub dropped_php_ini_keys: Vec<String>,
+    /// Names of the environment variables left out (never imported: a variable such as
+    /// `COMSPEC` or `NODE_OPTIONS` can run code here). The values are not repeated.
+    #[serde(default)]
+    pub dropped_env_vars: Vec<String>,
 }
 
 /// Result of analysing a folder before creating a project.

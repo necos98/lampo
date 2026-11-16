@@ -24,6 +24,12 @@
 {% for env in vhost.env %}
     FcgidInitialEnv {{ env.name }} "{{ env.value }}"
 {% endfor %}
+{% if vhost.project_env %}
+    # Environment variables of the project (getenv(), $_SERVER).
+{% for env in vhost.project_env %}
+    SetEnv {{ env.name }} {{ env.value }}
+{% endfor %}
+{% endif %}
     FcgidPassHeader Authorization
     <FilesMatch "\.php$">
         SetHandler fcgid-script

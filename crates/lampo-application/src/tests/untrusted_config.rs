@@ -32,11 +32,12 @@ async fn an_import_reports_what_was_left_out_and_never_brings_https() {
     exported.tls = TlsMode::LocalCa;
     let transfer = Arc::new(FakeTransfer::default());
     *transfer.to_import.lock().unwrap() = Some(exported);
-    *transfer.dropped.lock().unwrap() = DroppedOnImport { apache_directives: Some(PIPED_LOG.into()), php_ini_keys: vec!["auto_prepend_file".into()] };
+    *transfer.dropped.lock().unwrap() = DroppedOnImport { apache_directives: Some(PIPED_LOG.into()), php_ini_keys: vec!["auto_prepend_file".into()], env_vars: vec!["COMSPEC".into()] };
 
     let result = w.import_project(transfer).execute(ImportProjectRequest { file: "D:\\shop.lampo.toml".into(), root: None }, &gui()).await.unwrap();
     assert_eq!(result.dropped_apache_directives.as_deref(), Some(PIPED_LOG));
     assert_eq!(result.dropped_php_ini_keys, ["auto_prepend_file"]);
+    assert_eq!(result.dropped_env_vars, ["COMSPEC"]);
     assert!(!result.project.active);
     let saved = w.projects.get(&ProjectId::new("shop").unwrap()).unwrap().unwrap();
     assert_eq!(saved.tls, TlsMode::Disabled);
@@ -45,6 +46,7 @@ async fn an_import_reports_what_was_left_out_and_never_brings_https() {
     assert_eq!(json["id"], "shop", "the project fields stay at the top level");
     assert_eq!(json["droppedApacheDirectives"], PIPED_LOG);
     assert_eq!(json["droppedPhpIniKeys"], serde_json::json!(["auto_prepend_file"]));
+    assert_eq!(json["droppedEnvVars"], serde_json::json!(["COMSPEC"]));
 }
 
 /// From the CLI without `--allow-elevation`, an export with a hosts-file name is refused before

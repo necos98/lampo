@@ -382,6 +382,7 @@ fn no_mysql_environment() -> ProjectEnvironmentDto {
         public_dir: String::new(),
         services: vec![],
         apache_directives: String::new(),
+        env_vars: Default::default(),
     }
 }
 

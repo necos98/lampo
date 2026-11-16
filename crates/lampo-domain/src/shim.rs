@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::DomainError;
 use crate::php::{ComposerChannel, PhpMinor};
-use crate::project::ProjectRoot;
+use crate::project::{ProjectEnvVars, ProjectRoot};
 use crate::resolution::env_vars;
 use crate::service::{ServiceId, ServiceKind};
 use crate::site::SiteId;
@@ -66,6 +66,10 @@ pub struct ShimTarget {
     /// Client defaults per service kind (`mysql`, `redis`, …).
     #[serde(default)]
     pub services: BTreeMap<ServiceKind, ShimService>,
+    /// The project's own variables, set for `php`/`composer` and exported by `lampo env` /
+    /// `lampo exec`, never over Lampo's own. Empty for the default target.
+    #[serde(default, skip_serializing_if = "ProjectEnvVars::is_empty")]
+    pub env_vars: ProjectEnvVars,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ShimEntry {
@@ -142,8 +146,11 @@ pub trait ShimTool: Send + Sync {
     fn invocation(&self, target: &ShimTarget, args: &[String], folders: &dyn FolderProbe) -> Result<ShimInvocation, DomainError>;
 }
 
-fn phprc_env(target: &ShimTarget) -> Vec<(String, String)> {
-    target.phprc_dir.iter().map(|d| ("PHPRC".to_string(), d.display().to_string())).collect()
+/// What a PHP process started by a shim gets on top of the inherited environment: the project's
+/// own variables, then `PHPRC` (a reserved name, so a project variable never replaces it).
+fn php_env(target: &ShimTarget) -> Vec<(String, String)> {
+    let project = target.env_vars.effective().map(|(name, value)| (name.to_string(), value.to_string()));
+    project.chain(target.phprc_dir.iter().map(|d| ("PHPRC".to_string(), d.display().to_string()))).collect()
 }
 
 fn unavailable(tool: &str, reason: &str) -> DomainError {
@@ -164,7 +171,7 @@ pub mod tools {
             "php"
         }
         fn invocation(&self, target: &ShimTarget, args: &[String], _folders: &dyn FolderProbe) -> Result<ShimInvocation, DomainError> {
-            Ok(ShimInvocation { program: target.php_exe.clone(), args: args.to_vec(), env: phprc_env(target), notice: None })
+            Ok(ShimInvocation { program: target.php_exe.clone(), args: args.to_vec(), env: php_env(target), notice: None })
         }
     }
 
@@ -177,7 +184,7 @@ pub mod tools {
             let phar = target.composer_phar.as_ref().ok_or_else(|| unavailable("composer", "Composer is not installed for this PHP version"))?;
             let mut a = vec![phar.display().to_string()];
             a.extend_from_slice(args);
-            Ok(ShimInvocation { program: target.php_exe.clone(), args: a, env: phprc_env(target), notice: None })
+            Ok(ShimInvocation { program: target.php_exe.clone(), args: a, env: php_env(target), notice: None })
         }
     }
 
@@ -282,15 +289,17 @@ pub mod tools {
 pub struct ToolchainEnv {
     /// Directories to put in front of `PATH`, in order.
     pub path_prepend: Vec<PathBuf>,
-    /// Variables to set. Only `PHPRC` and `LAMPO_*` names: Lampo never sets framework variables
-    /// such as `DB_HOST`, which would silently override the project's `.env`.
+    /// Variables to set: Lampo's own (`PHPRC` and `LAMPO_*` names; it never sets framework
+    /// variables such as `DB_HOST`, which would silently override the project's `.env`), then the
+    /// variables the project itself declares (`ShimTarget::env_vars`), which never replace them.
     pub vars: Vec<(String, String)>,
 }
 
 impl ShimTarget {
     /// Shim dir first (so nested `php`/`composer` calls resolve the same project thanks to
     /// `LAMPO_PROJECT`, which holds inside `LAMPO_PROJECT_ROOT`), then the real tool dirs. Each
-    /// service exports `LAMPO_<prefix>_HOST`/`_PORT` (+ `_USER`, `_DATABASE` when known).
+    /// service exports `LAMPO_<prefix>_HOST`/`_PORT` (+ `_USER`, `_DATABASE` when known). The
+    /// project's own variables come last.
     pub fn toolchain_env(&self, site: Option<(&SiteId, &ProjectRoot)>, shim_dir: &Path) -> ToolchainEnv {
         let mut path_prepend = vec![shim_dir.to_path_buf(), self.php_dir.clone()];
         let mut vars: Vec<(String, String)> = Vec::new();
@@ -310,6 +319,9 @@ impl ShimTarget {
             vars.extend(s.user.iter().map(|u| (var("USER"), u.clone())));
             vars.extend(s.database.iter().map(|d| (var("DATABASE"), d.clone())));
         }
+        let project = self.env_vars.effective().filter(|(name, _)| !vars.iter().any(|(set, _)| set.eq_ignore_ascii_case(name)));
+        let project: Vec<(String, String)> = project.map(|(name, value)| (name.to_string(), value.to_string())).collect();
+        vars.extend(project);
         ToolchainEnv { path_prepend, vars }
     }
 }
@@ -344,6 +356,7 @@ pub(crate) mod tests {
             composer_phar: Some(PathBuf::from(r"C:\composer\composer.phar")),
             composer_channel: ComposerChannel::for_php(php),
             services: [(ServiceKind::MYSQL, mysql)].into(),
+            env_vars: ProjectEnvVars::default(),
         }
     }
 
@@ -541,5 +554,30 @@ pub(crate) mod tests {
         assert!(env.vars.contains(&("LAMPO_PROJECT".into(), "shop".into())));
         assert!(env.vars.contains(&("LAMPO_PROJECT_ROOT".into(), r"C:\sites\shop".into())));
         assert!(env.vars.contains(&("LAMPO_DB_DATABASE".into(), "shop".into())));
+    }
+
+    /// A target whose project declares `APP_ENV` and, in a file written by hand, `PHPRC`.
+    fn target_with_project_vars() -> ShimTarget {
+        let stored: ProjectEnvVars = serde_json::from_str(r#"{"APP_ENV": "local", "PHPRC": "C:/evil", "DB_HOST": "db"}"#).unwrap();
+        ShimTarget { env_vars: stored, ..target("8.3") }
+    }
+
+    #[test]
+    fn php_and_composer_get_the_project_variables_but_never_over_lampo_ones() {
+        let t = target_with_project_vars();
+        let expected = vec![("APP_ENV".to_string(), "local".to_string()), ("DB_HOST".to_string(), "db".to_string()), ("PHPRC".to_string(), r"C:\ini".to_string())];
+        assert_eq!(tools::Php.invocation(&t, &args(&["artisan"]), &present()).unwrap().env, expected);
+        assert_eq!(tools::Composer.invocation(&t, &args(&["install"]), &present()).unwrap().env, expected);
+        assert!(tools::Mysql.invocation(&t, &[], &present()).unwrap().env.is_empty(), "only PHP gets them");
+    }
+
+    #[test]
+    fn toolchain_env_exports_the_project_variables_after_lampo_ones() {
+        let t = target_with_project_vars();
+        let env = t.toolchain_env(None, Path::new(r"C:\lampo\bin"));
+        let names: Vec<&str> = env.vars.iter().map(|(k, _)| k.as_str()).collect();
+        assert_eq!(names.iter().filter(|n| n.eq_ignore_ascii_case("PHPRC")).count(), 1);
+        assert!(env.vars.contains(&("PHPRC".into(), r"C:\ini".into())), "Lampo's PHPRC wins");
+        assert_eq!(&names[names.len() - 2..], ["APP_ENV", "DB_HOST"]);
     }
 }

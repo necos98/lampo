@@ -15,6 +15,8 @@ mod toolchain;
 mod worktrees;
 
 #[cfg(test)]
+mod project_env_tests;
+#[cfg(test)]
 mod tests;
 
 use std::sync::Arc;

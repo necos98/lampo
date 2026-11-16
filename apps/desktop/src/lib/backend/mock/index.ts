@@ -401,7 +401,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 			return {
 				...attachWorktrees(clone(next)),
 				droppedApacheDirectives: shared ? 'CustomLog "|C:/Windows/System32/cmd.exe /c calc" common' : null,
-				droppedPhpIniKeys: shared ? ['auto_prepend_file'] : []
+				droppedPhpIniKeys: shared ? ['auto_prepend_file'] : [],
+				droppedEnvVars: shared ? ['COMSPEC'] : []
 			};
 		},
 

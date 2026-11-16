@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::address::SiteAddress;
 use crate::hostname::Hostname;
 use crate::php::{ExtensionName, PhpIniOverrides, PhpMinor};
-use crate::project::{ApacheDirectives, TlsMode};
+use crate::project::{ApacheDirectives, ProjectEnvVars, TlsMode};
 use crate::site::SiteId;
 use crate::tcp_port::Port;
 
@@ -28,6 +28,8 @@ pub struct VirtualHost {
     pub php_cgi: PathBuf,
     /// Directory holding the project's generated `php.ini`; becomes `FcgidInitialEnv PHPRC`.
     pub phprc_dir: PathBuf,
+    /// The project's own variables (`SetEnv`), after Lampo's.
+    pub env_vars: ProjectEnvVars,
     pub custom_directives: ApacheDirectives,
     pub tls: TlsMode,
     pub error_log: PathBuf,

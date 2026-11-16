@@ -21,6 +21,9 @@ pub struct DroppedOnImport {
     pub apache_directives: Option<String>,
     /// The php.ini keys left out ([`UNTRUSTED_PHP_INI_KEYS`]), as written in the file.
     pub php_ini_keys: Vec<String>,
+    /// Names of the environment variables of the export: none is imported, since a variable
+    /// (`COMSPEC`, `NODE_OPTIONS`, …) can run code here. The values are not kept.
+    pub env_vars: Vec<String>,
 }
 
 /// A parsed export: the project to save (without the dropped settings) and what was dropped.

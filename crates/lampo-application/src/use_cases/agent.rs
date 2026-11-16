@@ -197,7 +197,7 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         ),
         c(
             "lampo project create",
-            "lampo project create [<path>] [--name] [--preset] [--php] [--addressing hosts-only|standard|no-elevation] [--activate] [--no-database]",
+            "lampo project create [<path>] [--name] [--preset] [--php] [--addressing hosts-only|standard|no-elevation] [--activate] [--no-database] [--env <key>=<value>]",
             "Register a folder as a project and create its MySQL database (unless --no-database).",
             true,
             true,
@@ -214,8 +214,8 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         c("lampo project set-php", "lampo project set-php <minor> [<id>]", "Switch the project's PHP minor.", true, true),
         c(
             "lampo project set",
-            "lampo project set [<id>] [--ext <name>] [--no-ext <name>] [--addon xdebug|php-redis] [--no-addon <kind>] [--ini <key>=<value>] [--no-ini <key>] [--service redis|mailpit|mysql[@<series>]] [--no-service <kind>] [--database <name>] [--public-dir <dir>] [--apache-directives <text>] [--name <name>] [--address <addr>] [--no-address <addr>]",
-            "Change the project's extensions, add-ons, php.ini values, services, database name, public folder, Apache directives, display name or addresses (repeatable flags, one atomic edit). Addresses: <name>.localhost, 127.0.0.1:<port>, loopback (free port), or a hosts-file <name>.<tld> (needs --allow-elevation).",
+            "lampo project set [<id>] [--ext <name>] [--no-ext <name>] [--addon xdebug|php-redis] [--no-addon <kind>] [--ini <key>=<value>] [--no-ini <key>] [--env <key>=<value>] [--no-env <key>] [--service redis|mailpit|mysql[@<series>]] [--no-service <kind>] [--database <name>] [--public-dir <dir>] [--apache-directives <text>] [--name <name>] [--address <addr>] [--no-address <addr>]",
+            "Change the project's extensions, add-ons, php.ini values, environment variables (web and CLI), services, database name, public folder, Apache directives, display name or addresses (repeatable flags, one atomic edit). Addresses: <name>.localhost, 127.0.0.1:<port>, loopback (free port), or a hosts-file <name>.<tld> (needs --allow-elevation).",
             true,
             true,
         ),
@@ -224,7 +224,7 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         c(
             "lampo project import",
             "lampo project import <file> [--root <dir>]",
-            "Register a project exported from Lampo (inactive). Its Apache directives and code-running php.ini keys are never imported: they are listed (droppedApacheDirectives, droppedPhpIniKeys) for the user to review.",
+            "Register a project exported from Lampo (inactive). Its Apache directives, environment variables and code-running php.ini keys are never imported: they are listed (droppedApacheDirectives, droppedEnvVars by name, droppedPhpIniKeys) for the user to review.",
             true,
             true,
         ),

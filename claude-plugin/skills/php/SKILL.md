@@ -168,6 +168,22 @@ php --ini
 php -i
 ```
 
+## Environment variables
+
+Code that reads its configuration with `getenv()` (the `environment:` of a Docker Compose
+service) gets it from the project's environment variables, set with `--env KEY=VALUE`
+(repeatable, value verbatim) and removed with `--no-env KEY`. They apply to the site (`SetEnv`:
+`getenv()`, `$_SERVER`) and to the command line (`php`, `composer`, `lampo exec`, `lampo env`).
+Names Lampo manages are refused (`PATH`, `PHPRC`, `PHP_INI_SCAN_DIR`, `TEMP`, `TMP`,
+`PHP_FCGI_*`, `LAMPO_*`). An app that reads `.env` needs nothing here; mind that frameworks
+such as Laravel do not override a variable that is already set, so one set here wins over the
+same key in `.env`. `lampo project info` lists the names only; `--json` has the values.
+
+```powershell
+lampo project set --env APP_ENV=local --env "MAIL_FROM_NAME=My Shop"
+lampo project set --no-env APP_ENV
+```
+
 ### `mail()`
 
 PHP's `mail()` on Windows speaks SMTP to the `SMTP` / `smtp_port` php.ini values. For a site

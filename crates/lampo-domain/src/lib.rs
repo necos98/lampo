@@ -18,6 +18,7 @@ pub mod address;
 pub mod apache_directives;
 pub mod claude_code;
 pub mod detection;
+pub mod env_var;
 pub mod error;
 pub mod events;
 pub mod hostname;

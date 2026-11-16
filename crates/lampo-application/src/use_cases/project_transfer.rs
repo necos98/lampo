@@ -48,9 +48,10 @@ impl ImportProject {
         Self { writer, transfer, fs }
     }
 
-    /// The imported project is always inactive and without HTTPS. Its custom Apache directives
-    /// and the php.ini keys that could run code here are never imported: they are returned in
-    /// the result for the user to review. `root` (if given) must exist; without it the exported
+    /// The imported project is always inactive and without HTTPS. Its custom Apache directives,
+    /// its environment variables and the php.ini keys that could run code here are never
+    /// imported: they are returned in the result (variables by name only) for the user to
+    /// review. `root` (if given) must exist; without it the exported
     /// folder is kept even if missing here (relink later). When the id is already taken it gets
     /// a numeric suffix and its addresses are regenerated for the new id (the old ones would
     /// collide with the existing project). Exported addresses are otherwise kept and validated
@@ -83,6 +84,6 @@ impl ImportProject {
             })
             .await?;
         let project = self.writer.finish(saved, ctx).await?;
-        Ok(ImportProjectResultDto { project, dropped_apache_directives: dropped.apache_directives, dropped_php_ini_keys: dropped.php_ini_keys })
+        Ok(ImportProjectResultDto { project, dropped_apache_directives: dropped.apache_directives, dropped_php_ini_keys: dropped.php_ini_keys, dropped_env_vars: dropped.env_vars })
     }
 }

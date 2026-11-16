@@ -50,14 +50,16 @@ impl ProjectEnvironmentPolicy {
     }
 
     /// Checks `candidate` against `stored`, the saved environment (`None` for a new project).
-    /// Always: its custom Apache directives (a stored project may predate a rule: it loads, but
-    /// is never saved again unfixed) and its service kinds and versions. For what it introduces:
+    /// Always: its custom Apache directives and environment variables (a stored project may
+    /// predate a rule: it loads, but is never saved again unfixed) and its service kinds and
+    /// versions. For what it introduces:
     /// `Validation` for an instance the settings do not configure, `PackageMissing` for an add-on
     /// not installed for its PHP minor (a PHP switch re-checks every add-on). `Validation` for a
     /// bundled extension added to an existing project that its PHP build neither ships nor has
     /// compiled in (a stored name renamed for a new PHP minor is not an addition).
     pub(crate) fn check(&self, stored: Option<&ProjectEnvironment>, candidate: &ProjectEnvironment, settings: &Settings) -> AppResult<()> {
         candidate.apache_directives.validate()?;
+        candidate.env_vars.validate()?;
         self.services.validate_environment(candidate)?;
         let stored_services: Vec<ServiceId> = stored.map(|s| s.service_ids().collect()).unwrap_or_default();
         self.check_instances(candidate.service_ids().filter(|id| !stored_services.contains(id)), settings)?;

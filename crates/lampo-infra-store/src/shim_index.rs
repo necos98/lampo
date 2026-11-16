@@ -126,6 +126,7 @@ mod tests {
             composer_phar: None,
             composer_channel: ComposerChannel::for_php(php),
             services: Default::default(),
+            env_vars: Default::default(),
         };
         let projects =
             (0..n).map(|i| ShimEntry { site: format!("site-{i}").parse().unwrap(), root: ProjectRoot::new(format!("C:\\sites\\site-{i}")).unwrap(), target: target.clone() }).collect();

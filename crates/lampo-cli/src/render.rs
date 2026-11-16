@@ -126,6 +126,11 @@ pub fn project(p: &ProjectDto) -> String {
         let pairs: Vec<String> = p.environment.php_ini.iter().map(|(k, v)| format!("{k}={v}")).collect();
         out.push_str(&format!("  php.ini:   {}\n", pairs.join(", ")));
     }
+    if !p.environment.env_vars.is_empty() {
+        // Names only: the values may be secrets (`--json` has them).
+        let names: Vec<&str> = p.environment.env_vars.keys().map(String::as_str).collect();
+        out.push_str(&format!("  env vars:  {}\n", names.join(", ")));
+    }
     let directives = p.environment.apache_directives.lines().filter(|l| !l.trim().is_empty()).count();
     if directives > 0 {
         out.push_str(&format!("  apache:    {directives} extra directive line(s)\n"));

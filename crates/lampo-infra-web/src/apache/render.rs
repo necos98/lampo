@@ -11,7 +11,7 @@ use minijinja::{Environment, UndefinedBehavior};
 use lampo_infra_fs::log_rotation::{LOG_SET_SIZE, MAX_LOG_MIB};
 use serde::Serialize;
 
-use super::syntax::{apache_path, fcgid_wrapper_command, rotated_log};
+use super::syntax::{apache_path, fcgid_wrapper_command, quoted_text, rotated_log};
 use super::templates;
 use super::validation::rotatelogs_exe;
 use crate::site_layout;
@@ -188,6 +188,8 @@ struct VhostView {
     php_label: String,
     fcgid_wrapper: String,
     env: Vec<EnvVar>,
+    /// The project's own variables (`SetEnv`), values already quoted.
+    project_env: Vec<EnvVar>,
     custom_directives: String,
 }
 
@@ -323,6 +325,7 @@ impl ApacheConfigRenderer {
             php_label: php_label(&vhost.php_cgi),
             fcgid_wrapper: fcgid_wrapper_command(&php_cgi),
             env,
+            project_env: project_env(vhost)?,
             custom_directives: vhost.custom_directives.as_str().trim_end().to_string(),
         };
         self.env.get_template("vhost.conf").and_then(|t| t.render(minijinja::context! { vhost => view })).map_err(render_error)
@@ -387,6 +390,13 @@ fn internal_server_name(vhost: &VirtualHost) -> String {
 fn rotated_log_of(config: &WebServerConfig, file: &str) -> PortResult<String> {
     let rotatelogs = apache_path(&rotatelogs_exe(&config.server_root))?;
     Ok(rotated_log(&rotatelogs, file, LOG_SET_SIZE, MAX_LOG_MIB))
+}
+
+/// The project's variables as `SetEnv` arguments (request environment: `getenv()`, `$_SERVER`).
+/// A name Lampo manages (only in a file written by hand) is skipped, so it never shadows the
+/// `FcgidInitialEnv` values above.
+fn project_env(vhost: &VirtualHost) -> PortResult<Vec<EnvVar>> {
+    vhost.env_vars.effective().map(|(name, value)| Ok(EnvVar { name: name.to_string(), value: quoted_text(value)? })).collect()
 }
 
 /// Variables Lampo sets per site; inherited values with these names are ignored.
@@ -470,6 +480,25 @@ mod tests {
         let mut config = sample_config();
         config.vhosts[0].document_root = std::path::PathBuf::from(r"C:\x${SRVROOT}");
         assert!(matches!(ApacheConfigRenderer::new(sample_options()).render(&config), Err(PortError::InvalidData { .. })));
+    }
+
+    #[test]
+    fn project_variables_are_set_escaped_after_lampo_ones() {
+        let files = render(&sample_config());
+        let shop = &files[2].1;
+        let lines: Vec<&str> = shop.lines().map(str::trim).filter(|l| l.starts_with("SetEnv ")).collect();
+        assert_eq!(lines, ["SetEnv APP_ENV \"local\"", r#"SetEnv APP_NAME "My \"Shop\"""#, r#"SetEnv STORAGE_DIR "D:\\shop data\\""#]);
+        assert!(shop.find("SetEnv APP_ENV").unwrap() > shop.rfind("FcgidInitialEnv").unwrap());
+        assert!(!files[1].1.contains("SetEnv"), "a site without variables gets none");
+    }
+
+    #[test]
+    fn a_stored_reserved_variable_never_shadows_lampo_ones() {
+        let mut config = sample_config();
+        config.vhosts[1].env_vars = serde_json::from_str(r#"{"PHPRC": "C:/evil", "TEMP": "C:/x", "APP_ENV": "local"}"#).unwrap();
+        let shop = ApacheConfigRenderer::new(sample_options()).render_vhost(&config, &config.vhosts[1]).unwrap();
+        let set: Vec<&str> = shop.lines().map(str::trim).filter(|l| l.starts_with("SetEnv ")).collect();
+        assert_eq!(set, ["SetEnv APP_ENV \"local\""]);
     }
 
     #[test]

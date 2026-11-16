@@ -63,7 +63,13 @@ publicDir: string,
  * Services the project needs while served (`{ "kind": "mysql", "version": "8.4" }`,
  * `{ "kind": "redis", "version": null }`). The MySQL entry also holds its database.
  */
-services: Array<ServiceUse>, apacheDirectives: string, };
+services: Array<ServiceUse>, apacheDirectives: string, 
+/**
+ * Variables set for the site's PHP on the web (`SetEnv`) and on the command line (`lampo
+ * env`, `lampo exec`, the `php`/`composer` shims). Names managed by Lampo (`PATH`, `PHPRC`,
+ * `LAMPO_*`, …) are refused. Omitted = none.
+ */
+envVars: { [key in string]: string }, };
 
 /**
  * One service a project uses: its kind and, for versioned kinds, the series.
@@ -199,7 +205,12 @@ addresses?: Array<SiteAddress> | null, addressing?: Addressing, activate?: boole
  * Default `true` (also when the field is omitted). A failure never fails the creation: it
  * is reported in [`CreateProjectResultDto::database_setup`].
  */
-createDatabase?: boolean, };
+createDatabase?: boolean, 
+/**
+ * Environment variables added to the environment (the preset's or `environment`), each
+ * replacing one with the same name (`lampo project create --env KEY=VALUE`).
+ */
+envVars?: { [key in string]: string }, };
 
 /**
  * What happened to a new project's database (`CreateProjectResultDto::database_setup`).
@@ -299,7 +310,12 @@ droppedApacheDirectives: string | null,
 /**
  * php.ini keys left out (`auto_prepend_file`, `extension`, …), as written in the file.
  */
-droppedPhpIniKeys: Array<string>, id: string, name: string, root: string, 
+droppedPhpIniKeys: Array<string>, 
+/**
+ * Names of the environment variables left out (never imported: a variable such as
+ * `COMSPEC` or `NODE_OPTIONS` can run code here). The values are not repeated.
+ */
+droppedEnvVars: Array<string>, id: string, name: string, root: string, 
 /**
  * `false` when the folder was moved/deleted (offer "relink").
  */

@@ -1,6 +1,6 @@
 //! Partial edits of a project (`lampo project set`, `lampo project rename`): PHP minor,
 //! extensions, add-ons, php.ini overrides, services, database name, public folder, Apache
-//! directives, display name and addresses.
+//! directives, environment variables, display name and addresses.
 //!
 //! The patch is applied to the *stored* project inside [`ProjectWriter::modify`] (under the
 //! allocator lock), so it never overwrites a concurrent edit with stale data the way a
@@ -17,7 +17,8 @@ use lampo_domain::mysql::DatabaseName;
 use lampo_domain::package::PackageKind;
 use lampo_domain::php::{ExtensionName, IniKey, PhpMinor, extensions_for_php, php_ini_overrides};
 use lampo_domain::ports::InstalledPackageRegistry;
-use lampo_domain::project::{ApacheDirectives, DisplayName, Project, ProjectEnvironment, PublicDir};
+use lampo_domain::env_var::EnvVarName;
+use lampo_domain::project::{ApacheDirectives, DisplayName, Project, ProjectEnvVars, ProjectEnvironment, PublicDir};
 use lampo_domain::service::ServiceKind;
 use lampo_domain::settings::Settings;
 use lampo_domain::tcp_port::Port;
@@ -106,6 +107,8 @@ struct Patch {
     database: Option<DatabaseName>,
     public_dir: Option<PublicDir>,
     apache_directives: Option<ApacheDirectives>,
+    env_set: ProjectEnvVars,
+    env_unset: Vec<EnvVarName>,
     name: Option<DisplayName>,
     /// In request order (appended in that order).
     addresses_add: Vec<AddressArg>,
@@ -174,6 +177,8 @@ impl Patch {
             database: r.database_name.as_deref().map(|d| DatabaseName::new(d.trim())).transpose()?,
             public_dir: r.public_dir.as_deref().map(PublicDir::new).transpose()?,
             apache_directives: r.apache_directives.clone().map(ApacheDirectives::new).transpose()?,
+            env_set: ProjectEnvVars::from_pairs(r.env_set.iter().map(|(name, value)| (name.as_str(), value.clone())))?,
+            env_unset: r.env_unset.iter().map(EnvVarName::existing).collect::<Result<_, _>>()?,
             name: r.name.as_deref().map(DisplayName::new).transpose()?,
             addresses_add: r.addresses_add.iter().map(|a| AddressArg::parse(a)).collect::<AppResult<_>>()?,
             addresses_remove: r.addresses_remove.iter().map(|a| AddressArg::parse(a)).collect::<AppResult<_>>()?,
@@ -187,6 +192,9 @@ impl Patch {
         disjoint("service", &services_add, &patch.services_remove)?;
         if services_add.len() != patch.services_add.len() {
             return Err(validation("a service kind is added twice"));
+        }
+        if let Some(both) = patch.env_unset.iter().find(|name| patch.env_set.get(name.as_str()).is_some()) {
+            return Err(validation(format!("environment variable `{both}` is both set and removed")));
         }
         Ok(patch)
     }
@@ -218,6 +226,12 @@ impl Patch {
         }
         if let Some(directives) = &self.apache_directives {
             env.apache_directives = directives.clone();
+        }
+        for name in &self.env_unset {
+            env.env_vars.remove(name.as_str());
+        }
+        for (name, value) in self.env_set.iter() {
+            env.env_vars.set(name.clone(), value.clone());
         }
         Ok(())
     }

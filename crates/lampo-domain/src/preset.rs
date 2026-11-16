@@ -86,6 +86,7 @@ pub mod builtin {
             public_dir: PublicDir::new(public_dir).expect("built-in public dirs are valid"),
             services: Default::default(),
             apache_directives: ApacheDirectives::default(),
+            env_vars: Default::default(),
         };
         env.set_mysql(mysql);
         env

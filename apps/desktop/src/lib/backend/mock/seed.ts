@@ -11,6 +11,7 @@ const env = ({ mysql = '8.4', redis = false, mail = false, ...over }: EnvOverrid
 	publicDir: 'public',
 	services: [...(mysql ? [{ kind: 'mysql', version: mysql }] : []), ...(redis ? [{ kind: 'redis', version: null }] : []), ...(mail ? [{ kind: 'mailpit', version: null }] : [])],
 	apacheDirectives: '',
+	envVars: {},
 	...over
 });
 

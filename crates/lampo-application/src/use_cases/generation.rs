@@ -150,6 +150,7 @@ fn shim_target(
         composer_phar: composer_phar_for(&snap.installed, php),
         composer_channel: php.composer_channel(),
         services: catalog.shim_services(env, database, &snap.settings, &snap.installed, paths),
+        env_vars: env.map(|e| e.env_vars.clone()).unwrap_or_default(),
     })
 }
 
@@ -198,6 +199,7 @@ pub(crate) fn web_config(snap: &ConfigSnapshot, paths: &LampoPaths, warnings: &m
                 document_root: site.document_root(),
                 php_cgi,
                 phprc_dir: paths.php_ini_dir(&site.id),
+                env_vars: site.environment().env_vars.clone(),
                 custom_directives: site.environment().apache_directives.clone(),
                 tls: site.tls(),
                 error_log: LogSource::SiteError(site.id.clone()).file(paths),

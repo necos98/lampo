@@ -22,8 +22,16 @@ fn home() -> tempfile::TempDir {
     std::fs::create_dir_all(dir.path().join("config")).unwrap();
     let php = PhpMinor::parse("8.3").unwrap();
     let php_dir = dir.path().join("php");
-    let default =
-        ShimTarget { php, php_exe: php_dir.join("php.exe"), php_dir, phprc_dir: None, composer_phar: None, composer_channel: ComposerChannel::for_php(php), services: Default::default() };
+    let default = ShimTarget {
+        php,
+        php_exe: php_dir.join("php.exe"),
+        php_dir,
+        phprc_dir: None,
+        composer_phar: None,
+        composer_channel: ComposerChannel::for_php(php),
+        services: Default::default(),
+        env_vars: Default::default(),
+    };
     let index = ShimIndex { default: Some(default), ..Default::default() };
     std::fs::write(bin.join("shim-index.json"), serde_json::to_string(&index).unwrap()).unwrap();
     dir

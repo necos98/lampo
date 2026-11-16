@@ -2,6 +2,7 @@
 
 mod allocation;
 mod claude_code;
+mod env_vars;
 mod environment;
 mod external_apps;
 mod misc;

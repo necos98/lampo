@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 pub use crate::apache_directives::ApacheDirectives;
+pub use crate::env_var::ProjectEnvVars;
 use crate::address::{SiteAddress, validate_addresses};
 use crate::error::DomainError;
 use crate::mysql::{DatabaseConnection, DatabaseName, MysqlSeries};
@@ -346,6 +347,10 @@ pub struct ProjectEnvironment {
     /// The services the project's sites need while served (MySQL `8.4`, Redis, …).
     pub services: BTreeMap<ServiceKind, ServiceUse>,
     pub apache_directives: ApacheDirectives,
+    /// Variables set for the site's PHP, on the web and on the command line (written only
+    /// when there are some).
+    #[serde(default, skip_serializing_if = "ProjectEnvVars::is_empty")]
+    pub env_vars: ProjectEnvVars,
 }
 
 /// The file shape: today's fields plus the legacy `mysql`/`redis` ones.
@@ -365,6 +370,8 @@ struct EnvironmentFile {
     #[serde(default)]
     apache_directives: ApacheDirectives,
     #[serde(default)]
+    env_vars: ProjectEnvVars,
+    #[serde(default)]
     mysql: Option<MysqlSeries>,
     #[serde(default)]
     redis: bool,
@@ -372,8 +379,16 @@ struct EnvironmentFile {
 
 impl From<EnvironmentFile> for ProjectEnvironment {
     fn from(f: EnvironmentFile) -> Self {
-        let mut env =
-            Self { php: f.php, extensions: f.extensions, addons: f.addons, php_ini: f.php_ini, public_dir: f.public_dir, services: f.services, apache_directives: f.apache_directives };
+        let mut env = Self {
+            php: f.php,
+            extensions: f.extensions,
+            addons: f.addons,
+            php_ini: f.php_ini,
+            public_dir: f.public_dir,
+            services: f.services,
+            apache_directives: f.apache_directives,
+            env_vars: f.env_vars,
+        };
         if let Some(series) = f.mysql {
             env.set_mysql(Some(series));
         }
@@ -395,6 +410,7 @@ impl ProjectEnvironment {
             public_dir: PublicDir::root(),
             services: BTreeMap::new(),
             apache_directives: ApacheDirectives::default(),
+            env_vars: ProjectEnvVars::default(),
         }
     }
 

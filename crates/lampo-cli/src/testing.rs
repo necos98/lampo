@@ -29,7 +29,7 @@ pub fn project_json() -> Value {
         "url": "http://127.0.0.1:8101", "urls": ["http://127.0.0.1:8101", "http://shop.localhost:8101"],
         "documentRoot": "C:\\work\\shop\\public",
         "environment": {"phpVersion": "8.3", "extensions": ["intl"], "addons": [], "phpIni": {}, "publicDir": "public",
-                        "services": [{"kind": "mysql", "version": "8.4"}], "apacheDirectives": ""},
+                        "services": [{"kind": "mysql", "version": "8.4"}], "apacheDirectives": "", "envVars": {}},
         "databaseName": "shop",
         "database": {"mysqlVersion": "8.4", "host": "127.0.0.1", "port": 3306, "user": "root", "password": "", "database": "shop"},
         "tls": "disabled", "active": true, "originPreset": "laravel", "worktrees": [], "notices": []

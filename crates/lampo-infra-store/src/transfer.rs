@@ -14,12 +14,13 @@ const KIND_VALUE: &str = "lampo-project";
 const ENVIRONMENT_KEY: &str = "environment";
 const DIRECTIVES_KEY: &str = "apache_directives";
 const PHP_INI_KEY: &str = "php_ini";
+const ENV_VARS_KEY: &str = "env_vars";
 
 /// Export file = project TOML with `kind = "lampo-project"` and `schema` headers.
 ///
 /// An export may come from someone else, so the import leaves out (and reports) what would run
-/// code here (`project_import`), resets `active` and `tls`, and keeps the database name only
-/// when the project uses MySQL.
+/// code here (`project_import`: Apache directives, environment variables, some php.ini keys),
+/// resets `active` and `tls`, and keeps the database name only when the project uses MySQL.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TomlProjectTransfer;
 
@@ -78,7 +79,12 @@ fn drop_untrusted(table: &mut Table, name: &str) -> PortResult<DroppedOnImport> 
         }
         _ => Vec::new(),
     };
-    Ok(DroppedOnImport { apache_directives, php_ini_keys })
+    let env_vars = match environment.remove(ENV_VARS_KEY) {
+        None => Vec::new(),
+        Some(Value::Table(vars)) => vars.into_iter().map(|(name, _)| name).collect(),
+        Some(_) => return Err(PortError::invalid_data(name, "`environment.env_vars` must be a table")),
+    };
+    Ok(DroppedOnImport { apache_directives, php_ini_keys, env_vars })
 }
 
 #[cfg(test)]
@@ -110,10 +116,11 @@ mod tests {
         assert_eq!(back, ImportedProject { project: expected, dropped: DroppedOnImport::default() });
     }
 
-    /// A shared export must not run code here: its Apache directives and the php.ini keys that
-    /// load or run files are left out and reported, everything else is kept.
+    /// A shared export must not run code here: its Apache directives, its environment variables
+    /// and the php.ini keys that load or run files are left out and reported, everything else
+    /// is kept.
     #[test]
-    fn a_malicious_export_loses_its_directives_and_untrusted_php_ini_keys() {
+    fn a_malicious_export_loses_its_directives_variables_and_untrusted_php_ini_keys() {
         let dir = tempfile::tempdir().unwrap();
         let (file, mut table) = exported(&dir, &project("shop", "C:\\sites\\shop"));
         let env = table.get_mut(ENVIRONMENT_KEY).and_then(Value::as_table_mut).unwrap();
@@ -123,10 +130,14 @@ mod tests {
         for (key, value) in [("auto_prepend_file", "\\\\evil\\share\\x.php"), ("Extension", "C:/evil.dll"), (" zend_extension", "x"), ("include_path", "C:/"), ("memory_limit", "512M")] {
             ini.insert(key.into(), Value::String(value.into()));
         }
+        let vars = [("COMSPEC", "C:/evil.exe"), ("APP_KEY", "secret")].map(|(k, v)| (k.to_string(), Value::String(v.into())));
+        env.insert(ENV_VARS_KEY.into(), Value::Table(vars.into_iter().collect()));
         table.insert("tls".into(), Value::String("local-ca".into()));
         write_table(&file, &table).unwrap();
 
         let ImportedProject { project, dropped } = TomlProjectTransfer.import_from(&file).unwrap();
+        assert_eq!(dropped.env_vars, ["APP_KEY", "COMSPEC"], "names only");
+        assert!(project.environment.env_vars.is_empty());
         assert_eq!(dropped.apache_directives.as_deref(), Some(directives));
         let mut keys = dropped.php_ini_keys.clone();
         keys.sort();
@@ -169,6 +180,8 @@ mod tests {
         assert!(TomlProjectTransfer.import_from(&file).unwrap_err().to_string().contains("x.toml"));
         std::fs::write(&file, "kind = \"lampo-project\"\nschema = 2\n[environment]\napache_directives = 1\n").unwrap();
         assert!(TomlProjectTransfer.import_from(&file).unwrap_err().to_string().contains("must be a string"));
+        std::fs::write(&file, "kind = \"lampo-project\"\nschema = 2\n[environment]\nenv_vars = \"x\"\n").unwrap();
+        assert!(TomlProjectTransfer.import_from(&file).unwrap_err().to_string().contains("must be a table"));
         std::fs::write(&file, "[[[").unwrap();
         assert!(TomlProjectTransfer.import_from(&file).is_err());
         assert!(matches!(TomlProjectTransfer.import_from(&dir.path().join("none.toml")), Err(PortError::NotFound { .. })));

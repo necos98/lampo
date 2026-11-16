@@ -60,6 +60,24 @@ mod tests {
         assert!(text.contains("schema = 2"), "{text}");
     }
 
+    /// Environment variables are an optional table of the environment: no schema bump, files
+    /// without it load unchanged, and an empty set is not written at all.
+    #[test]
+    fn environment_variables_round_trip_and_are_optional() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = TomlProjectRepository::new(paths(&dir));
+        let mut p = project("shop", "C:\\sites\\shop");
+        repo.save(&p).unwrap();
+        let file = paths(&dir).project_file(&p.id);
+        assert!(!std::fs::read_to_string(&file).unwrap().contains("env_vars"));
+
+        p.environment.env_vars = lampo_domain::project::ProjectEnvVars::from_pairs([("APP_ENV", "local"), ("APP_NAME", r#"My "Shop" C:\x\"#)]).unwrap();
+        repo.save(&p).unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains("[environment.env_vars]") && text.contains("schema = 2"), "{text}");
+        assert_eq!(repo.get(&p.id).unwrap().unwrap(), p);
+    }
+
     #[test]
     fn list_is_sorted_and_survives_a_corrupt_file() {
         let dir = tempfile::tempdir().unwrap();

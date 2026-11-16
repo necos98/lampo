@@ -14,7 +14,7 @@ use lampo_domain::package::PackageKind;
 use lampo_domain::php::PhpMinor;
 use lampo_domain::ports::{EventPublisher, FileSystemInspector, InstalledPackageRegistry, ProjectDetector, ProjectRepository, SettingsRepository, WorktreeRepository};
 use lampo_domain::preset::Preset;
-use lampo_domain::project::{DisplayName, Project, ProjectEnvironment, ProjectId, ProjectRoot, TlsMode, unique_project_id};
+use lampo_domain::project::{DisplayName, Project, ProjectEnvVars, ProjectEnvironment, ProjectId, ProjectRoot, TlsMode, unique_project_id};
 use lampo_domain::service::ServiceKind;
 use lampo_domain::tcp_port::Port;
 use lampo_domain::worktree::WorktreeEnvironment;
@@ -208,6 +208,7 @@ impl CreateProject {
     /// PHP: the request's `phpVersion`, else the preset's — raised to the detected minimum
     /// (`composer.json` `require.php`, a container image) when the preset's PHP is older than that.
     /// Services: the preset's, plus the detected unversioned ones (`add_detected_services`).
+    /// Environment variables: the environment's, plus `envVars` (which win on a same name).
     ///
     /// The database step never fails the creation (the project is already saved): its outcome
     /// is in [`CreateProjectResultDto::database_setup`]. It runs before the sync, so the sync
@@ -234,6 +235,10 @@ impl CreateProject {
         }
         if request.environment.is_none() {
             self.add_detected_services(&mut environment, &detection.services);
+        }
+        let extra_vars = ProjectEnvVars::from_pairs(request.env_vars.iter().map(|(name, value)| (name.as_str(), value.clone())))?;
+        for (name, value) in extra_vars.iter() {
+            environment.env_vars.set(name.clone(), value.clone());
         }
         let explicit = request.addresses.as_ref().map(|list| list.iter().map(address_from_dto).collect::<Result<Vec<_>, _>>()).transpose()?;
         let addressing = addressing_from_dto(request.addressing);
