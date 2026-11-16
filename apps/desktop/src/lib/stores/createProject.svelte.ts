@@ -6,10 +6,12 @@ import {
 	type Project,
 	type ScaffoldProjectRequest,
 	type StarterKit,
+	type TaskOutcome,
 	type TestingFramework
 } from '../api/index.js';
 import type { Backend } from '../backend/ports.js';
 import type { ProjectsStore } from './projects.svelte.js';
+import { scaffoldViewOf, type ScaffoldPhase, type ScaffoldSession } from './scaffoldSession.js';
 import { scaffoldTaskKey, type TaskState, type TasksStore } from './tasks.svelte.js';
 
 const GENERIC_PRESET = 'generic-php';
@@ -27,8 +29,7 @@ export function compareMinor(a: string, b: string): number {
 /** Where the project comes from: a folder that already exists, a git clone or a new Laravel app. */
 export type ProjectSource = 'existing' | 'git' | 'laravel';
 
-/** Setup of a new folder: filling the form, running (live log), failed (log + retry), done. */
-export type ScaffoldPhase = 'form' | 'running' | 'failed' | 'done';
+export type { ScaffoldPhase };
 
 /** Same rule as the backend (`folder_name_from_repo_url`): the last path segment without `.git`. */
 export function folderNameFromRepoUrl(url: string): string {
@@ -56,7 +57,8 @@ export function laravelNameIsValid(name: string): boolean {
  * The "add a project" flow. For an existing folder: folder -> detection suggests preset and PHP
  * -> user confirms. For a new project the folder is first created by a background task (git
  * clone or the Laravel Installer, with a live log), then the same detection/confirm step runs on
- * it. One instance per visit of the create screen.
+ * it. One instance per visit of the create screen; a setup started in an earlier visit and not
+ * registered yet is picked up again through the `ScaffoldSession`.
  */
 export class CreateProjectFlow {
 	source = $state<ProjectSource>('existing');
@@ -95,15 +97,18 @@ export class CreateProjectFlow {
 	readonly #backend: Backend;
 	readonly #projects: ProjectsStore;
 	readonly #tasks: TasksStore;
+	readonly #session: ScaffoldSession;
 	#generation = 0;
 	/** The folder name follows the repository URL until the user types one. */
 	#folderNameTouched = false;
 	#stopListening: (() => void) | null = null;
+	#detach: (() => void) | null = null;
 
-	constructor(backend: Backend, projects: ProjectsStore, tasks: TasksStore) {
+	constructor(backend: Backend, projects: ProjectsStore, tasks: TasksStore, session: ScaffoldSession) {
 		this.#backend = backend;
 		this.#projects = projects;
 		this.#tasks = tasks;
+		this.#session = session;
 	}
 
 	get canCreate(): boolean {
@@ -173,11 +178,12 @@ export class CreateProjectFlow {
 		this.starting = true;
 		this.scaffoldError = null;
 		this.cancelled = false;
-		this.#stopListening ??= this.#tasks.onFinished((t) => this.#finished(t));
+		this.#listen();
 		try {
 			const { taskId } = await this.#backend.commands.scaffoldProject(request);
 			this.taskId = taskId;
 			this.phase = 'running';
+			this.#session.began(request, taskId);
 			this.#tasks.track(taskId, { kind: 'scaffold', key: scaffoldTaskKey(request) });
 		} catch (e) {
 			this.scaffoldError = toAppError(e);
@@ -197,30 +203,71 @@ export class CreateProjectFlow {
 		this.phase = 'form';
 	}
 
-	#finished(task: TaskState): void {
-		if (task.taskId !== this.taskId || !task.outcome) return;
-		const outcome = task.outcome;
-		if (outcome.status === 'succeeded') {
-			this.phase = 'done';
-			this.folder = this.destination;
-			const php = this.source === 'laravel' ? this.laravelPhp : null;
-			void this.detect().then(() => {
-				// The installer ran with this PHP: the natural default for the project too.
-				if (php && this.detection) this.phpVersion = php;
-			});
-		} else if (outcome.status === 'cancelled') {
-			this.cancelled = true;
-			this.phase = 'form';
+	/**
+	 * Call when the screen is shown: takes back the setup started in an earlier visit (running,
+	 * or finished and not registered yet) with its form values, log and the step it reached.
+	 */
+	resume(): void {
+		this.#detach ??= this.#session.attach();
+		const request = this.#session.request;
+		const task = request ? this.#tasks.forKey(scaffoldTaskKey(request)) : null;
+		if (!request || !task) return;
+		this.#restore(request);
+		this.taskId = task.taskId;
+		this.#listen();
+		this.#apply(task.outcome);
+	}
+
+	/** Puts the values of a started setup back in the form. */
+	#restore(request: ScaffoldProjectRequest): void {
+		this.parentDir = request.parentDir;
+		this.folderName = request.folderName ?? '';
+		this.#folderNameTouched = true;
+		const source = request.source;
+		if (source.kind === 'git-clone') {
+			this.source = 'git';
+			this.repoUrl = source.url;
+			this.branch = source.branch ?? '';
 		} else {
-			this.scaffoldError = outcome.error;
-			this.phase = 'failed';
+			this.source = 'laravel';
+			this.laravelPhp = source.phpVersion ?? null;
+			this.starterKit = source.starterKit ?? this.starterKit;
+			this.testing = source.testing ?? this.testing;
+			this.initGit = source.git ?? false;
+			this.npm = source.npm ?? false;
 		}
 	}
 
-	/** Removes the task listener (call when leaving the screen). */
+	#listen(): void {
+		this.#stopListening ??= this.#tasks.onFinished((t) => this.#finished(t));
+	}
+
+	#finished(task: TaskState): void {
+		if (task.taskId !== this.taskId || !task.outcome) return;
+		this.#apply(task.outcome);
+	}
+
+	/** Shows the step a setup task reached; a finished one continues into detection. */
+	#apply(outcome: TaskOutcome | null): void {
+		const view = scaffoldViewOf(outcome);
+		this.phase = view.phase;
+		this.cancelled = view.cancelled;
+		this.scaffoldError = view.error;
+		if (view.phase !== 'done') return;
+		this.folder = this.destination;
+		const php = this.source === 'laravel' ? this.laravelPhp : null;
+		void this.detect().then(() => {
+			// The installer ran with this PHP: the natural default for the project too.
+			if (php && this.detection) this.phpVersion = php;
+		});
+	}
+
+	/** Call when leaving the screen: stops following the task and lets the session announce its end. */
 	dispose(): void {
 		this.#stopListening?.();
 		this.#stopListening = null;
+		this.#detach?.();
+		this.#detach = null;
 	}
 
 	async detect(): Promise<void> {
@@ -266,6 +313,9 @@ export class CreateProjectFlow {
 			activate: true
 		});
 		this.creating = false;
-		return result.ok ? result.value : null;
+		if (!result.ok) return null;
+		// The scaffolded folder is now a project: a later visit starts from a clean form.
+		if (this.source !== 'existing') this.#session.registered();
+		return result.value;
 	}
 }

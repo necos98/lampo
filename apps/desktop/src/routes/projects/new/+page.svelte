@@ -33,6 +33,8 @@
 	const t = m.create;
 
 	onMount(() => {
+		// A clone or Laravel setup started before leaving this page continues where it got to.
+		flow.resume();
 		if (!presets.list.data) void presets.load();
 		if (!packages.catalog.data) void packages.loadLocal();
 		return () => flow.dispose();
@@ -250,9 +252,8 @@
 							aria-live="polite">{task.lines.length ? task.lines.join('\n') : t.logWaiting}</pre>
 					</div>
 					{#if flow.phase === 'failed' && flow.scaffoldError}
-						<ErrorNotice error={flow.scaffoldError} title={t.failed} onretry={() => flow.startScaffold()} />
-						{#if scaffoldErrorText === t.gitMissing}<p class="text-sm text-destructive">{t.gitMissing}</p>{/if}
-						<p class="font-mono text-xs text-muted-foreground">{flow.scaffoldError.message}</p>
+						<!-- Retry lives in the footer, next to Modifica: one block, one button. -->
+						<ErrorNotice error={flow.scaffoldError} title={t.failed} description={scaffoldErrorText} />
 					{/if}
 					{#if flow.phase === 'done'}
 						<p class="text-sm text-emerald-700 dark:text-emerald-400">{t.done(flow.folder)}</p>

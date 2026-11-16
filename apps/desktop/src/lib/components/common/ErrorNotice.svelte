@@ -10,10 +10,12 @@
 	interface Props {
 		error: AppError | null;
 		title?: string;
+		/** Replaces the generic text of the error code when the caller knows better. */
+		description?: string | null;
 		onretry?: () => void;
 	}
 
-	let { error, title = m.common.loadFailed, onretry }: Props = $props();
+	let { error, title = m.common.loadFailed, description = null, onretry }: Props = $props();
 	const output = $derived(error ? errorOutput(error) : null);
 </script>
 
@@ -21,7 +23,7 @@
 	<CircleAlert />
 	<Alert.Title>{title}</Alert.Title>
 	<Alert.Description>
-		<p>{error ? describeError(error) : ''}</p>
+		<p>{description ?? (error ? describeError(error) : '')}</p>
 		{#if output}
 			<pre class="mt-2 max-h-40 overflow-auto rounded bg-muted p-2 font-mono text-xs whitespace-pre-wrap text-foreground">{output}</pre>
 		{/if}

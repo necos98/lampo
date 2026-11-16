@@ -284,7 +284,9 @@ export const it = {
 		cancelledNotice: 'Operazione annullata: la cartella parziale è stata rimossa.',
 		done: (path: string) => `Cartella pronta: ${path}. Controlla i dati e crea il progetto.`,
 		edit: 'Modifica',
-		gitMissing: 'Git non trovato: installalo da git-scm.com e riprova.'
+		gitMissing: 'Git non trovato: installalo da git-scm.com e riprova.',
+		readyElsewhere: 'Cartella pronta: registra progetto',
+		register: 'Registra'
 	},
 	worktrees: {
 		title: 'Ambienti worktree',

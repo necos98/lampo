@@ -2,7 +2,10 @@
  * Composition root of the GUI state. The only place that picks the backend and wires stores
  * together; views import the singletons from here and never touch `invoke` or event names.
  */
+import { goto } from '$app/navigation';
+
 import { backend } from '../backend/gateway.js';
+import { messages as m } from '../messages/index.js';
 import { notifier } from '../services/notifier.js';
 import { DiagnosticsStore } from './diagnostics.svelte.js';
 import { ElevationStore } from './elevation.svelte.js';
@@ -21,6 +24,10 @@ import { UnsavedChanges } from './unsavedChanges.js';
 import { UpdaterStore } from './updater.svelte.js';
 import { WorktreesStore } from './worktrees.svelte.js';
 import { CreateProjectFlow } from './createProject.svelte.js';
+import { ScaffoldSession } from './scaffoldSession.js';
+
+/** The create screen, where a scaffolded folder is confirmed as a project. */
+const CREATE_PROJECT_ROUTE = '/projects/new';
 
 export const simulated = backend.simulated;
 
@@ -39,12 +46,16 @@ export const integrations = new IntegrationsStore(backend, runner);
 export const firstRun = new FirstRunStore(backend, runner, tasks);
 export const logSources = new LogSourcesStore(backend);
 export const updater = new UpdaterStore(backend);
+/** A new-project setup survives leaving the create screen; its end is announced from anywhere. */
+const scaffoldSession = new ScaffoldSession(tasks, () =>
+	notifier.success(m.create.readyElsewhere, { label: m.create.register, run: () => void goto(CREATE_PROJECT_ROUTE) })
+);
 /** The draft forms on screen, so the shell can guard navigation and route Ctrl+S to them. */
 export const unsavedChanges = new UnsavedChanges();
 
 /** Per-visit objects are created through factories so they get the shared backend and stores. */
 export const createLogSession = () => new LogSession(backend);
-export const createProjectFlow = () => new CreateProjectFlow(backend, projects, tasks);
+export const createProjectFlow = () => new CreateProjectFlow(backend, projects, tasks, scaffoldSession);
 
 interface Startable {
 	start(): Promise<() => void>;
@@ -56,7 +67,7 @@ interface Startable {
  * Returns a disposer that removes all listeners.
  */
 export async function startStores(): Promise<() => void> {
-	const startables: Startable[] = [elevation, tasks, projects, services, packages, worktrees, settings, firstRun];
+	const startables: Startable[] = [elevation, tasks, projects, services, packages, worktrees, settings, firstRun, scaffoldSession];
 	// Subscribe before loading, so nothing that happens during the first load is missed.
 	const stops = await Promise.all(startables.map((s) => s.start()));
 	void firstRun.load();
