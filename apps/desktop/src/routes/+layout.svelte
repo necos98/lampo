@@ -10,9 +10,10 @@
 	import favicon from '#lib/assets/favicon.svg';
 	import ElevationBanner from '#lib/components/layout/ElevationBanner.svelte';
 	import Sidebar from '#lib/components/layout/Sidebar.svelte';
+	import UnsavedChangesGuard from '#lib/components/layout/UnsavedChangesGuard.svelte';
 	import { Toaster } from '#lib/components/ui/sonner/index.js';
 	import { installShortcuts } from '#lib/services/navigation.js';
-	import { firstRun, startStores, updater } from '#lib/stores/index.js';
+	import { firstRun, startStores, unsavedChanges, updater } from '#lib/stores/index.js';
 
 	import type { LayoutProps } from './$types';
 
@@ -28,7 +29,7 @@
 			if (disposed) dispose();
 			else disposeStores = dispose;
 		});
-		const disposeShortcuts = installShortcuts((href) => void goto(href));
+		const disposeShortcuts = installShortcuts({ navigate: (href) => void goto(href), save: () => void unsavedChanges.saveAll() });
 		// The tray ("Controlla aggiornamenti") asks a live window to open a route.
 		const onNavigate = (e: Event) => {
 			const href = (e as CustomEvent<unknown>).detail;
@@ -57,6 +58,7 @@
 
 <ModeWatcher />
 <Toaster position="bottom-right" />
+<UnsavedChangesGuard />
 
 {#if inWizard}
 	<div class="h-screen overflow-y-auto">{@render children()}</div>

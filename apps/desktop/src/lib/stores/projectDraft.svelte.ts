@@ -1,7 +1,13 @@
 import type { Project, ProjectEnvironment, SiteAddress, TlsMode, UpdateProjectRequest } from '../api/index.js';
 import { DATABASE_KIND, usesService } from '../projects/services.js';
+import { Baseline } from './baseline.js';
 
 const plain = <V>(v: V): V => JSON.parse(JSON.stringify(v)) as V;
+
+type EditableFields = Pick<Project, 'name' | 'addresses' | 'environment' | 'databaseName' | 'tls'>;
+
+/** The editable fields of a project, in the order the baseline compares them. */
+const editable = (p: EditableFields) => [p.name, p.addresses, p.environment, p.databaseName, p.tls];
 
 /**
  * Editable copy of a project. Sections bind to its fields; `dirty` compares with the last saved
@@ -23,7 +29,7 @@ export class ProjectDraft {
 	databaseName = $state<string | null>(null);
 	tls = $state<TlsMode>('disabled');
 
-	#baseline = '';
+	#baseline = new Baseline();
 
 	constructor(project: Project) {
 		this.projectId = project.id;
@@ -37,15 +43,21 @@ export class ProjectDraft {
 		this.environment = plain(project.environment);
 		this.databaseName = project.databaseName;
 		this.tls = project.tls;
-		this.#baseline = this.#serialise();
+		this.#baseline.set(editable(this));
 	}
 
-	#serialise(): string {
-		return JSON.stringify([this.name, this.addresses, this.environment, this.databaseName, this.tls]);
+	/** Takes `project` as the new baseline but keeps the edits, so saving overwrites it. */
+	rebase(project: Project): void {
+		this.#baseline.set(editable(project));
+	}
+
+	/** True when `project` (from the backend) differs from what this draft was loaded from. */
+	isStale(project: Project): boolean {
+		return !this.#baseline.matches(editable(project));
 	}
 
 	get dirty(): boolean {
-		return this.#serialise() !== this.#baseline;
+		return !this.#baseline.matches(editable(this));
 	}
 
 	get valid(): boolean {

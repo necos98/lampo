@@ -17,6 +17,7 @@ import { CommandRunner } from './runner.js';
 import { ServicesStore } from './services.svelte.js';
 import { SettingsStore } from './settings.svelte.js';
 import { TasksStore } from './tasks.svelte.js';
+import { UnsavedChanges } from './unsavedChanges.js';
 import { UpdaterStore } from './updater.svelte.js';
 import { WorktreesStore } from './worktrees.svelte.js';
 import { CreateProjectFlow } from './createProject.svelte.js';
@@ -38,6 +39,8 @@ export const integrations = new IntegrationsStore(backend, runner);
 export const firstRun = new FirstRunStore(backend, runner, tasks);
 export const logSources = new LogSourcesStore(backend);
 export const updater = new UpdaterStore(backend);
+/** The draft forms on screen, so the shell can guard navigation and route Ctrl+S to them. */
+export const unsavedChanges = new UnsavedChanges();
 
 /** Per-visit objects are created through factories so they get the shared backend and stores. */
 export const createLogSession = () => new LogSession(backend);

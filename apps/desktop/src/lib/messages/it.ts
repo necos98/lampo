@@ -53,6 +53,16 @@ export const it = {
 		openLinkFailed: 'Impossibile aprire il link nel browser',
 		unsupportedLink: 'Lampo apre solo link http e https.'
 	},
+	unsaved: {
+		leaveTitle: 'Modifiche non salvate',
+		leaveBody: 'Hai modifiche non salvate: se esci da questa pagina andranno perse.',
+		discard: 'Scarta',
+		stay: 'Resta',
+		changedElsewhereTitle: 'Modificato altrove',
+		changedElsewhereBody: "Mentre modificavi, questi dati sono cambiati fuori da questa pagina (CLI o un'altra finestra). Ricarica per vedere la versione aggiornata perdendo le tue modifiche, oppure sovrascrivila con le tue al prossimo salvataggio.",
+		reload: 'Ricarica',
+		overwrite: 'Sovrascrivi'
+	},
 	nav: {
 		label: 'Navigazione principale',
 		projects: 'Progetti',

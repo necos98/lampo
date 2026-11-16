@@ -18,13 +18,15 @@
 		title: string;
 		body: string;
 		confirmLabel: string;
+		/** Label of the button that closes without acting (default «Annulla»). */
+		cancelLabel?: string;
 		destructive?: boolean;
 		onconfirm: () => ConfirmResult | Promise<ConfirmResult>;
 		/** Extra controls between the text and the buttons (e.g. a checkbox). */
 		children?: Snippet;
 	}
 
-	let { open = $bindable(), title, body, confirmLabel, destructive = false, onconfirm, children }: Props = $props();
+	let { open = $bindable(), title, body, confirmLabel, cancelLabel = m.common.cancel, destructive = false, onconfirm, children }: Props = $props();
 
 	let busy = $state(false);
 	let error = $state<AppError | null>(null);
@@ -55,7 +57,7 @@
 		{@render children?.()}
 		{#if error}<ErrorNotice {error} title={m.common.actionFailed} />{/if}
 		<AlertDialog.Footer>
-			<AlertDialog.Cancel disabled={busy}>{m.common.cancel}</AlertDialog.Cancel>
+			<AlertDialog.Cancel disabled={busy}>{cancelLabel}</AlertDialog.Cancel>
 			<AlertDialog.Action class={destructive ? buttonVariants({ variant: 'destructive' }) : undefined} disabled={busy} onclick={confirm}>
 				{#if busy}<LoaderCircle class="animate-spin" />{/if}{confirmLabel}
 			</AlertDialog.Action>

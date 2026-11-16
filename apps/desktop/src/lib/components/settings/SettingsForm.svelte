@@ -1,14 +1,15 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 
 	import type { Settings } from '#lib/api/index.js';
+	import ExternalChangeNotice from '#lib/components/common/ExternalChangeNotice.svelte';
 	import FormRow from '#lib/components/common/FormRow.svelte';
 	import SaveBar from '#lib/components/common/SaveBar.svelte';
 	import SelectField from '#lib/components/common/SelectField.svelte';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Switch } from '#lib/components/ui/switch/index.js';
 	import { messages as m } from '#lib/messages/index.js';
-	import { packages, settings } from '#lib/stores/index.js';
+	import { packages, settings, unsavedChanges } from '#lib/stores/index.js';
 	import { SettingsDraft } from '#lib/stores/settingsDraft.svelte.js';
 
 	let { source }: { source: Settings } = $props();
@@ -16,23 +17,41 @@
 
 	const draft = new SettingsDraft(untrack(() => source));
 
+	// Backend changes flow in unless the user is mid-edit; then the notice asks what to keep.
+	const changedElsewhere = $derived(!settings.saving && draft.dirty && draft.isStale(source));
 	$effect(() => {
-		const latest = source;
-		untrack(() => {
-			if (!draft.dirty) draft.reset(latest);
-		});
+		if (!draft.dirty && draft.isStale(source)) draft.reset(source);
 	});
+
+	onMount(() =>
+		unsavedChanges.register({
+			get dirty() {
+				return draft.dirty;
+			},
+			save,
+			discard
+		})
+	);
 
 	const phpOptions = $derived(packages.phpOptions.filter((o) => o.installed).map((o) => ({ value: o.series, label: `PHP ${o.series}` })));
 	const phpWithCurrent = $derived(draft.value.defaultPhpVersion && !phpOptions.some((o) => o.value === draft.value.defaultPhpVersion) ? [...phpOptions, { value: draft.value.defaultPhpVersion, label: `PHP ${draft.value.defaultPhpVersion}` }] : phpOptions);
 
+	function discard() {
+		draft.reset(source);
+	}
+
 	async function save() {
+		if (settings.saving || !draft.dirty || !draft.valid) return;
 		const result = await settings.save(draft.toSettings());
 		if (result.ok) draft.reset(result.value);
 	}
 
 	const num = (e: Event & { currentTarget: HTMLInputElement }) => e.currentTarget.valueAsNumber;
 </script>
+
+{#if changedElsewhere}
+	<ExternalChangeNotice onreload={discard} onoverwrite={() => draft.rebase(source)} />
+{/if}
 
 <h2 class="mb-1 text-sm font-medium">{t.defaults}</h2>
 <FormRow label={t.defaultPhp} for="default-php" help={t.defaultPhpHelp}>
@@ -85,4 +104,4 @@
 	<Switch bind:checked={draft.value.closeToTray} aria-label={t.closeToTray} />
 </FormRow>
 
-<SaveBar dirty={draft.dirty} valid={draft.valid} saving={settings.saving} onsave={save} onreset={() => draft.reset(source)} />
+<SaveBar dirty={draft.dirty} valid={draft.valid} saving={settings.saving} onsave={save} onreset={discard} />

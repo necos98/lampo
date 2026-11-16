@@ -1,4 +1,5 @@
 import type { Settings } from '../api/index.js';
+import { Baseline } from './baseline.js';
 
 const plain = <V>(v: V): V => JSON.parse(JSON.stringify(v)) as V;
 const validPort = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535;
@@ -15,7 +16,7 @@ export class SettingsDraft {
 		firstRunCompleted: false
 	});
 
-	#baseline = '';
+	#baseline = new Baseline();
 
 	constructor(source: Settings) {
 		this.reset(source);
@@ -23,11 +24,21 @@ export class SettingsDraft {
 
 	reset(source: Settings): void {
 		this.value = plain(source);
-		this.#baseline = JSON.stringify(this.value);
+		this.#baseline.set(this.value);
+	}
+
+	/** Takes `source` as the new baseline but keeps the edits, so saving overwrites it. */
+	rebase(source: Settings): void {
+		this.#baseline.set(source);
+	}
+
+	/** True when `source` (from the backend) differs from what this draft was loaded from. */
+	isStale(source: Settings): boolean {
+		return !this.#baseline.matches(source);
 	}
 
 	get dirty(): boolean {
-		return JSON.stringify(this.value) !== this.#baseline;
+		return !this.#baseline.matches(this.value);
 	}
 
 	get rangeValid(): boolean {

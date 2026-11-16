@@ -5,12 +5,13 @@
 	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
 	import ScrollText from '@lucide/svelte/icons/scroll-text';
 	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import { untrack } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 
 	import { goto } from '$app/navigation';
 
 	import type { AppError, Project } from '#lib/api/index.js';
 	import ConfirmDialog from '#lib/components/common/ConfirmDialog.svelte';
+	import ExternalChangeNotice from '#lib/components/common/ExternalChangeNotice.svelte';
 	import ExternalLink from '#lib/components/common/ExternalLink.svelte';
 	import PageHeader from '#lib/components/common/PageHeader.svelte';
 	import SaveBar from '#lib/components/common/SaveBar.svelte';
@@ -19,7 +20,7 @@
 	import * as Tabs from '#lib/components/ui/tabs/index.js';
 	import { messages as m } from '#lib/messages/index.js';
 	import { refusedDirectivesReason } from '#lib/services/errors.js';
-	import { projects } from '#lib/stores/index.js';
+	import { projects, unsavedChanges } from '#lib/stores/index.js';
 	import { ProjectDraft } from '#lib/stores/projectDraft.svelte.js';
 
 	import WorktreePanel from '../worktrees/WorktreePanel.svelte';
@@ -43,15 +44,30 @@
 	let presetOpen = $state(false);
 	let deleteOpen = $state(false);
 
-	// Backend changes (events, another window, the CLI) flow in unless the user is mid-edit.
+	// Backend changes (events, another window, the CLI) flow in unless the user is mid-edit; then
+	// the notice asks whether to reload them or overwrite them on save.
+	const changedElsewhere = $derived(!saving && draft.dirty && draft.isStale(project));
 	$effect(() => {
-		const latest = project;
-		untrack(() => {
-			if (!draft.dirty) draft.reset(latest);
-		});
+		if (!draft.dirty && draft.isStale(project)) draft.reset(project);
 	});
 
+	onMount(() =>
+		unsavedChanges.register({
+			get dirty() {
+				return draft.dirty;
+			},
+			save,
+			discard
+		})
+	);
+
+	function discard() {
+		saveError = null;
+		draft.reset(project);
+	}
+
 	async function save() {
+		if (saving || !draft.dirty || !draft.valid) return;
 		saving = true;
 		saveError = null;
 		const result = await projects.update(draft.toRequest());
@@ -65,7 +81,11 @@
 
 	async function remove() {
 		const result = await projects.remove(project.id);
-		if (result.ok) await goto('/projects');
+		if (result.ok) {
+			// The project is gone and its edits with it: leaving must not ask to keep them.
+			draft.reset(project);
+			await goto('/projects');
+		}
 		return result;
 	}
 
@@ -91,6 +111,10 @@
 	{/snippet}
 </PageHeader>
 
+{#if changedElsewhere}
+	<ExternalChangeNotice onreload={discard} onoverwrite={() => draft.rebase(project)} />
+{/if}
+
 <Tabs.Root bind:value={tab}>
 	<Tabs.List>
 		<Tabs.Trigger value="general">{t.tabs.general}</Tabs.Trigger>
@@ -115,7 +139,7 @@
 	</div>
 </Tabs.Root>
 
-<SaveBar dirty={draft.dirty} valid={draft.valid} {saving} onsave={save} onreset={() => ((saveError = null), draft.reset(project))} />
+<SaveBar dirty={draft.dirty} valid={draft.valid} {saving} onsave={save} onreset={discard} />
 
 <PathPromptDialog
 	bind:open={relinkOpen}
