@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use lampo_application::control::{ControlClient, instance_pipe_name};
+use lampo_application::control::{AppServiceStatus, ControlClient, instance_pipe_name};
 use lampo_application::use_cases::*;
 use lampo_application::AppResult;
 use lampo_domain::ports::{
@@ -116,6 +116,8 @@ pub fn build() -> AppResult<CliContext> {
             settings: settings_repo.clone(),
             installed: installed.clone(),
             control: channel.clone(),
+            // The app's live states, as `lampo status`; a warning when it is not running.
+            service_states: Arc::new(AppServiceStatus::new(app.clone())),
             checks,
         })),
         shims: Arc::new(ShimSetup::new(shim_installer, user_path, locator, paths.clone(), shim_tools)),

@@ -5,6 +5,8 @@
 //! [`standard_checks`] is the one list both composition roots register (open-closed: a new
 //! check is a new type added there).
 
+mod services_check;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -25,10 +27,13 @@ use lampo_domain::worktree::WorktreeEnvironment;
 use super::hosts_sync::hosts_block_in_sync;
 use super::requirements::{missing, requirements};
 use super::service_catalog::ServiceCatalog;
+use super::services::ServiceStatusSource;
 use super::shims::shadowed_tools;
 use super::support::all_sites;
-use crate::dto::{CheckStatus, DoctorCheckDto, DoctorReportDto, PortConflictDto, VcRuntimeIssueDto};
+use crate::dto::{CheckStatus, DoctorCheckDto, DoctorReportDto, PortConflictDto, ServiceStatusDto, VcRuntimeIssueDto};
 use crate::error::AppResult;
+
+pub use services_check::ServicesCheck;
 
 /// What every check may look at, loaded once per run.
 pub struct DoctorFacts {
@@ -38,6 +43,8 @@ pub struct DoctorFacts {
     pub installed: Vec<InstalledPackage>,
     /// The app answers on the control pipe (its services then hold their own ports).
     pub app_running: bool,
+    /// Live service states; `Err` when they cannot be read (in the CLI: the app is not running).
+    pub services: AppResult<Vec<ServiceStatusDto>>,
 }
 
 /// One diagnostic. Returns its line of the report and may fill its own detail field of
@@ -56,6 +63,9 @@ pub struct DoctorDeps {
     pub settings: Arc<dyn SettingsRepository>,
     pub installed: Arc<dyn InstalledPackageRegistry>,
     pub control: Arc<dyn ControlChannelClient>,
+    /// The source of `lampo status`: the live services in the app, the app over the control
+    /// pipe in the CLI.
+    pub service_states: Arc<dyn ServiceStatusSource>,
     /// Run in this order.
     pub checks: Vec<Arc<dyn DoctorCheck>>,
 }
@@ -77,6 +87,7 @@ impl Doctor {
             settings: d.settings.load()?,
             installed: d.installed.list()?,
             app_running: d.control.is_server_running(),
+            services: d.service_states.statuses().await,
         };
         let mut report = DoctorReportDto::default();
         for c in &d.checks {
@@ -112,6 +123,7 @@ pub fn standard_checks(deps: StandardChecksDeps) -> Vec<Arc<dyn DoctorCheck>> {
         Arc::new(PathShadowingCheck { locator: deps.locator, shim_dir: deps.shim_dir, tools: deps.shim_tools }),
         Arc::new(HostsBlockCheck { hosts: deps.hosts }),
         Arc::new(PackagesCheck { services: deps.services }),
+        Arc::new(ServicesCheck),
         Arc::new(FoldersCheck { fs: deps.fs.clone() }),
         Arc::new(StaleWorktreesCheck { fs: deps.fs }),
         Arc::new(AppCheck),

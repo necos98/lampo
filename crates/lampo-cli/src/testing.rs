@@ -322,7 +322,7 @@ impl DoctorRunner for Fake {
         Ok(dto(json!({
             "ok": ok,
             "checks": [{"id": "ports", "status": if ok {"ok"} else {"error"}, "message": "port 80", "fix": if ok {Value::Null} else {json!("stop IIS")}}],
-            "missingVcRuntimes": [], "portConflicts": [], "shadowedTools": [], "staleWorktrees": [], "missingPackages": [], "hostsFileInSync": true
+            "missingVcRuntimes": [], "portConflicts": [], "shadowedTools": [], "staleWorktrees": [], "missingPackages": [], "servicesDown": [], "hostsFileInSync": true
         })))
     }
 }

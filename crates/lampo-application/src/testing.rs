@@ -36,8 +36,8 @@ use lampo_domain::worktree::WorktreeEnvironment;
 use lampo_domain::{PortError, PortResult};
 
 use crate::context::CallContext;
-use crate::dto::SyncReportDto;
-use crate::error::{AppError, AppResult};
+use crate::dto::{ServiceStatusDto, SyncReportDto};
+use crate::error::{AppError, AppResult, ErrorCode};
 use crate::use_cases::*;
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -1388,8 +1388,19 @@ impl World {
             settings: self.settings.clone(),
             installed: self.installed.clone(),
             control: self.control.clone(),
+            service_states: Arc::new(ServiceQueries::new(self.runners(), self.services.clone(), self.projects.clone(), self.worktrees.clone(), self.settings.clone())),
             checks,
         }
+    }
+}
+
+/// Service states nobody can read (the CLI with the app gone): every call fails with `AppUnavailable`.
+pub struct UnreadableServiceStates;
+
+#[async_trait]
+impl ServiceStatusSource for UnreadableServiceStates {
+    async fn statuses(&self) -> AppResult<Vec<ServiceStatusDto>> {
+        Err(AppError::new(ErrorCode::AppUnavailable, "the Lampo app is not running"))
     }
 }
 

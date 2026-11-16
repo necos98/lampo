@@ -669,7 +669,7 @@ export const it = {
 		},
 		doctor: {
 			title: 'Diagnostica',
-			help: 'Controlla porte, runtime, PATH, file hosts e pacchetti.',
+			help: 'Controlla porte, runtime, PATH, file hosts, pacchetti e servizi.',
 			run: 'Esegui controlli',
 			running: 'Controllo in corso…',
 			ok: 'Nessun problema trovato.',
@@ -684,6 +684,7 @@ export const it = {
 				'shims-on-path': 'Strumenti nel PATH',
 				'hosts-block': 'File hosts',
 				packages: 'Pacchetti richiesti',
+				services: 'Servizi',
 				'stale-worktrees': 'Ambienti worktree orfani',
 				folders: 'Cartelle dei progetti'
 			} as Record<string, string>,
@@ -696,6 +697,11 @@ export const it = {
 				'path-shadowing': { ok: 'Nessun altro programma nasconde gli strumenti di Lampo.', warning: 'Un altro programma nel PATH nasconde uno strumento di Lampo.' },
 				'hosts-block': { ok: 'Il file hosts elenca tutti gli indirizzi dei progetti.', warning: 'Il file hosts non è aggiornato.' },
 				packages: { ok: 'I pacchetti richiesti dai progetti sono installati.', error: 'Mancano pacchetti richiesti dai progetti.' },
+				services: {
+					ok: 'I servizi che servono ai progetti sono in esecuzione.',
+					warning: 'Un servizio che serve ai progetti è fermo, oppure il suo stato non si può leggere.',
+					error: 'Un servizio che serve ai progetti si è chiuso con un errore.'
+				},
 				folders: { ok: 'Tutte le cartelle dei progetti esistono.', warning: 'Alcune cartelle di progetto non esistono più.' },
 				'stale-worktrees': { ok: 'Nessun ambiente worktree orfano.', warning: 'Ci sono ambienti worktree la cui cartella non esiste più.' }
 			} as Record<string, Partial<Record<CheckStatus, string>>>,
@@ -709,6 +715,7 @@ export const it = {
 				'install-shims': 'Installa shim',
 				'prune-worktrees': 'Pulisci worktree',
 				'apply-hosts': 'Aggiorna file hosts',
+				'start-services': 'Riavvia i servizi',
 				open: (page: string) => `Apri ${page}`,
 				download: (redistributable: string) => `Scarica ${redistributable}`
 			},

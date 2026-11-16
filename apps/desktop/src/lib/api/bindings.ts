@@ -818,7 +818,7 @@ export type CheckStatus = "ok" | "warning" | "error";
 
 /**
  * One `doctor` check. `id` is stable (`vc-runtime`, `ports`, `path-shadowing`, `shims-on-path`,
- * `hosts-block`, `packages`, `stale-worktrees`, `folders`, `app`).
+ * `hosts-block`, `packages`, `services`, `stale-worktrees`, `folders`, `app`).
  */
 export type DoctorCheck = { id: string, status: CheckStatus, message: string, 
 /**
@@ -859,7 +859,11 @@ staleWorktrees: Array<string>,
 /**
  * Package requirements not satisfied (`php 8.2`, `mysql 5.7`).
  */
-missingPackages: Array<string>, hostsFileInSync: boolean, };
+missingPackages: Array<string>, 
+/**
+ * Services the plan needs that are `failed` or `stopped` (`apache`, `mysql-8.4`).
+ */
+servicesDown: Array<string>, hostsFileInSync: boolean, };
 
 export type ShimStatus = { shimDir: string, installed: boolean, onPath: boolean, shadowed: Array<ShadowedTool>, };
 

@@ -8,7 +8,7 @@ const check = (id: string, status: CheckStatus = 'warning'): DoctorCheck => ({ i
 const noVc = { missingVcRuntimes: [] as VcRuntimeIssue[] };
 
 test('a passing check offers nothing', () => {
-	for (const id of ['shims-on-path', 'stale-worktrees', 'hosts-block', 'packages', 'folders', 'ports', 'vc-runtime']) {
+	for (const id of ['shims-on-path', 'stale-worktrees', 'hosts-block', 'services', 'packages', 'folders', 'ports', 'vc-runtime']) {
 		assert.deepEqual(fixActions(check(id, 'ok'), noVc), [], id);
 	}
 });
@@ -17,6 +17,7 @@ test('fixes Lampo can run itself are commands', () => {
 	assert.deepEqual(fixActions(check('shims-on-path'), noVc), [{ kind: 'command', command: 'install-shims' }]);
 	assert.deepEqual(fixActions(check('stale-worktrees'), noVc), [{ kind: 'command', command: 'prune-worktrees' }]);
 	assert.deepEqual(fixActions(check('hosts-block'), noVc), [{ kind: 'command', command: 'apply-hosts' }]);
+	assert.deepEqual(fixActions(check('services', 'error'), noVc), [{ kind: 'command', command: 'start-services' }]);
 });
 
 test('fixes made on another page navigate there', () => {

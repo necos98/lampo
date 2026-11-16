@@ -2,7 +2,7 @@ import type { DoctorCheck, DoctorReport } from '../api/index.js';
 import type { NavId } from '../services/navigation.js';
 
 /** A fix the app runs itself, by name: the panel binds each to its store call. */
-export type FixCommand = 'install-shims' | 'prune-worktrees' | 'apply-hosts';
+export type FixCommand = 'install-shims' | 'prune-worktrees' | 'apply-hosts' | 'start-services';
 
 /** What the Doctor offers next to a failed check, beside the textual suggestion. */
 export type FixAction =
@@ -15,7 +15,8 @@ export type FixAction =
 const COMMAND_FIXES: Partial<Record<string, FixCommand>> = {
 	'shims-on-path': 'install-shims',
 	'stale-worktrees': 'prune-worktrees',
-	'hosts-block': 'apply-hosts'
+	'hosts-block': 'apply-hosts',
+	services: 'start-services'
 };
 
 const PAGE_FIXES: Partial<Record<string, NavId>> = {

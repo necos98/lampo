@@ -3,7 +3,7 @@
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { fixActions, type FixAction, type FixCommand } from '#lib/diagnostics/fixes.js';
 	import { messages as m } from '#lib/messages/index.js';
-	import { diagnostics, elevation, worktrees } from '#lib/stores/index.js';
+	import { diagnostics, elevation, services, worktrees } from '#lib/stores/index.js';
 
 	import ConfirmDialog from '../common/ConfirmDialog.svelte';
 	import ExternalLink from '../common/ExternalLink.svelte';
@@ -23,6 +23,7 @@
 	const busy: Record<FixCommand, boolean> = $derived({
 		'install-shims': diagnostics.installingShims,
 		'apply-hosts': elevation.applying,
+		'start-services': report.servicesDown.some((s) => services.busy[s]),
 		// The confirmation dialog shows its own progress.
 		'prune-worktrees': false
 	});
@@ -33,6 +34,8 @@
 	const run: Record<FixCommand, () => void> = {
 		'install-shims': () => void diagnostics.installShims(),
 		'apply-hosts': () => void elevation.apply().then(diagnostics.runDoctor),
+		// A failed service is started again; none listed (states unreadable) starts the whole plan.
+		'start-services': () => void services.act('start', report.servicesDown).then(diagnostics.runDoctor),
 		'prune-worktrees': () => (pruneOpen = true)
 	};
 

@@ -10,7 +10,7 @@ pub enum CheckStatus {
 }
 
 /// One `doctor` check. `id` is stable (`vc-runtime`, `ports`, `path-shadowing`, `shims-on-path`,
-/// `hosts-block`, `packages`, `stale-worktrees`, `folders`, `app`).
+/// `hosts-block`, `packages`, `services`, `stale-worktrees`, `folders`, `app`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DoctorCheck"))]
 #[serde(rename_all = "camelCase")]
@@ -67,6 +67,8 @@ pub struct DoctorReportDto {
     pub stale_worktrees: Vec<String>,
     /// Package requirements not satisfied (`php 8.2`, `mysql 5.7`).
     pub missing_packages: Vec<String>,
+    /// Services the plan needs that are `failed` or `stopped` (`apache`, `mysql-8.4`).
+    pub services_down: Vec<String>,
     pub hosts_file_in_sync: bool,
 }
 

@@ -321,7 +321,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
             env: env.clone(),
             shims: shims.clone(),
         })),
-        service_queries,
+        service_queries: service_queries.clone(),
         service_control,
         environment,
         worktree_queries,
@@ -339,6 +339,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
             settings: settings.clone(),
             installed,
             control: Arc::new(services::NamedPipeControlClient::new(pipe)),
+            service_states: service_queries,
             checks: standard_checks(StandardChecksDeps {
                 vc,
                 port_probe,

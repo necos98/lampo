@@ -21,6 +21,10 @@ use crate::error::{AppError, AppResult, ErrorCode};
 use crate::events::ProgressDto;
 use crate::use_cases::*;
 
+mod service_status;
+
+pub use service_status::{AppServiceStatus, STATUS_READ_TIMEOUT};
+
 /// Bumped on any incompatible change to requests, frames or payload DTOs. Adding a request is
 /// not one: older clients keep working, and an older app rejects the unknown request as a
 /// malformed one (`ProtocolMismatch`, the same "update both" hint).
@@ -296,6 +300,12 @@ impl ControlClient {
     /// Sends `request` and decodes the success payload as `T`. `on_progress` receives progress
     /// frames. Does not start the app (call [`ControlClient::ensure_app`] first).
     pub async fn call<T: DeserializeOwned>(&self, request: ControlRequest, ctx: CallContext, on_progress: &(dyn Fn(ProgressDto) + Send + Sync)) -> AppResult<T> {
+        self.call_within(request, ctx, DEFAULT_EXCHANGE_TIMEOUT, on_progress).await
+    }
+
+    /// [`ControlClient::call`] for an exchange that must answer within `timeout` (a quick read
+    /// that a hung app must not block).
+    pub async fn call_within<T: DeserializeOwned>(&self, request: ControlRequest, ctx: CallContext, timeout: Duration, on_progress: &(dyn Fn(ProgressDto) + Send + Sync)) -> AppResult<T> {
         let envelope = ControlEnvelope { protocol: PROTOCOL_VERSION, context: ctx, request };
         let json = serde_json::to_string(&envelope).map_err(|e| AppError::internal(e.to_string()))?;
         struct Forward<'a>(&'a (dyn Fn(ProgressDto) + Send + Sync));
@@ -306,7 +316,7 @@ impl ControlClient {
                 }
             }
         }
-        let final_frame = self.channel.exchange(json, &Forward(on_progress), DEFAULT_EXCHANGE_TIMEOUT).await?;
+        let final_frame = self.channel.exchange(json, &Forward(on_progress), timeout).await?;
         match serde_json::from_str::<ControlFrame>(&final_frame) {
             Ok(ControlFrame::Response { reply: ControlReply::Ok { payload } }) => {
                 serde_json::from_value(payload).map_err(|e| AppError::new(ErrorCode::ProtocolMismatch, format!("unexpected reply payload: {e}")))
