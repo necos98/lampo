@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use lampo_domain::PortError;
 use lampo_domain::ports::{CommandRunner, CommandSpec, PipedCommand, PipedCommandRunner, StreamCompression};
 use lampo_domain::progress::CancelFlag;
+use lampo_domain::sql_dump::rewrite::DumpRewrite;
 use lampo_infra_services::JobObjectSupervisor;
 
 mod common;
@@ -224,4 +225,23 @@ async fn pipeline_gzips_the_last_stdout_into_the_output_file() {
     assert_eq!(decoded, std::fs::read(&plain).unwrap());
     assert!(std::fs::metadata(&output).unwrap().len() < len / 2, "compressed");
     assert_eq!(*seen.lock().unwrap().last().unwrap(), len, "progress counts the uncompressed bytes");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pipeline_rewrites_a_plain_input_on_its_way_without_changing_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("dump.sql");
+    let dump = "/*M!999999\\- enable the sandbox mode */\r\nCREATE DEFINER=`app`@`localhost` PROCEDURE p()\r\nINSERT INTO t VALUES ('CREATE DEFINER=`x`@`y`');\r\n";
+    std::fs::write(&input, dump).unwrap();
+    let output = dir.path().join("out.txt");
+    let sup = JobObjectSupervisor::new();
+    let seen = AtomicU64::new(0);
+    let rewrite = DumpRewrite { drop_sandbox_line: true, strip_definers: true };
+    let command =
+        PipedCommand { stages: vec![spec("findstr.exe", &["/r", "^"])], stdin_file: Some(input.clone()), stdout_file: Some(output.clone()), stdin_rewrite: rewrite, ..Default::default() };
+    let outs = sup.run_piped(command, &|b| seen.store(b, Ordering::SeqCst), &CancelFlag::new(), Duration::from_secs(30)).await.unwrap();
+    assert!(outs.iter().all(|o| o.success()), "{outs:?}");
+    assert_eq!(std::fs::read_to_string(&output).unwrap(), "CREATE PROCEDURE p()\r\nINSERT INTO t VALUES ('CREATE DEFINER=`x`@`y`');\r\n");
+    assert_eq!(std::fs::read_to_string(&input).unwrap(), dump, "the source file is untouched");
+    assert_eq!(seen.load(Ordering::SeqCst), dump.len() as u64, "progress counts the file's bytes");
 }

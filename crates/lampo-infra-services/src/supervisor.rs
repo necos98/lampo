@@ -30,6 +30,7 @@ use lampo_domain::ports::{
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::service::LogStream;
 use lampo_domain::tcp_port::Port;
+use lampo_domain::sql_dump::rewrite::DumpRewrite;
 use lampo_domain::{PortError, PortResult};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::NamedPipeServer;
@@ -41,6 +42,7 @@ use windows_sys::Win32::System::JobObjects::{
 use windows_sys::Win32::System::Threading::TerminateProcess;
 
 use crate::compression;
+use crate::dump_input;
 use crate::process::{self, Input, Output};
 use crate::win::{self, owned, raw};
 
@@ -218,13 +220,13 @@ fn open_input(path: &Path) -> PortResult<std::fs::File> {
 /// Why feeding a compressed input failed, with the stage's stdin still open (see [`feed`]).
 type FeedFailure = (String, NamedPipeServer);
 
-/// Decompresses `path` (on a blocking thread, a few chunks in flight) into the first stage's
-/// stdin; `position` = bytes of the compressed file consumed. A stage that stops reading ends it
+/// Decompresses and rewrites `path` (on a blocking thread, a few chunks in flight) into the first
+/// stage's stdin; `position` = bytes of the compressed file consumed. A stage that stops reading ends it
 /// quietly (its own failure is reported by its exit code). On corrupt data the pipe is returned
 /// still open, so the caller can kill the stages before they see EOF.
-async fn feed(path: PathBuf, compression: StreamCompression, position: Arc<AtomicU64>, mut stdin: NamedPipeServer) -> Result<(), FeedFailure> {
+async fn feed(path: PathBuf, compression: StreamCompression, rewrite: DumpRewrite, position: Arc<AtomicU64>, mut stdin: NamedPipeServer) -> Result<(), FeedFailure> {
     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(4);
-    let decoder = tokio::task::spawn_blocking(move || compression::decode(&path, compression, &position, |chunk| tx.blocking_send(chunk).is_ok()));
+    let decoder = tokio::task::spawn_blocking(move || dump_input::read(&path, compression, rewrite, &position, |chunk| tx.blocking_send(chunk).is_ok()));
     let mut consumer_gone = false;
     while let Some(chunk) = rx.recv().await {
         if stdin.write_all(&chunk).await.is_err() {
@@ -393,8 +395,9 @@ impl PipedCommandRunner for JobObjectSupervisor {
             return Err(PortError::Unsupported("zip-compressed command output".into()));
         }
         let job = self.job()?;
-        // A compressed input is decoded here and written into a pipe; a plain one is inherited.
-        let feed_path = command.stdin_file.clone().filter(|_| command.stdin_compression != StreamCompression::None);
+        // A compressed or rewritten input is decoded here and written into a pipe; a plain one is
+        // inherited.
+        let feed_path = command.stdin_file.clone().filter(|_| command.stdin_compression != StreamCompression::None || !command.stdin_rewrite.is_noop());
         let stdin_file: Option<OwnedHandle> = match &command.stdin_file {
             Some(path) => {
                 let file = open_input(path)?;
@@ -436,7 +439,7 @@ impl PipedCommandRunner for JobObjectSupervisor {
         }
         let fed = Arc::new(AtomicU64::new(0));
         let feeder = match (&feed_path, procs[0].stdin.take()) {
-            (Some(path), Some(stdin)) => Some(tokio::spawn(feed(path.clone(), command.stdin_compression, fed.clone(), stdin))),
+            (Some(path), Some(stdin)) => Some(tokio::spawn(feed(path.clone(), command.stdin_compression, command.stdin_rewrite, fed.clone(), stdin))),
             _ => None,
         };
         let encoded = Arc::new(AtomicU64::new(0));

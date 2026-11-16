@@ -321,6 +321,11 @@ async fn database_operations_target_the_sites_instance() {
     assert!(w.db.calls().contains(&"import:shop:D:\\dump.sql".to_string()), "a database switch is refused by default");
     db.import(&import_request(Some("shop"), true), &progress, &CancelFlag::new()).await.unwrap();
     assert!(w.db.calls().contains(&"import:shop:D:\\dump.sql:allow-use".to_string()), "--allow-use reaches the adapter");
+    for (compat, expected) in [(DumpCompatDto::Mariadb, "mariadb"), (DumpCompatDto::Mysql80, "mysql80")] {
+        let request = DatabaseImportRequest { compat: Some(compat), ..import_request(None, false) };
+        db.import(&request, &progress, &CancelFlag::new()).await.unwrap();
+        assert!(w.db.calls().contains(&format!("import:shop:D:\\dump.sql:compat={expected}")), "--compat reaches the adapter");
+    }
     assert!(!progress.0.lock().unwrap().is_empty());
     let cancel = CancelFlag::new();
     cancel.cancel();
@@ -397,7 +402,7 @@ async fn database_operations_refuse_system_schemas_before_reaching_the_server() 
 
 /// Imports `D:\dump.sql` into `name` (default: the site's database) of the site `shop`.
 fn import_request(name: Option<&str>, allow_database_switch: bool) -> DatabaseImportRequest {
-    DatabaseImportRequest { site: "shop".into(), name: name.map(String::from), file: "D:\\dump.sql".into(), allow_database_switch }
+    DatabaseImportRequest { site: "shop".into(), name: name.map(String::from), file: "D:\\dump.sql".into(), allow_database_switch, compat: None }
 }
 
 #[tokio::test]

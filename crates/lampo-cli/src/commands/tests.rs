@@ -327,6 +327,17 @@ async fn db_import_and_export_pass_compressed_files_through() {
     assert_eq!(code, 0);
     let (ControlRequest::DbImport(r), _) = fake.last_request() else { panic!("wrong request") };
     assert!(r.allow_database_switch, "--allow-use");
+    assert_eq!(r.compat, None, "no --compat: the dump runs as it is");
+
+    for (flag, expected) in [("mariadb", DumpCompatDto::Mariadb), ("mysql80", DumpCompatDto::Mysql80)] {
+        fake.reply(Ok(Value::Null));
+        let (code, _, _) = run_cli(&fake, &["db", "import", "dump.sql", "--compat", flag]).await;
+        assert_eq!(code, 0);
+        let (ControlRequest::DbImport(r), _) = fake.last_request() else { panic!("wrong request") };
+        assert_eq!(r.compat, Some(expected), "--compat {flag}");
+    }
+    let unknown = crate::cli::build_command().try_get_matches_from(["lampo", "db", "import", "dump.sql", "--compat", "postgres"]).unwrap_err();
+    assert_eq!(unknown.kind(), clap::error::ErrorKind::InvalidValue);
 
     fake.reply(Err(AppError::new(ErrorCode::Validation, "invalid data in two.zip: the zip archive contains 2 .sql files (a.sql, b.sql)")));
     let (code, out, _) = run_cli(&fake, &["db", "import", "two.zip", "--json"]).await;

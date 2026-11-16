@@ -89,7 +89,7 @@ async fn a_sync_during_an_import_never_restarts_its_mysql_and_restarts_it_afterw
     w.db.hold_import.store(true, Ordering::SeqCst);
     let db = w.database_service();
     let (progress, cancel) = (RecordingProgress::default(), CancelFlag::new());
-    let request = DatabaseImportRequest { site: "shop".into(), name: None, file: "D:\\dump.sql".into(), allow_database_switch: false };
+    let request = DatabaseImportRequest { site: "shop".into(), name: None, file: "D:\\dump.sql".into(), allow_database_switch: false, compat: None };
 
     let during_import = async {
         w.db.import_started.notified().await;

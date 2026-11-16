@@ -16,6 +16,8 @@ use crate::ports::events::ProgressSink;
 use crate::progress::CancelFlag;
 use crate::service::{LogStream, ServiceId, ServiceKind, ServiceLaunch, ServiceStatus};
 use crate::tcp_port::Port;
+use crate::sql_dump::compat::DumpCompat;
+use crate::sql_dump::rewrite::DumpRewrite;
 
 /// A program invocation.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -92,6 +94,9 @@ pub struct PipedCommand {
     pub stdin_compression: StreamCompression,
     /// How the last stage's stdout is encoded into `stdout_file` (`Zip` is not supported).
     pub stdout_compression: StreamCompression,
+    /// Rewrites applied to the decoded `stdin_file` on its way into the first stage (line by line,
+    /// constant memory; the file itself is never changed). Default: none.
+    pub stdin_rewrite: DumpRewrite,
 }
 
 /// Compression of a file streamed by a [`PipedCommand`] (compressed SQL dumps). The domain only
@@ -194,6 +199,9 @@ pub struct DumpImportOptions {
     /// Import even when the dump has `USE` / `CREATE DATABASE` statements: its statements may
     /// then run in (and create) databases other than the target.
     pub allow_database_switch: bool,
+    /// The server the dump comes from, when it is not the target's own: its fixes are applied in
+    /// the importing session and in the stream ([`DumpCompat`]). `None`: the dump runs as it is.
+    pub compat: Option<DumpCompat>,
 }
 
 /// Database administration on a running instance (via the MySQL command-line clients).
@@ -210,6 +218,9 @@ pub trait DatabaseAdmin: Send + Sync {
     ///
     /// Before touching the server, a dump whose head ([`crate::sql_dump::DUMP_HEAD_BYTES`])
     /// switches or creates a database is refused with `InvalidData` unless `options` allows it.
+    /// With `options.compat`, the dump is rewritten on its way and the session adjusted (see
+    /// [`crate::sql_dump::compat`]); without it, a failing dump whose header names another server
+    /// gets a suggestion of the `--compat` to use.
     /// A failure or cancellation once statements may have run is [`PortError::Interrupted`]:
     /// `name` may be left incomplete.
     ///

@@ -258,8 +258,8 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         c("lampo db drop", "lampo db drop <name> --yes", "Drop a database.", true, true),
         c(
             "lampo db import",
-            "lampo db import <file.sql> [<name>] [--allow-use]",
-            "Import an SQL dump (.sql, .sql.gz or a .zip with one .sql); one with USE / CREATE DATABASE needs --allow-use.",
+            "lampo db import <file.sql> [<name>] [--allow-use] [--compat mysql80|mariadb]",
+            "Import an SQL dump (.sql, .sql.gz or a .zip with one .sql); one with USE / CREATE DATABASE needs --allow-use; one from MySQL 8.0 or MariaDB may need --compat.",
             true,
             true,
         ),

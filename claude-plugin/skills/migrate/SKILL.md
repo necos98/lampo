@@ -73,8 +73,11 @@ deliberate project change.
 `uuid`/`inet6` column types, `CHECK` constraints on JSON columns written as
 `json_valid(...)`, `SEQUENCE` objects, system-versioned tables, the collation
 `utf8mb4_uca1400_ai_ci` (MariaDB 11; replace with `utf8mb4_0900_ai_ci` or `utf8mb4_unicode_ci`
-in the dump, with the user's approval) and `DEFINER` clauses. If the import fails (exit 12),
-show the error line; fixing the dump is a change the user approves.
+in the dump, with the user's approval) and `DEFINER` clauses. Import MariaDB dumps with
+`lampo db import <file> --compat mariadb` (and MySQL 8.0 dumps with `--compat mysql80`): it
+handles `DEFINER` clauses, the sandbox first line, non-unique foreign keys and the default
+collation (see `lampo:database`). If the import still fails (exit 12), show the error line;
+fixing the dump is a change the user approves.
 
 Every entry of `warnings` from `lampo project detect` must appear in this check. If something
 essential is unsupported, stop and report before creating anything.

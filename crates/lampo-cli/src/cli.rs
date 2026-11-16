@@ -588,6 +588,10 @@ pub enum DbCommand {
     /// A dump whose first 64 KB contain `USE` or `CREATE DATABASE` (`mysqldump --databases`) is
     /// refused: its statements would run in the database it names, not in the target. If the
     /// import fails or is cancelled part-way, the target may be left incomplete.
+    ///
+    /// A dump made by MySQL 8.0 or MariaDB may need `--compat` to load: the file is never
+    /// changed, the fixes apply to the importing session and to the stream on its way. When the
+    /// header of such a dump names its server and the import fails, the error suggests the flag.
     Import {
         /// `.sql`, `.sql.gz` or `.zip` file.
         file: String,
@@ -597,6 +601,9 @@ pub enum DbCommand {
         /// databases than the target).
         #[arg(long)]
         allow_use: bool,
+        /// The server the dump comes from (`lampo db import dump.sql --compat mariadb`).
+        #[arg(long, value_enum, value_name = "SERVER")]
+        compat: Option<DumpCompatArg>,
     },
     /// Export a database to an SQL file (default database: the site's).
     ///
@@ -607,6 +614,18 @@ pub enum DbCommand {
         /// Source database.
         name: Option<String>,
     },
+}
+
+/// `lampo db import --compat`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum DumpCompatArg {
+    /// MySQL 8.0: foreign keys on non-unique keys allowed (`restrict_fk_on_non_standard_key=OFF`
+    /// on 8.4+), `DEFINER=` clauses of views, triggers and routines removed (the objects belong
+    /// to the importing user).
+    Mysql80,
+    /// MariaDB: as mysql80, plus the first-line sandbox comment dropped and `utf8mb4_general_ci`
+    /// as the default `utf8mb4` collation (session and a database created by the import).
+    Mariadb,
 }
 
 #[derive(Debug, Args)]

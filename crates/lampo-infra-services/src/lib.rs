@@ -22,6 +22,7 @@
 //! | [`WindowsExternalAppLauncher`] | `ExternalAppLauncher` (PowerShell, Explorer, VS Code) |
 //!
 //! Internal modules: `process` (process creation inside the job, IOCP stdio pipes),
+//! `dump_input` (a piped command's input file, decoded and rewritten on the way),
 //! `service_host` (behind [`ServiceHost`]),
 //! `rotating_log` (captured service output, rotated by size while it is written),
 //! `startup_deadline` (when a slow but progressing start gives up), `last_resort` (synchronous
@@ -35,6 +36,7 @@ pub mod claude_code;
 pub mod compression;
 pub mod control_pipe;
 pub mod database;
+mod dump_input;
 mod external_apps;
 mod last_resort;
 pub mod launcher;

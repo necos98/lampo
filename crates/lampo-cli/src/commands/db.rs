@@ -6,7 +6,7 @@ use lampo_application::AppResult;
 use serde::Serialize;
 
 use super::{Cmd, validation};
-use crate::cli::DbCommand;
+use crate::cli::{DbCommand, DumpCompatArg};
 use crate::render;
 
 /// `--json` result of the commands that return nothing useful: what was done to what.
@@ -40,10 +40,11 @@ pub async fn run(c: &Cmd<'_>, command: DbCommand) -> AppResult<i32> {
             let dropped: String = c.app(ControlRequest::DbDrop(DatabaseRequest { site: site.clone(), name: Some(name) })).await?;
             report(c, DatabaseActionDto { site, action: "dropped", database: Some(dropped), file: None });
         }
-        DbCommand::Import { file, name, allow_use } => {
+        DbCommand::Import { file, name, allow_use, compat } => {
             let site = c.site_id()?;
             let file = c.ctx.env.absolute(&file);
-            let request = DatabaseImportRequest { site: site.clone(), name: name.clone(), file: file.clone(), allow_database_switch: allow_use };
+            let compat = compat.map(dump_compat);
+            let request = DatabaseImportRequest { site: site.clone(), name: name.clone(), file: file.clone(), allow_database_switch: allow_use, compat };
             let _: serde_json::Value = c.app(ControlRequest::DbImport(request)).await?;
             report(c, DatabaseActionDto { site, action: "imported", database: name, file: Some(file) });
         }
@@ -55,6 +56,13 @@ pub async fn run(c: &Cmd<'_>, command: DbCommand) -> AppResult<i32> {
         }
     }
     Ok(0)
+}
+
+fn dump_compat(compat: DumpCompatArg) -> DumpCompatDto {
+    match compat {
+        DumpCompatArg::Mysql80 => DumpCompatDto::Mysql80,
+        DumpCompatArg::Mariadb => DumpCompatDto::Mariadb,
+    }
 }
 
 fn report(c: &Cmd<'_>, done: DatabaseActionDto) {

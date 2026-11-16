@@ -5,6 +5,7 @@ use lampo_domain::mysql::DatabaseName;
 use lampo_domain::ports::{DatabaseAdmin, DumpImportOptions, InstalledPackageRegistry, MysqlEndpoint, ProgressSink, ProjectRepository, SettingsRepository, WorktreeRepository};
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::project::Project;
+use lampo_domain::sql_dump::compat::DumpCompat;
 use lampo_domain::PortError;
 
 use super::service_catalog::ServiceCatalog;
@@ -141,14 +142,15 @@ impl DatabaseService {
         Ok(name.to_string())
     }
 
-    /// A dump that switches database is refused unless `allow_database_switch`. A failed or
-    /// cancelled import that already ran statements says the database may be incomplete.
+    /// A dump that switches database is refused unless `allow_database_switch`; `compat` adapts a
+    /// dump from another server. A failed or cancelled import that already ran statements says
+    /// the database may be incomplete.
     pub async fn import(&self, request: &DatabaseImportRequest, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<()> {
         let file = Self::file(&request.file)?;
         let target = self.target(&request.site).await?;
         let name = Self::name_or_default(request.name.as_deref(), &target)?;
         cancel.check()?;
-        let options = DumpImportOptions { allow_database_switch: request.allow_database_switch };
+        let options = DumpImportOptions { allow_database_switch: request.allow_database_switch, compat: request.compat.map(dump_compat) };
         self.admin.import(&target.endpoint, &name, file, options, progress, cancel).await.map_err(|e| match e {
             PortError::Interrupted(cause) => incomplete_import(&name, *cause),
             e => e.into(),
@@ -161,6 +163,13 @@ impl DatabaseService {
         let name = Self::name_or_default(request.name.as_deref(), &target)?;
         cancel.check()?;
         Ok(self.admin.export(&target.endpoint, &name, file, progress, cancel).await?)
+    }
+}
+
+fn dump_compat(compat: DumpCompatDto) -> DumpCompat {
+    match compat {
+        DumpCompatDto::Mysql80 => DumpCompat::Mysql80,
+        DumpCompatDto::Mariadb => DumpCompat::Mariadb,
     }
 }
 

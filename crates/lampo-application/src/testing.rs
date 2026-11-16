@@ -555,7 +555,8 @@ impl DatabaseAdmin for FakeDb {
         cancel.check()?;
         progress.report(Progress::new(ProgressStage::Configuring, 1, Some(1)));
         let allowed = if options.allow_database_switch { ":allow-use" } else { "" };
-        lock(&self.calls).push(format!("import:{name}:{}{allowed}", file.display()));
+        let compat = options.compat.map(|c| format!(":compat={c}")).unwrap_or_default();
+        lock(&self.calls).push(format!("import:{name}:{}{allowed}{compat}", file.display()));
         lock(&self.import_error).take().map_or(Ok(()), Err)
     }
     async fn export(&self, _e: &MysqlEndpoint, name: &DatabaseName, file: &Path, _p: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {

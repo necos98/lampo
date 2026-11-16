@@ -64,6 +64,21 @@ pub struct DatabaseImportRequest {
     /// outside `name` (`--allow-use`). Absent (older clients) = refused.
     #[serde(default)]
     pub allow_database_switch: bool,
+    /// The server the dump comes from, when it is not MySQL of the target's series
+    /// (`--compat`): its fixes are applied in the importing session and in the stream. Absent =
+    /// the dump runs as it is.
+    #[serde(default)]
+    pub compat: Option<DumpCompatDto>,
+}
+
+/// `lampo db import --compat`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DumpCompatDto {
+    /// A dump from MySQL 8.0.
+    Mysql80,
+    /// A dump from MariaDB.
+    Mariadb,
 }
 
 /// What happened to a new project's database (`CreateProjectResultDto::database_setup`).

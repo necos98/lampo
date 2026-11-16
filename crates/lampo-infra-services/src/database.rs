@@ -4,13 +4,16 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use lampo_domain::mysql::{DatabaseName, is_system_schema};
-use lampo_domain::ports::{CommandOutput, CommandRunner, CommandSpec, DatabaseAdmin, DumpImportOptions, MysqlEndpoint, PipedCommand, PipedCommandRunner, ProgressSink, StreamCompression};
+use lampo_domain::ports::{CommandOutput, CommandRunner, CommandSpec, DatabaseAdmin, DumpImportOptions, MysqlEndpoint, PipedCommand, PipedCommandRunner, ProgressSink};
 use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
+use lampo_domain::sql_dump::compat::{DumpCompat, suggest_compat};
 use lampo_domain::sql_dump::{DUMP_HEAD_BYTES, find_database_switch};
 use lampo_domain::{PortError, PortResult};
 
 use crate::compression;
 use crate::mysql::client_args;
+
+mod compat;
 
 const STATEMENT_TIMEOUT: Duration = Duration::from_secs(120);
 /// Imports/exports of big databases; the user cancels with the `CancelFlag`.
@@ -91,9 +94,8 @@ fn reporter<'a>(progress: &'a dyn ProgressSink, total: Option<u64>, subject: Str
 
 /// `InvalidData` if the head of the dump has a `USE` / `CREATE DATABASE`: `--database=` only sets
 /// the initial database, so the statements after it would not land in `target`.
-fn refuse_database_switch(sql_file: &Path, compression: StreamCompression, target: &DatabaseName) -> PortResult<()> {
-    let head = compression::read_head(sql_file, compression, DUMP_HEAD_BYTES)?;
-    match find_database_switch(&head) {
+fn refuse_database_switch(head: &[u8], sql_file: &Path, target: &DatabaseName) -> PortResult<()> {
+    match find_database_switch(head) {
         None => Ok(()),
         Some(switch) => Err(PortError::invalid_data(
             sql_file.display().to_string(),
@@ -152,16 +154,22 @@ impl DatabaseAdmin for MysqlCliAdmin {
         // Checked before touching the server: a bad archive or a dump that would write elsewhere
         // fails without creating the database.
         let stdin_compression = compression::detect_input(sql_file)?;
+        let head = compression::read_head(sql_file, stdin_compression, DUMP_HEAD_BYTES)?;
         if !options.allow_database_switch {
-            refuse_database_switch(sql_file, stdin_compression, name)?;
+            refuse_database_switch(&head, sql_file, name)?;
         }
+        let suggestion = if options.compat.is_none() { suggest_compat(&head, endpoint.series) } else { None };
         cancel.check()?;
-        self.execute_ok(endpoint, &format!("CREATE DATABASE IF NOT EXISTS {} CHARACTER SET utf8mb4", quote_ident(name))).await?;
-        let command = PipedCommand { stages: vec![restore_spec(endpoint, name)?], stdin_file: Some(sql_file.to_path_buf()), stdin_compression, ..Default::default() };
+        let collation = compat::database_collation_clause(options.compat);
+        self.execute_ok(endpoint, &format!("CREATE DATABASE IF NOT EXISTS {} CHARACTER SET utf8mb4{collation}", quote_ident(name))).await?;
+        let mut restore = restore_spec(endpoint, name)?;
+        compat::add_session_settings(&mut restore, endpoint, options.compat);
+        let stdin_rewrite = options.compat.map(DumpCompat::rewrite).unwrap_or_default();
+        let command = PipedCommand { stages: vec![restore], stdin_file: Some(sql_file.to_path_buf()), stdin_compression, stdin_rewrite, ..Default::default() };
         let on_bytes = reporter(progress, Some(total), format!("import {name}"));
         // From here on statements may already have run: whatever stops the import leaves them.
         let outputs = self.pipes.run_piped(command, &on_bytes, cancel, TRANSFER_TIMEOUT).await.map_err(PortError::interrupted)?;
-        ensure_ok("mysql", &outputs).map_err(PortError::interrupted)
+        ensure_ok("mysql", &outputs).map_err(|e| compat::with_hint(e, suggestion.as_ref()).interrupted())
     }
 
     async fn export(&self, endpoint: &MysqlEndpoint, name: &DatabaseName, sql_file: &Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
@@ -206,6 +214,7 @@ mod tests {
     use lampo_domain::mysql::MysqlSeries;
     use lampo_domain::tcp_port::Port;
     use lampo_domain::ports::{NullProgressSink, StreamCompression};
+    use lampo_domain::sql_dump::rewrite::DumpRewrite;
     use std::sync::Mutex;
 
     /// Records invocations and answers with canned outputs.
@@ -214,6 +223,8 @@ mod tests {
         calls: Mutex<Vec<Vec<CommandSpec>>>,
         /// `(stdin_compression, stdout_compression)` of every piped command.
         compressions: Mutex<Vec<(StreamCompression, StreamCompression)>>,
+        /// `stdin_rewrite` of every piped command.
+        rewrites: Mutex<Vec<DumpRewrite>>,
         reply: Mutex<Vec<CommandOutput>>,
         /// Returned by the next piped command after recording it (a cancellation mid-stream).
         pipe_error: Mutex<Option<PortError>>,
@@ -242,6 +253,7 @@ mod tests {
                 std::fs::write(out, b"").unwrap();
             }
             self.compressions.lock().unwrap().push((command.stdin_compression, command.stdout_compression));
+            self.rewrites.lock().unwrap().push(command.stdin_rewrite);
             self.calls.lock().unwrap().push(command.stages);
             if let Some(error) = self.pipe_error.lock().unwrap().take() {
                 return Err(error);
@@ -402,7 +414,7 @@ mod tests {
         let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
         let file = dir.path().join("all.sql");
         std::fs::write(&file, MULTI_DATABASE_DUMP).unwrap();
-        let allow = DumpImportOptions { allow_database_switch: true };
+        let allow = DumpImportOptions { allow_database_switch: true, ..Default::default() };
         admin.import(&endpoint(dir.path()), &DatabaseName::new("shop").unwrap(), &file, allow, &NullProgressSink, &CancelFlag::new()).await.unwrap();
         assert_eq!(fake.calls.lock().unwrap().len(), 2, "CREATE DATABASE, then the restore");
     }
@@ -448,5 +460,89 @@ mod tests {
         let err = admin.export(&endpoint(dir.path()), &name, &dir.path().join("shop.zip"), &NullProgressSink, &CancelFlag::new()).await.unwrap_err();
         assert!(err.to_string().contains("use .sql.gz"), "{err}");
         assert_eq!(fake.calls.lock().unwrap().len(), 1);
+    }
+
+    const MARIADB_HEADER: &[u8] =
+        b"/*M!999999\\- enable the sandbox mode */\n-- MariaDB dump 10.19-11.4.2-MariaDB, for Win64 (AMD64)\n-- Server version\t11.4.2-MariaDB\nCREATE TABLE t (id INT);\n";
+
+    fn endpoint_of(dir: &Path, series: &str) -> MysqlEndpoint {
+        MysqlEndpoint { series: MysqlSeries::parse(series).unwrap(), ..endpoint(dir) }
+    }
+
+    fn import_args(calls: &[Vec<CommandSpec>]) -> (&[String], &[String]) {
+        (&calls[0][0].args, &calls[1][0].args)
+    }
+
+    #[tokio::test]
+    async fn import_with_compat_sets_the_session_and_rewrites_the_stream() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(FakeRunner::default());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let file = dir.path().join("maria.sql.gz");
+        std::fs::write(&file, gzipped(MARIADB_HEADER)).unwrap();
+        let options = DumpImportOptions { compat: Some(DumpCompat::Mariadb), ..Default::default() };
+        admin.import(&endpoint(dir.path()), &DatabaseName::new("shop").unwrap(), &file, options, &NullProgressSink, &CancelFlag::new()).await.unwrap();
+
+        let calls = fake.calls.lock().unwrap();
+        let (create, restore) = import_args(&calls);
+        assert!(create.contains(&"--execute=CREATE DATABASE IF NOT EXISTS `shop` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci".to_string()), "{create:?}");
+        let init =
+            "--init-command=SET SESSION restrict_fk_on_non_standard_key=OFF, SESSION default_collation_for_utf8mb4=utf8mb4_general_ci, SESSION collation_connection=utf8mb4_general_ci";
+        assert_eq!(restore.iter().filter(|a| a.starts_with("--init-command=")).collect::<Vec<_>>(), [init]);
+        assert!(restore.contains(&"--database=shop".to_string()));
+        assert_eq!(*fake.rewrites.lock().unwrap(), [DumpRewrite { drop_sandbox_line: true, strip_definers: true }]);
+        assert_eq!(*fake.compressions.lock().unwrap(), [(StreamCompression::Gzip, StreamCompression::None)], "decompressed and rewritten on the way");
+    }
+
+    #[tokio::test]
+    async fn import_session_settings_follow_the_target_series() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("dump.sql");
+        std::fs::write(&file, b"SELECT 1;\n").unwrap();
+        let cases = [
+            ("8.4", Some(DumpCompat::Mysql80), Some("--init-command=SET SESSION restrict_fk_on_non_standard_key=OFF")),
+            ("8.0", Some(DumpCompat::Mysql80), None),
+            ("5.7", Some(DumpCompat::Mariadb), None),
+            ("8.4", None, None),
+        ];
+        for (series, compat, expected) in cases {
+            let fake = Arc::new(FakeRunner::default());
+            let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+            let options = DumpImportOptions { compat, ..Default::default() };
+            admin.import(&endpoint_of(dir.path(), series), &DatabaseName::new("shop").unwrap(), &file, options, &NullProgressSink, &CancelFlag::new()).await.unwrap();
+            let calls = fake.calls.lock().unwrap();
+            let (create, restore) = import_args(&calls);
+            let init: Vec<&str> = restore.iter().filter(|a| a.starts_with("--init-command=")).map(String::as_str).collect();
+            assert_eq!(init, expected.into_iter().collect::<Vec<_>>(), "{series} {compat:?}");
+            assert!(create.last().unwrap().ends_with("CHARACTER SET utf8mb4") == (compat != Some(DumpCompat::Mariadb)), "{create:?}");
+            let rewrite = *fake.rewrites.lock().unwrap().first().unwrap();
+            assert_eq!(rewrite.is_noop(), compat.is_none(), "without --compat the stream is untouched");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_import_of_a_dump_from_another_server_suggests_compat() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("maria.sql");
+        std::fs::write(&file, MARIADB_HEADER).unwrap();
+        let failing = || {
+            let fake = Arc::new(FakeRunner::default());
+            // Replies are popped from the end: restore fails, CREATE DATABASE ok.
+            fake.reply.lock().unwrap().extend([
+                CommandOutput { exit_code: Some(1), stdout: String::new(), stderr: "ERROR at line 1: Unknown command '\\-'.".into() },
+                CommandOutput { exit_code: Some(0), stdout: String::new(), stderr: String::new() },
+            ]);
+            MysqlCliAdmin::new(fake.clone(), fake)
+        };
+        let name = DatabaseName::new("shop").unwrap();
+
+        let err = failing().import(&endpoint(dir.path()), &name, &file, DumpImportOptions::default(), &NullProgressSink, &CancelFlag::new()).await.unwrap_err();
+        let PortError::Interrupted(cause) = &err else { panic!("{err}") };
+        let message = cause.to_string();
+        assert!(message.contains("Unknown command") && message.contains("made by MariaDB (server version 11.4.2-MariaDB)") && message.contains("--compat mariadb"), "{message}");
+
+        let options = DumpImportOptions { compat: Some(DumpCompat::Mariadb), ..Default::default() };
+        let err = failing().import(&endpoint(dir.path()), &name, &file, options, &NullProgressSink, &CancelFlag::new()).await.unwrap_err();
+        assert!(!err.to_string().contains("--compat"), "already imported with --compat: {err}");
     }
 }

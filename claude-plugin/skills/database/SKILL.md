@@ -158,6 +158,30 @@ database `may now be incomplete`. Report it, never retry on your own; with the u
 confirmation, drop the database (`lampo db drop <name> --yes`) and import again, or import the
 backup exported before.
 
+#### Dumps from MySQL 8.0 or MariaDB: `--compat`
+
+```powershell
+lampo db import C:\dumps\legacy.sql --compat mysql80
+lampo db import C:\dumps\xampp.sql.gz shop_copy --compat mariadb
+```
+
+`--compat` adapts a dump made by another server while it streams into MySQL; the file itself is
+never changed and nothing is extracted to disk. Without it the dump runs as it is.
+
+| Fix | `mysql80` | `mariadb` |
+|-----|-----------|-----------|
+| Foreign keys on non-unique keys accepted (`SET SESSION restrict_fk_on_non_standard_key=OFF`, MySQL 8.4+) | yes | yes |
+| `DEFINER=…` removed from views, triggers, routines and events (they belong to `root`) | yes | yes |
+| First line `/*M!999999\- enable the sandbox mode */` dropped | | yes |
+| `utf8mb4_general_ci` as the default `utf8mb4` collation (session; database created by the import) | | yes |
+
+Only the `DEFINER` of `CREATE …` headers and of `/*!NNNNN DEFINER=… */` comments at the start
+of a line is removed; the same text inside data rows stays. When an import without `--compat`
+fails and the dump's header says MariaDB (or MySQL 8.0 into 8.4), the error ends with `import it
+again with --compat <server>`. The failed import already ran part of the dump: the same rules
+apply (ask, then drop and import again with the flag). Never add `--compat` by default, and do
+not work around a failure with `mysql --init-command=… -e "source …"`: use the flag.
+
 Dump caveats:
 
 - A dump made with `--databases` / `--all-databases` contains `CREATE DATABASE` and `USE`
@@ -166,7 +190,8 @@ Dump caveats:
   for a compressed dump ask the user, or look inside a `.zip` with `Expand-Archive` into a
   temporary folder) and, with the user's approval, import into that name or dump again without
   those options.
-- Dumps from MariaDB may use syntax MySQL rejects (see `lampo:migrate`, "MariaDB").
+- Dumps from MariaDB may also use syntax `--compat` does not fix and MySQL rejects (see
+  `lampo:migrate`, "MariaDB").
 - Exit code 12 means the mysql client failed: the message has the SQL error and its line.
 
 ### Drop: always ask first

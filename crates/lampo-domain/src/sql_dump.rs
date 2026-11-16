@@ -4,6 +4,11 @@
 //! `mysqldump --databases` (or `--all-databases`) starts with `CREATE DATABASE` and `USE`
 //! statements, and everything after a `USE` runs in the database it names, whatever target the
 //! user chose. Such statements are looked for in the head of the dump, where mysqldump writes them.
+//!
+//! [`compat`] and [`rewrite`] adapt dumps made by other servers (MySQL 8.0, MariaDB) on import.
+
+pub mod compat;
+pub mod rewrite;
 
 /// Bytes of a (decompressed) dump inspected before an import.
 pub const DUMP_HEAD_BYTES: usize = 64 * 1024;
