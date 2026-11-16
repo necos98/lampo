@@ -134,6 +134,7 @@ pub trait ProjectDetector: Send + Sync {
 /// Minimal filesystem facts the use cases need to validate input and detect stale worktrees.
 pub trait FileSystemInspector: Send + Sync {
     fn is_dir(&self, path: &Path) -> bool;
+    fn is_file(&self, path: &Path) -> bool;
 }
 
 /// The files a new project's setup touches: its destination folder (checked before, removed

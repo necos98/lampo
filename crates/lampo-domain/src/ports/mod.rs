@@ -53,9 +53,9 @@ pub use packages::{
     SlotReplacement, VcRuntimeDetector,
 };
 pub use services::{
-    ChildId, CommandOutput, CommandRunner, CommandSpec, DatabaseAdmin, DumpImportOptions, LogFileReader, LogRotator, MysqlEndpoint, MysqlRootPasswordReader, MysqlRootPasswordWriter,
-    NoMysqlRootPasswords, PipedCommand, PipedCommandRunner, PortAvailability, PortProbe, ProcessObserver, ProcessSupervisor, ServiceRunner, SpawnedChild, StreamCompression,
-    StreamingCommandRunner,
+    ChildId, CommandOutput, CommandRunner, CommandSpec, DatabaseAdmin, DumpImportOptions, LogExportWriter, LogFileReader, LogRotator, MysqlEndpoint, MysqlRootPasswordReader,
+    MysqlRootPasswordWriter, NoMysqlRootPasswords, PipedCommand, PipedCommandRunner, PortAvailability, PortProbe, ProcessObserver, ProcessSupervisor, ServiceRunner, SpawnedChild,
+    StreamCompression, StreamingCommandRunner,
 };
 pub use store::{
     AppLocationRecorder, CustomPresetRepository, ExecutableLocator, FileSystemInspector, FolderProbe, GitInspector, PathCanonicalizer, ProjectDetector, ProjectListing, ProjectRepository,

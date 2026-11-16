@@ -176,6 +176,12 @@ pub trait LogFileReader: Send + Sync {
     fn read_from(&self, file: &Path, offset: u64) -> PortResult<LogChunk>;
 }
 
+/// Saves the lines a reader picked out of a log (the GUI's export) to a file of their choice.
+pub trait LogExportWriter: Send + Sync {
+    /// Writes `lines`, one per line, to `file`, replacing it. `Io` when it cannot be written.
+    fn write_lines(&self, file: &Path, lines: &[String]) -> PortResult<()>;
+}
+
 /// Keeps log files bounded, for the logs whose writer reopens them for every entry (PHP's
 /// `error_log`) and so cannot rotate them itself. The current file stays where
 /// [`LogFileReader`] finds it.

@@ -2,6 +2,8 @@ import type * as T from '../../api/types.js';
 
 const BASE_LINES = 240;
 const TICK_MS = 900;
+/** Sources whose file the mock pretends was never written. */
+const MISSING_SOURCES: ReadonlySet<string> = new Set(['mysql-5.7', 'php:blog']);
 
 const TEMPLATES: Record<string, string[]> = {
 	apache: ['[core:notice] AH00094: Command line: httpd.exe -d C:/Lampo/apache', '[mpm_winnt:notice] AH00418: Parent: Created child process 7712', '[mpm_winnt:notice] AH00354: Child: Starting 64 worker threads.'],
@@ -52,18 +54,26 @@ export class MockLogs {
 		return BASE_LINES + Math.floor((Date.now() - this.#t0) / TICK_MS);
 	}
 
+	file(source: string): string {
+		return `C:\\Users\\dev\\AppData\\Local\\Lampo\\logs\\${source.replace(':', '-')}.log`;
+	}
+
+	exists(source: string): boolean {
+		return !MISSING_SOURCES.has(source);
+	}
+
 	tail(source: string, count: number): T.LogLines {
 		const end = this.#available();
 		const from = Math.max(0, end - count);
 		const lines: T.LogLine[] = [];
 		for (let i = from; i < end; i++) lines.push(lineAt(source, i, this.#t0));
-		return { source, file: `C:\\Lampo\\logs\\${source.replace(':', '-')}.log`, lines, nextOffset: end };
+		return { source, file: this.file(source), lines, nextOffset: end };
 	}
 
 	readFrom(source: string, offset: number): T.LogLines {
 		const end = this.#available();
 		const lines: T.LogLine[] = [];
 		for (let i = offset; i < end; i++) lines.push(lineAt(source, i, this.#t0));
-		return { source, file: `C:\\Lampo\\logs\\${source.replace(':', '-')}.log`, lines, nextOffset: end };
+		return { source, file: this.file(source), lines, nextOffset: end };
 	}
 }

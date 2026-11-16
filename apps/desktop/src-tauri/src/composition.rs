@@ -272,6 +272,8 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         gate: shutdown.gate(),
     }));
     let log_rotation = Arc::new(PeriodicLogRotation::new(Arc::new(services::SizeLogRotator), Arc::new(services::TokioTimer), projects.clone(), worktrees.clone(), paths.clone()));
+    let launcher: Arc<dyn ExternalAppLauncher> = Arc::new(services::WindowsExternalAppLauncher);
+    let logs = Arc::new(LogQueries::new(Arc::new(services::FileLogReader), projects.clone(), settings.clone(), service_catalog.clone(), paths.clone()));
     let state = AppState {
         events: events.clone(),
         tasks,
@@ -289,7 +291,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         relink_project: Arc::new(RelinkProject::new(project_writer.clone(), fs.clone())),
         export_project: Arc::new(ExportProject::new(projects.clone(), transfer.clone())),
         import_project,
-        open_project_in: Arc::new(OpenProjectIn::new(projects.clone(), fs.clone(), Arc::new(services::WindowsExternalAppLauncher))),
+        open_project_in: Arc::new(OpenProjectIn::new(projects.clone(), fs.clone(), launcher.clone())),
         preset_queries,
         save_preset: Arc::new(SavePreset::new(projects.clone(), custom_presets.clone(), builtin_presets.clone())),
         delete_preset: Arc::new(DeletePreset::new(custom_presets, builtin_presets)),
@@ -320,7 +322,9 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         worktree_up,
         worktree_down,
         prune_worktrees,
-        logs: Arc::new(LogQueries::new(Arc::new(services::FileLogReader), projects.clone(), settings.clone(), service_catalog.clone(), paths.clone())),
+        open_log: Arc::new(OpenLog::new(logs.clone(), fs.clone(), launcher)),
+        export_log_lines: Arc::new(ExportLogLines::new(Arc::new(services::FileLogExportWriter))),
+        logs,
         settings: Arc::new(SettingsService::new(settings_writer, env.clone())),
         hosts_sync: Arc::new(HostsSyncQuery::new(projects.clone(), hosts.clone())),
         doctor: Arc::new(Doctor::new(DoctorDeps {

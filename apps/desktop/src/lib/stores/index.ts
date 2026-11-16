@@ -7,11 +7,14 @@ import { goto } from '$app/navigation';
 import { backend } from '../backend/gateway.js';
 import { messages as m } from '../messages/index.js';
 import { notifier } from '../services/notifier.js';
+import { copyText } from '../services/platform.js';
 import { AutoRestartNotices } from './autoRestartNotices.js';
 import { DiagnosticsStore } from './diagnostics.svelte.js';
 import { ElevationStore } from './elevation.svelte.js';
 import { FirstRunStore } from './firstRun.svelte.js';
 import { IntegrationsStore } from './integrations.svelte.js';
+import { LogFileActions } from './logFiles.js';
+import { LogSearch } from './logSearch.svelte.js';
 import { LogSession } from './logSession.svelte.js';
 import { LogSourcesStore } from './logSources.svelte.js';
 import { PackagesStore } from './packages.svelte.js';
@@ -46,6 +49,7 @@ export const diagnostics = new DiagnosticsStore(backend, runner);
 export const integrations = new IntegrationsStore(backend, runner);
 export const firstRun = new FirstRunStore(backend, runner, tasks);
 export const logSources = new LogSourcesStore(backend);
+export const logFiles = new LogFileActions(backend, runner, notifier, copyText);
 export const updater = new UpdaterStore(backend);
 /** Each step of the automatic restart of a crashed service, announced from anywhere. */
 const autoRestartNotices = new AutoRestartNotices(
@@ -63,6 +67,12 @@ export const unsavedChanges = new UnsavedChanges();
 
 /** Per-visit objects are created through factories so they get the shared backend and stores. */
 export const createLogSession = () => new LogSession(backend);
+/** Search over what `session` shows; a jump stops following the tail so the match stays in view. */
+export const createLogSearch = (session: LogSession) =>
+	new LogSearch(
+		() => session.visible,
+		() => session.unfollow()
+	);
 export const createProjectFlow = () => new CreateProjectFlow(backend, projects, tasks, scaffoldSession, () => settings.value.data?.defaultAddressing);
 
 interface Startable {

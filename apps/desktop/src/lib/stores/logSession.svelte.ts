@@ -1,6 +1,6 @@
 import { toAppError, type AppError, type LogLine } from '../api/index.js';
 import type { Backend } from '../backend/ports.js';
-import { levelOf, type LogLevel } from '../logs/level.js';
+import { levelOf, passesLevel, type LevelFilter, type LogLevel } from '../logs/level.js';
 import { Poller } from '../logs/poller.js';
 import { TailBuffer } from '../logs/tailBuffer.js';
 
@@ -32,11 +32,20 @@ export class LogSession {
 	status = $state<'idle' | 'loading' | 'ready' | 'error'>('idle');
 	error = $state<AppError | null>(null);
 	filter = $state('');
+	levelFilter = $state<LevelFilter>('all');
 
+	/** The lines that pass both the text filter and the level filter. */
 	readonly visible = $derived.by((): readonly LogEntry[] => {
 		const needle = this.filter.trim().toLowerCase();
-		return needle ? this.lines.filter((l) => l.text.toLowerCase().includes(needle)) : this.lines;
+		const level = this.levelFilter;
+		if (!needle && level === 'all') return this.lines;
+		return this.lines.filter((l) => passesLevel(l.level, level) && (!needle || l.text.toLowerCase().includes(needle)));
 	});
+
+	/** Whether a filter may be hiding lines. */
+	get filtering(): boolean {
+		return this.filter.trim() !== '' || this.levelFilter !== 'all';
+	}
 
 	readonly #backend: Backend;
 	readonly #buffer = new TailBuffer<LogEntry>(MAX_LINES);

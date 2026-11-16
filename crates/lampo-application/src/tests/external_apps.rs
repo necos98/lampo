@@ -39,6 +39,9 @@ impl ExternalAppLauncher for FakeExternalApps {
     fn open_folder(&self, folder: &Path) -> PortResult<()> {
         self.record(ExternalApp::Folder, None, folder)
     }
+    fn open_file(&self, file: &Path) -> PortResult<()> {
+        unreachable!("a project is never opened as a file ({})", file.display())
+    }
     fn open_in_vscode(&self, folder: &Path) -> PortResult<()> {
         self.record(ExternalApp::VsCode, None, folder)
     }

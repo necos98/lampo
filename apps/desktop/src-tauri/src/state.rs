@@ -47,6 +47,8 @@ pub struct AppState {
     pub prune_worktrees: Arc<PruneWorktrees>,
 
     pub logs: Arc<LogQueries>,
+    pub open_log: Arc<OpenLog>,
+    pub export_log_lines: Arc<ExportLogLines>,
     pub settings: Arc<SettingsService>,
     pub doctor: Arc<Doctor>,
     pub hosts_sync: Arc<HostsSyncQuery>,

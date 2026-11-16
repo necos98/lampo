@@ -38,3 +38,13 @@ pub struct LogLinesDto {
     /// Pass back to `read_from` to follow the file.
     pub next_offset: u64,
 }
+
+/// Lines the log viewer shows (after its filters), saved to `file`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
+#[serde(rename_all = "camelCase")]
+pub struct LogExportRequest {
+    /// Absolute path of the file to write (replaced if it exists).
+    pub file: String,
+    pub lines: Vec<String>,
+}

@@ -737,6 +737,15 @@ export type LogLines = { source: string, file: string, lines: Array<LogLine>,
  */
 nextOffset: number, };
 
+/**
+ * Lines the log viewer shows (after its filters), saved to `file`.
+ */
+export type LogExportRequest = { 
+/**
+ * Absolute path of the file to write (replaced if it exists).
+ */
+file: string, lines: Array<string>, };
+
 // --- Settings ---
 
 /**

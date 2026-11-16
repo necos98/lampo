@@ -21,6 +21,7 @@ pub mod external_apps;
 pub(crate) mod generation;
 pub mod hosts_sync;
 pub mod lifecycle;
+pub mod log_files;
 pub mod log_rotation;
 pub mod logs;
 pub mod package_uninstall;
@@ -65,6 +66,7 @@ pub use environment::{ApplyEnvironment, ApplyEnvironmentDeps, EnvironmentSync, S
 pub use external_apps::{ExternalApp, OpenProjectIn};
 pub use hosts_sync::{HostsSyncQuery, hosts_block_in_sync};
 pub use lifecycle::{FirstRunDeps, FirstRunSetup, Shutdown, ShutdownGate, Startup};
+pub use log_files::{ExportLogLines, LogTarget, OpenLog};
 pub use log_rotation::PeriodicLogRotation;
 pub use logs::LogQueries;
 pub use package_uninstall::{UninstallPackage, UninstallPackageDeps};

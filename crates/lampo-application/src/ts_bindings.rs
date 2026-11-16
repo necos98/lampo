@@ -100,7 +100,7 @@ fn declarations(cfg: &Config) -> Vec<(&'static str, Vec<Declaration>)> {
             DatabaseModeDto, WorktreeEnvironmentDto, WorktreeUpRequest, WorktreeUpResultDto, WorktreeDownRequest,
             WorktreeDownResultDto, PruneWorktreesRequest, PruneReportDto, PruneFailureDto,
         ),
-        section!("Logs": LogSourceDto, LogTailRequest, LogLineDto, LogLinesDto),
+        section!("Logs": LogSourceDto, LogTailRequest, LogLineDto, LogLinesDto, LogExportRequest),
         section!("Settings": ServiceInstanceDto, ServiceKindDto, PortRangeDto, SettingsDto),
         section!("Diagnostics and shims":
             CheckStatus, DoctorCheckDto, VcRuntimeIssueDto, PortConflictDto, ShadowedToolDto, DoctorReportDto, ShimStatusDto,

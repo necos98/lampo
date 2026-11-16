@@ -6,6 +6,7 @@ mod claude_code;
 mod env_vars;
 mod environment;
 mod external_apps;
+mod log_files;
 mod misc;
 mod packages;
 mod php_extension_names;

@@ -595,14 +595,22 @@ export function createMockBackend({ fresh }: Options): Backend {
 		listLogSources: async (site = null) => {
 			await sleep(120);
 			const sites = projects.filter((p) => p.active && (!site || p.id === site));
-			const src = (id: string, exists = true): T.LogSource => ({ id, file: `C:\\Users\\dev\\AppData\\Local\\Lampo\\logs\\${id.replace(':', '-')}.log`, exists });
+			const src = (id: string): T.LogSource => ({ id, file: logs.file(id), exists: logs.exists(id) });
 			return [
-				...(site ? [] : [src('apache'), src('apache-error'), src('mysql-8.4'), src('mysql-8.4-error'), src('mysql-5.7', false), src('redis'), src('mailpit')]),
-				...sites.flatMap((p) => [src(`access:${p.id}`), src(`error:${p.id}`), src(`php:${p.id}`, p.id !== 'blog')])
+				...(site ? [] : [src('apache'), src('apache-error'), src('mysql-8.4'), src('mysql-8.4-error'), src('mysql-5.7'), src('redis'), src('mailpit')]),
+				...sites.flatMap((p) => [src(`access:${p.id}`), src(`error:${p.id}`), src(`php:${p.id}`)])
 			];
 		},
 		tailLog: async ({ source, lines }) => logs.tail(source, lines),
 		readLogFrom: async (source, offset) => logs.readFrom(source, offset),
+		openLogFile: async (source) => {
+			if (!logs.exists(source)) fail('validation', `the log file does not exist yet: ${logs.file(source)}`, { path: logs.file(source) });
+		},
+		openLogFolder: async () => {},
+		exportLogLines: async ({ file }) => {
+			await sleep(200);
+			if (!file.trim()) fail('validation', 'an export file is required');
+		},
 
 		// Settings
 		listServiceKinds: async () => {

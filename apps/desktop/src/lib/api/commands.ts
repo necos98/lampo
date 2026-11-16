@@ -56,6 +56,9 @@ export const COMMANDS = {
 	listLogSources: 'list_log_sources',
 	tailLog: 'tail_log',
 	readLogFrom: 'read_log_from',
+	openLogFile: 'open_log_file',
+	openLogFolder: 'open_log_folder',
+	exportLogLines: 'export_log_lines',
 	getSettings: 'get_settings',
 	listServiceKinds: 'list_service_kinds',
 	updateSettings: 'update_settings',
@@ -142,6 +145,9 @@ export const pruneWorktrees = (request: T.PruneWorktreesRequest = {}) => call<T.
 export const listLogSources = (site: string | null = null) => call<T.LogSource[]>(COMMANDS.listLogSources, { site });
 export const tailLog = (request: T.LogTailRequest) => call<T.LogLines>(COMMANDS.tailLog, { request });
 export const readLogFrom = (source: string, offset: number) => call<T.LogLines>(COMMANDS.readLogFrom, { source, offset });
+export const openLogFile = (source: string) => call<void>(COMMANDS.openLogFile, { source });
+export const openLogFolder = (source: string) => call<void>(COMMANDS.openLogFolder, { source });
+export const exportLogLines = (request: T.LogExportRequest) => call<void>(COMMANDS.exportLogLines, { request });
 
 // Settings
 export const getSettings = () => call<T.Settings>(COMMANDS.getSettings);

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { levelOf } from './level.ts';
+import { isLevelFilter, levelOf, passesLevel } from './level.ts';
 
 test('error keywords and 5xx statuses are errors', () => {
 	assert.equal(levelOf('[php:error] PHP Fatal error: Uncaught Error'), 'error');
@@ -25,4 +25,16 @@ test('ordinary, empty and look-alike lines are not highlighted', () => {
 	assert.equal(levelOf('errors_total=0 terrorism warned'), null);
 	assert.equal(levelOf('port 5000 ready'), null);
 	assert.equal(levelOf('città è pronta ✓'), null);
+});
+
+test('the level filter keeps lines at or above its severity', () => {
+	const levels = [null, 'warn', 'error'] as const;
+	assert.deepEqual(levels.map((l) => passesLevel(l, 'all')), [true, true, true]);
+	assert.deepEqual(levels.map((l) => passesLevel(l, 'warn')), [false, true, true]);
+	assert.deepEqual(levels.map((l) => passesLevel(l, 'error')), [false, false, true]);
+});
+
+test('only the known level filters are accepted', () => {
+	assert.equal(isLevelFilter('warn'), true);
+	assert.equal(isLevelFilter('debug'), false);
 });

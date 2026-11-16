@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use lampo_domain::logs::{LogChunk, LogQuery, LogSource};
@@ -80,6 +81,11 @@ impl LogQueries {
             lines: chunk.lines.into_iter().map(|l| LogLineDto { text: l.text, at_unix_ms: l.at_unix_ms }).collect(),
             next_offset: chunk.next_offset,
         }
+    }
+
+    /// The file of a source, validated like [`Self::tail`].
+    pub fn file_of(&self, source: &str) -> AppResult<PathBuf> {
+        Ok(self.parse_source(source)?.file(&self.paths))
     }
 
     pub fn tail(&self, request: &LogTailRequest) -> AppResult<LogLinesDto> {

@@ -38,6 +38,13 @@ impl ExternalAppLauncher for WindowsExternalAppLauncher {
         Ok(())
     }
 
+    /// Explorer hands a file to the app associated with its type (or asks which one to use),
+    /// without a shell parsing the path; like `open_folder`, it is not waited on.
+    fn open_file(&self, file: &Path) -> PortResult<()> {
+        Command::new(EXPLORER_EXE).arg(file).spawn().map_err(|e| PortError::process(EXPLORER_EXE, e))?;
+        Ok(())
+    }
+
     fn open_in_vscode(&self, folder: &Path) -> PortResult<()> {
         let local_app_data = std::env::var_os("LOCALAPPDATA");
         let program_files = std::env::var_os("ProgramFiles");

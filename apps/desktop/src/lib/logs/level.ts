@@ -11,3 +11,20 @@ export function levelOf(text: string): LogLevel {
 	if (WARN_PATTERN.test(text)) return 'warn';
 	return null;
 }
+
+/** Which lines the viewer keeps by severity: every line, warnings and errors, or errors only. */
+export type LevelFilter = 'all' | 'warn' | 'error';
+
+export const LEVEL_FILTERS: readonly LevelFilter[] = ['all', 'warn', 'error'];
+
+const SEVERITY: Record<Exclude<LogLevel, null>, number> = { warn: 1, error: 2 };
+const MIN_SEVERITY: Record<LevelFilter, number> = { all: 0, warn: 1, error: 2 };
+
+/** Whether a line of `level` is kept by `filter`. */
+export function passesLevel(level: LogLevel, filter: LevelFilter): boolean {
+	return (level ? SEVERITY[level] : 0) >= MIN_SEVERITY[filter];
+}
+
+export function isLevelFilter(value: string): value is LevelFilter {
+	return (LEVEL_FILTERS as readonly string[]).includes(value);
+}

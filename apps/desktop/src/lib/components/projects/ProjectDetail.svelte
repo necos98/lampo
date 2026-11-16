@@ -4,7 +4,6 @@
 	import FileUp from '@lucide/svelte/icons/file-up';
 	import ListX from '@lucide/svelte/icons/list-x';
 	import SquareTerminal from '@lucide/svelte/icons/square-terminal';
-	import ScrollText from '@lucide/svelte/icons/scroll-text';
 	import { onMount, untrack } from 'svelte';
 
 	import { goto } from '$app/navigation';
@@ -21,13 +20,13 @@
 	import * as Tabs from '#lib/components/ui/tabs/index.js';
 	import { messages as m } from '#lib/messages/index.js';
 	import { envVarRefusal } from '#lib/projects/envVarRefusal.js';
-	import { projectLogsHref } from '#lib/projects/links.js';
 	import { refusedDirectivesReason } from '#lib/services/errors.js';
 	import { projects, unsavedChanges } from '#lib/stores/index.js';
 	import { ProjectDraft } from '#lib/stores/projectDraft.svelte.js';
 
 	import WorktreePanel from '../worktrees/WorktreePanel.svelte';
 	import PathPromptDialog from './PathPromptDialog.svelte';
+	import ProjectLogLinks from './ProjectLogLinks.svelte';
 	import SavePresetDialog from './SavePresetDialog.svelte';
 	import AddressesSection from './sections/AddressesSection.svelte';
 	import ApacheSection from './sections/ApacheSection.svelte';
@@ -110,7 +109,7 @@
 	{#snippet actions()}
 		<Button variant="ghost" size="sm" disabled={!project.folderExists} onclick={() => projects.openTerminal(project.id)}><SquareTerminal />{t.openTerminal}</Button>
 		<Button variant="ghost" size="sm" title={t.openInVsCodeHelp} disabled={!project.folderExists} onclick={() => projects.openInVsCode(project.id)}><Code />{t.openInVsCode}</Button>
-		<Button variant="ghost" size="sm" href={projectLogsHref(project.id)}><ScrollText />{m.nav.logs}</Button>
+		<ProjectLogLinks site={project.id} />
 		<Button variant="ghost" size="sm" onclick={() => (exportOpen = true)}><FileUp />{t.export}</Button>
 		<Button variant="ghost" size="sm" onclick={() => (presetOpen = true)}><BookmarkPlus />{t.saveAsPreset}</Button>
 		<label class="flex items-center gap-2 text-sm" title={t.servedHelp}>

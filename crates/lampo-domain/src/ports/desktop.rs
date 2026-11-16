@@ -1,4 +1,5 @@
-//! The user's own desktop apps (terminal, file manager, code editor), opened on a project folder.
+//! The user's own desktop apps (terminal, file manager, code editor), opened on a project folder
+//! or on a file.
 
 use std::path::Path;
 
@@ -13,6 +14,8 @@ use crate::project::ProjectId;
 pub trait ExternalAppLauncher: Send + Sync {
     /// Opens `folder` in the file manager (Windows Explorer).
     fn open_folder(&self, folder: &Path) -> PortResult<()>;
+    /// Opens `file` in the app Windows associates with its type (Notepad for a `.log`).
+    fn open_file(&self, file: &Path) -> PortResult<()>;
     /// Opens `folder` in Visual Studio Code. `NotFound` when it is not installed;
     /// `Unsupported(reason)` when the install found cannot open this folder (`reason` is
     /// user-facing).

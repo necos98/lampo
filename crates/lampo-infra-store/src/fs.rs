@@ -14,6 +14,10 @@ impl FileSystemInspector for LocalFileSystem {
     fn is_dir(&self, path: &Path) -> bool {
         path.is_dir()
     }
+
+    fn is_file(&self, path: &Path) -> bool {
+        path.is_file()
+    }
 }
 
 /// One `metadata` call. On Windows a missing last component is `ERROR_FILE_NOT_FOUND`, a missing
@@ -165,7 +169,8 @@ mod tests {
         assert_eq!(fs.path_state(&dir), PathState::EmptyDir);
         let file = dir.join(".git").join("objects").join("ab");
         fs.write_file(&file, "x").unwrap();
-        assert!(fs.is_file(&file));
+        assert!(ScaffoldFiles::is_file(&fs, &file));
+        assert!(FileSystemInspector::is_file(&fs, &file) && !FileSystemInspector::is_file(&fs, &dir));
         assert_eq!(fs.path_state(&dir), PathState::NonEmptyDir);
         assert_eq!(fs.path_state(&file), PathState::File);
         let mut perms = std::fs::metadata(&file).unwrap().permissions();

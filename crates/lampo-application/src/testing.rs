@@ -224,19 +224,29 @@ impl InstalledPackageRegistry for MemInstalled {
     }
 }
 
+/// Folders (`add`) and files (`add_file`) that exist; nothing else does.
 #[derive(Default)]
-pub struct FakeFs(pub Mutex<BTreeSet<String>>);
+pub struct FakeFs {
+    dirs: Mutex<BTreeSet<String>>,
+    files: Mutex<BTreeSet<String>>,
+}
 impl FakeFs {
     pub fn add(&self, path: &str) {
-        lock(&self.0).insert(key(Path::new(path)));
+        lock(&self.dirs).insert(key(Path::new(path)));
+    }
+    pub fn add_file(&self, path: &Path) {
+        lock(&self.files).insert(key(path));
     }
     pub fn remove(&self, path: &str) {
-        lock(&self.0).remove(&key(Path::new(path)));
+        lock(&self.dirs).remove(&key(Path::new(path)));
     }
 }
 impl FileSystemInspector for FakeFs {
     fn is_dir(&self, path: &Path) -> bool {
-        lock(&self.0).contains(&key(path))
+        lock(&self.dirs).contains(&key(path))
+    }
+    fn is_file(&self, path: &Path) -> bool {
+        lock(&self.files).contains(&key(path))
     }
 }
 
