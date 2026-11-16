@@ -1,4 +1,5 @@
 import type { Project, ProjectEnvironment, SiteAddress, TlsMode, UpdateProjectRequest } from '../api/index.js';
+import { AddressList, type AddressRow } from '../projects/addressList.js';
 import { DATABASE_KIND, usesService } from '../projects/services.js';
 import { Baseline } from './baseline.js';
 
@@ -16,7 +17,8 @@ const editable = (p: EditableFields) => [p.name, p.addresses, p.environment, p.d
 export class ProjectDraft {
 	projectId: string;
 	name = $state('');
-	addresses = $state<SiteAddress[]>([]);
+	#addressRows = $state<AddressRow[]>([]);
+	readonly addresses = new AddressList(this.#addressRows);
 	environment = $state<ProjectEnvironment>({
 		phpVersion: '',
 		extensions: [],
@@ -39,11 +41,11 @@ export class ProjectDraft {
 	/** Loads `project` as both the draft and the new "saved" baseline. */
 	reset(project: Project): void {
 		this.name = project.name;
-		this.addresses = plain(project.addresses);
+		this.addresses.load(plain(project.addresses));
 		this.environment = plain(project.environment);
 		this.databaseName = project.databaseName;
 		this.tls = project.tls;
-		this.#baseline.set(editable(this));
+		this.#baseline.set(editable(this.#fields()));
 	}
 
 	/** Takes `project` as the new baseline but keeps the edits, so saving overwrites it. */
@@ -57,11 +59,11 @@ export class ProjectDraft {
 	}
 
 	get dirty(): boolean {
-		return !this.#baseline.matches(editable(this));
+		return !this.#baseline.matches(editable(this.#fields()));
 	}
 
 	get valid(): boolean {
-		return this.name.trim().length > 0 && this.addresses.length > 0 && this.addresses.every(isAddressFilled);
+		return this.name.trim().length > 0 && this.addresses.rows.length > 0 && this.addresses.values.every(isAddressFilled);
 	}
 
 	/** The database name is only sent while the project uses MySQL (the backend refuses it otherwise). */
@@ -70,11 +72,15 @@ export class ProjectDraft {
 		return {
 			projectId: this.projectId,
 			name: this.name.trim(),
-			addresses: plain(this.addresses),
+			addresses: plain(this.addresses.values),
 			environment: plain(this.environment),
 			databaseName: databaseName || null,
 			tls: this.tls
 		};
+	}
+
+	#fields(): EditableFields {
+		return { name: this.name, addresses: this.addresses.values, environment: this.environment, databaseName: this.databaseName, tls: this.tls };
 	}
 }
 

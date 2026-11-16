@@ -180,6 +180,7 @@ export const it = {
 			title: 'Indirizzi',
 			help: 'Il nome host richiede l’aggiornamento del file hosts (permesso di amministratore). Gli indirizzi .localhost e le porte no.',
 			kinds: { hostname: 'Nome host (hosts)', localhost: 'Alias .localhost', 'loopback-port': 'Porta locale' },
+			kind: 'Tipo di indirizzo',
 			host: 'Nome',
 			port: 'Porta',
 			add: 'Aggiungi indirizzo',
