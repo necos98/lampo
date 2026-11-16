@@ -108,6 +108,14 @@ async fn doctor_reports_every_problem_category() {
     assert!(doctor.run().await.unwrap().port_conflicts.is_empty());
 }
 
+#[tokio::test]
+async fn doctor_runs_the_standard_checks_in_order() {
+    let w = World::with_basics();
+    let report = Doctor::new(w.doctor_deps(Arc::new(FakeLocator::default()))).run().await.unwrap();
+    let ids: Vec<&str> = report.checks.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids, ["vc-runtime", "ports", "shims-on-path", "path-shadowing", "hosts-block", "packages", "folders", "stale-worktrees", "app"]);
+}
+
 // --- resolution, agent context, toolchain ----------------------------------------------------
 
 #[tokio::test]

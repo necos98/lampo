@@ -1355,18 +1355,18 @@ pub fn redis_id() -> ServiceId {
 impl World {
     /// The doctor with every standard check, as the composition roots register them.
     pub fn doctor_deps(&self, locator: Arc<FakeLocator>) -> DoctorDeps {
-        let shim_dir = self.paths.shim_dir();
-        let checks: Vec<Arc<dyn DoctorCheck>> = vec![
-            Arc::new(VcRuntimeCheck { vc: Arc::new(FakeVc::modern()) }),
-            Arc::new(PortsCheck { probe: self.ports.clone(), services: self.services.clone() }),
-            Arc::new(ShimsOnPathCheck { installer: Arc::new(FakeShimInstaller::default()), user_path: Arc::new(FakeUserPath::default()), shim_dir: shim_dir.clone() }),
-            Arc::new(PathShadowingCheck { locator, shim_dir, tools: lampo_domain::shim::tools::all() }),
-            Arc::new(HostsBlockCheck { hosts: self.hosts.clone() }),
-            Arc::new(PackagesCheck { services: self.services.clone() }),
-            Arc::new(FoldersCheck { fs: self.fs.clone() }),
-            Arc::new(StaleWorktreesCheck { fs: self.fs.clone() }),
-            Arc::new(AppCheck),
-        ];
+        let checks = standard_checks(StandardChecksDeps {
+            vc: Arc::new(FakeVc::modern()),
+            port_probe: self.ports.clone(),
+            services: self.services.clone(),
+            shim_installer: Arc::new(FakeShimInstaller::default()),
+            user_path: Arc::new(FakeUserPath::default()),
+            locator,
+            shim_dir: self.paths.shim_dir(),
+            shim_tools: lampo_domain::shim::tools::all(),
+            hosts: self.hosts.clone(),
+            fs: self.fs.clone(),
+        });
         DoctorDeps {
             projects: self.projects.clone(),
             worktrees: self.worktrees.clone(),

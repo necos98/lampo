@@ -1,8 +1,9 @@
 //! `lampo doctor` / GUI diagnostics. Read-only, works without the app.
 //!
 //! [`Doctor`] loads the configuration once ([`DoctorFacts`]) and runs every registered
-//! [`DoctorCheck`] in order. Each check is one small type with only the ports it needs; the
-//! composition roots decide which checks run (open-closed: a new check is a new type).
+//! [`DoctorCheck`] in order. Each check is one small type with only the ports it needs;
+//! [`standard_checks`] is the one list both composition roots register (open-closed: a new
+//! check is a new type added there).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -85,6 +86,36 @@ impl Doctor {
         report.ok = report.checks.iter().all(|c| c.status != CheckStatus::Error);
         Ok(report)
     }
+}
+
+/// The ports the [`standard_checks`] need, supplied by each composition root.
+pub struct StandardChecksDeps {
+    pub vc: Arc<dyn VcRuntimeDetector>,
+    pub port_probe: Arc<dyn PortProbe>,
+    pub services: Arc<ServiceCatalog>,
+    pub shim_installer: Arc<dyn ShimInstaller>,
+    pub user_path: Arc<dyn UserPathEditor>,
+    pub locator: Arc<dyn ExecutableLocator>,
+    pub shim_dir: PathBuf,
+    pub shim_tools: Vec<Arc<dyn ShimTool>>,
+    pub hosts: Arc<dyn HostsFileReader>,
+    pub fs: Arc<dyn FileSystemInspector>,
+}
+
+/// The checks of `lampo doctor` and of the GUI diagnostics, in report order. The single list
+/// both composition roots register, so CLI and GUI always run the same diagnostics.
+pub fn standard_checks(deps: StandardChecksDeps) -> Vec<Arc<dyn DoctorCheck>> {
+    vec![
+        Arc::new(VcRuntimeCheck { vc: deps.vc }),
+        Arc::new(PortsCheck { probe: deps.port_probe, services: deps.services.clone() }),
+        Arc::new(ShimsOnPathCheck { installer: deps.shim_installer, user_path: deps.user_path, shim_dir: deps.shim_dir.clone() }),
+        Arc::new(PathShadowingCheck { locator: deps.locator, shim_dir: deps.shim_dir, tools: deps.shim_tools }),
+        Arc::new(HostsBlockCheck { hosts: deps.hosts }),
+        Arc::new(PackagesCheck { services: deps.services }),
+        Arc::new(FoldersCheck { fs: deps.fs.clone() }),
+        Arc::new(StaleWorktreesCheck { fs: deps.fs }),
+        Arc::new(AppCheck),
+    ]
 }
 
 /// `vc-runtime`: Visual C++ runtimes needed by installed builds (`required_vc_runtime`).

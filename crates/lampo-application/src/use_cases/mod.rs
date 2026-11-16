@@ -56,7 +56,7 @@ pub use claude_code::{ClaudeCodeSetup, ClaudeCodeSetupDeps, embedded_icon, embed
 pub use database::DatabaseService;
 pub use diagnostics::{
     AppCheck, Doctor, DoctorCheck, DoctorDeps, DoctorFacts, FoldersCheck, HostsBlockCheck, PackagesCheck, PathShadowingCheck, PortsCheck, ShimsOnPathCheck, StaleWorktreesCheck,
-    VcRuntimeCheck,
+    StandardChecksDeps, VcRuntimeCheck, standard_checks,
 };
 pub use environment::{ApplyEnvironment, ApplyEnvironmentDeps, EnvironmentSync, ServiceLifecycle};
 pub use external_apps::{ExternalApp, OpenProjectIn};

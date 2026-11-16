@@ -64,18 +64,18 @@ pub fn build() -> AppResult<CliContext> {
     ));
     let app = Arc::new(ControlClient::new(channel.clone(), launcher, Arc::new(store::SystemClock), Arc::new(TokioTimer)));
     let running_channel = channel.clone();
-    let shim_dir = paths.shim_dir();
-    let checks: Vec<Arc<dyn DoctorCheck>> = vec![
-        Arc::new(VcRuntimeCheck { vc: vc.clone() }),
-        Arc::new(PortsCheck { probe: Arc::new(TcpPortProbe), services: services.clone() }),
-        Arc::new(ShimsOnPathCheck { installer: shim_installer.clone(), user_path: user_path.clone(), shim_dir: shim_dir.clone() }),
-        Arc::new(PathShadowingCheck { locator: locator.clone(), shim_dir, tools: shim_tools.clone() }),
-        Arc::new(HostsBlockCheck { hosts: Arc::new(ElevatedHostsFile::system(app_dir.join("lampo-hosts-helper.exe"), Arc::new(RunAsLauncher::default()))?) }),
-        Arc::new(PackagesCheck { services: services.clone() }),
-        Arc::new(FoldersCheck { fs: fs.clone() }),
-        Arc::new(StaleWorktreesCheck { fs: fs.clone() }),
-        Arc::new(AppCheck),
-    ];
+    let checks = standard_checks(StandardChecksDeps {
+        vc: vc.clone(),
+        port_probe: Arc::new(TcpPortProbe),
+        services: services.clone(),
+        shim_installer: shim_installer.clone(),
+        user_path: user_path.clone(),
+        locator: locator.clone(),
+        shim_dir: paths.shim_dir(),
+        shim_tools: shim_tools.clone(),
+        hosts: Arc::new(ElevatedHostsFile::system(app_dir.join("lampo-hosts-helper.exe"), Arc::new(RunAsLauncher::default()))?),
+        fs: fs.clone(),
+    });
 
     let settings = Arc::new(SettingsQuery::new(settings_repo.clone(), services.clone()));
 
