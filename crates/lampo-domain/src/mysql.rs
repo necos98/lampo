@@ -9,6 +9,8 @@ use crate::error::DomainError;
 use crate::tcp_port::Port;
 use crate::version::{PackageVersion, VersionSeries};
 
+pub mod credentials;
+
 /// A MySQL `<major>.<minor>` series (`8.4`, `5.7`). Each series has its own data directory and port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -174,7 +176,7 @@ pub struct DatabaseConnection {
 impl DatabaseConnection {
     /// Instances are initialised with `--initialize-insecure`: user `root`, empty password.
     pub fn local(series: MysqlSeries, port: Port, database: DatabaseName) -> Self {
-        Self { series, host: "127.0.0.1".into(), port, user: "root".into(), password: String::new(), database }
+        Self { series, host: "127.0.0.1".into(), port, user: credentials::ROOT_ACCOUNT.into(), password: String::new(), database }
     }
 }
 

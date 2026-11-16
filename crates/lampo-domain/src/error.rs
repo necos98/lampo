@@ -60,6 +60,9 @@ pub enum DomainError {
     InvalidDatabaseName(String),
     #[error("`{0}` is a MySQL system schema shared by every project and cannot be used, created, dropped, imported into or cloned")]
     ReservedDatabaseName(String),
+    /// Never carries the password.
+    #[error("invalid MySQL password: {0}")]
+    InvalidMysqlPassword(String),
     #[error("invalid port {0}")]
     InvalidPort(u32),
     #[error("invalid service id `{0}`: expected `apache`, `redis` or `mysql-<major>.<minor>`")]

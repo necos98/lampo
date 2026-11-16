@@ -23,7 +23,7 @@
 //! | [`system`]   | `lampo-infra-store` (`SystemClock`), `lampo-infra-services` (`TokioTimer`) |
 //! | [`packages`] | `lampo-infra-packages`  |
 //! | [`web`]      | `lampo-infra-web` (also Apache's `ServiceRunner`) |
-//! | [`services`] | `lampo-infra-services` (supervisor, runners, ports, logs, `DatabaseAdmin`) |
+//! | [`services`] | `lampo-infra-services` (supervisor, runners, ports, logs, `DatabaseAdmin`, MySQL root passwords) |
 //! | [`control`]  | `lampo-infra-services` (named pipe, headless launcher) |
 //! | [`agents`]   | `lampo-infra-services` (`ClaudeCodeCli`), `lampo-infra-store` (`AgentPluginFiles`) |
 //! | [`desktop`]  | `lampo-infra-services` (`WindowsExternalAppLauncher`) |
@@ -53,8 +53,9 @@ pub use packages::{
     SlotReplacement, VcRuntimeDetector,
 };
 pub use services::{
-    ChildId, CommandOutput, CommandRunner, CommandSpec, DatabaseAdmin, DumpImportOptions, LogFileReader, LogRotator, MysqlEndpoint, PipedCommand, PipedCommandRunner, PortAvailability,
-    PortProbe, ProcessObserver, ProcessSupervisor, ServiceRunner, SpawnedChild, StreamCompression, StreamingCommandRunner,
+    ChildId, CommandOutput, CommandRunner, CommandSpec, DatabaseAdmin, DumpImportOptions, LogFileReader, LogRotator, MysqlEndpoint, MysqlRootPasswordReader, MysqlRootPasswordWriter,
+    NoMysqlRootPasswords, PipedCommand, PipedCommandRunner, PortAvailability, PortProbe, ProcessObserver, ProcessSupervisor, ServiceRunner, SpawnedChild, StreamCompression,
+    StreamingCommandRunner,
 };
 pub use store::{
     AppLocationRecorder, CustomPresetRepository, ExecutableLocator, FileSystemInspector, FolderProbe, GitInspector, PathCanonicalizer, ProjectDetector, ProjectListing, ProjectRepository,

@@ -14,12 +14,16 @@
 //! | [`FileLogReader`]            | `LogFileReader`                              |
 //! | [`SizeLogRotator`]           | `LogRotator`                                 |
 //! | [`MysqlCliAdmin`]            | `DatabaseAdmin` (compressed dumps via [`compression`]) |
+//! | [`DpapiMysqlRootPasswords`]  | `MysqlRootPasswordReader`, `MysqlRootPasswordWriter` (DPAPI, current user) |
 //! | [`NamedPipeControlServer`]   | `ControlChannelServer`                       |
 //! | [`NamedPipeControlClient`]   | `ControlChannelClient`                       |
 //! | [`HeadlessAppLauncher`]      | `AppLauncher`                                |
 //! | [`TokioTimer`]               | `Timer`                                      |
 //! | [`ClaudeCliRunner`]          | `ClaudeCodeCli` (`claude` via the `CommandRunner`) |
 //! | [`WindowsExternalAppLauncher`] | `ExternalAppLauncher` (PowerShell, Explorer, VS Code) |
+//!
+//! [`ClientOptionFile`] hands a stored password to the MySQL clients (a user-only temporary
+//! option file, never the command line): `MysqlCliAdmin`, `mysqladmin shutdown` and the shims.
 //!
 //! Internal modules: `process` (process creation inside the job, IOCP stdio pipes),
 //! `dump_input` (a piped command's input file, decoded and rewritten on the way),
@@ -33,6 +37,7 @@
 compile_error!("lampo-infra-services targets Windows only");
 
 pub mod claude_code;
+pub mod client_option_file;
 pub mod compression;
 mod config_path;
 pub mod control_pipe;
@@ -44,6 +49,7 @@ pub mod launcher;
 pub mod logs;
 pub mod mailpit;
 pub mod mysql;
+pub mod mysql_root_passwords;
 pub mod ports;
 mod process;
 pub mod redis;
@@ -65,6 +71,8 @@ pub use launcher::HeadlessAppLauncher;
 pub use logs::FileLogReader;
 pub use mailpit::MailpitRunner;
 pub use mysql::MysqlRunner;
+pub use mysql_root_passwords::DpapiMysqlRootPasswords;
+pub use client_option_file::ClientOptionFile;
 pub use ports::TcpPortProbe;
 pub use redis::RedisRunner;
 pub use rotating_log::SizeLogRotator;

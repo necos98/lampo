@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::PortResult;
 use crate::logs::{LogChunk, LogQuery};
+use crate::mysql::credentials::MysqlPassword;
 use crate::mysql::{DatabaseName, MysqlSeries};
 use crate::ports::events::ProgressSink;
 use crate::progress::CancelFlag;
@@ -231,6 +232,32 @@ pub trait DatabaseAdmin: Send + Sync {
     async fn export(&self, endpoint: &MysqlEndpoint, name: &DatabaseName, sql_file: &Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()>;
     /// Creates `target` as a copy of `source` on the same instance (dump piped into restore).
     async fn clone_database(&self, endpoint: &MysqlEndpoint, source: &DatabaseName, target: &DatabaseName, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()>;
+}
+
+/// The stored password of the administrative account ([`ROOT_ACCOUNT`]) of a local MySQL
+/// instance, which Lampo's own clients (database admin, `mysqladmin shutdown`, the shims)
+/// authenticate with. Synchronous: one small file, read by the shims too.
+///
+/// [`ROOT_ACCOUNT`]: crate::mysql::credentials::ROOT_ACCOUNT
+pub trait MysqlRootPasswordReader: Send + Sync {
+    /// `None` when none is stored: the account has no password, as the instance was initialised.
+    fn root_password(&self, instance: &ServiceId) -> PortResult<Option<MysqlPassword>>;
+}
+
+/// Stores the password of an instance's administrative account, after it was set on the server.
+pub trait MysqlRootPasswordWriter: Send + Sync {
+    /// Replaces any stored one.
+    fn save_root_password(&self, instance: &ServiceId, password: &MysqlPassword) -> PortResult<()>;
+}
+
+/// No stored passwords: every instance's root has none (tests, tools without a store).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoMysqlRootPasswords;
+
+impl MysqlRootPasswordReader for NoMysqlRootPasswords {
+    fn root_password(&self, _instance: &ServiceId) -> PortResult<Option<MysqlPassword>> {
+        Ok(None)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

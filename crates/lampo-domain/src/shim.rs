@@ -118,6 +118,12 @@ pub struct ShimInvocation {
     pub env: Vec<(String, String)>,
     /// One line for stderr before the tool starts (the defaults were adjusted).
     pub notice: Option<String>,
+    /// The MySQL instance whose stored root password the launcher hands to the client, when one
+    /// is stored: an option file given before every argument (`--defaults-extra-file=`), never
+    /// the command line. Set only for a client connecting to that instance as
+    /// [`ROOT_ACCOUNT`](crate::mysql::credentials::ROOT_ACCOUNT) with no account, password,
+    /// server or option file chosen by the user.
+    pub stored_credentials: Option<ServiceId>,
 }
 
 /// What is at a path, as one file-system call can tell.
@@ -163,6 +169,7 @@ mod mysql_database;
 /// Built-in shim tools.
 pub mod tools {
     use super::mysql_database::{self, SiteDatabase};
+    use crate::mysql::credentials::ROOT_ACCOUNT;
     use super::*;
 
     pub struct Php;
@@ -171,7 +178,7 @@ pub mod tools {
             "php"
         }
         fn invocation(&self, target: &ShimTarget, args: &[String], _folders: &dyn FolderProbe) -> Result<ShimInvocation, DomainError> {
-            Ok(ShimInvocation { program: target.php_exe.clone(), args: args.to_vec(), env: php_env(target), notice: None })
+            Ok(ShimInvocation { program: target.php_exe.clone(), args: args.to_vec(), env: php_env(target), notice: None, stored_credentials: None })
         }
     }
 
@@ -184,7 +191,7 @@ pub mod tools {
             let phar = target.composer_phar.as_ref().ok_or_else(|| unavailable("composer", "Composer is not installed for this PHP version"))?;
             let mut a = vec![phar.display().to_string()];
             a.extend_from_slice(args);
-            Ok(ShimInvocation { program: target.php_exe.clone(), args: a, env: php_env(target), notice: None })
+            Ok(ShimInvocation { program: target.php_exe.clone(), args: a, env: php_env(target), notice: None, stored_credentials: None })
         }
     }
 
@@ -202,16 +209,20 @@ pub mod tools {
     /// `[option-file options the user put first] --host --port --user --default-character-set
     /// [extra] <user args>`. Option-file options (`--no-defaults`, `--defaults-file=`, …) must stay
     /// first for the client; everything else the user passes comes after the defaults, so explicit
-    /// options win.
-    fn mysql_client(m: &ShimService, binary: &str, args: &[String], extra: Option<String>) -> ShimInvocation {
-        let (leading, rest) = args.split_at(mysql_args::leading_only_count(args));
+    /// options win. The instance's stored root password is offered
+    /// ([`ShimInvocation::stored_credentials`]) only when the defaults decide the connection.
+    fn mysql_client(m: &ShimService, binary: &str, args: &[String], parsed: &mysql_args::ParsedArgs, extra: Option<String>) -> ShimInvocation {
+        let leading_count = mysql_args::leading_only_count(args);
+        let (leading, rest) = args.split_at(leading_count);
         let mut a = leading.to_vec();
         a.extend([format!("--host={}", m.host), format!("--port={}", m.port)]);
         a.extend(m.user.iter().map(|u| format!("--user={u}")));
         a.push(format!("--default-character-set={MYSQL_CLIENT_CHARSET}"));
         a.extend(extra);
         a.extend_from_slice(rest);
-        ShimInvocation { program: m.client_dir.join(format!("{binary}.exe")), args: a, env: Vec::new(), notice: None }
+        let as_root = m.user.as_deref() == Some(ROOT_ACCOUNT);
+        let stored_credentials = (as_root && leading_count == 0 && !parsed.chooses_connection()).then(|| m.service.clone());
+        ShimInvocation { program: m.client_dir.join(format!("{binary}.exe")), args: a, env: Vec::new(), notice: None, stored_credentials }
     }
 
     /// `mysql`: also selects the site's database unless the user chose one (a positional
@@ -230,7 +241,7 @@ pub mod tools {
             let parsed = mysql_args::parse(args, mysql_args::MYSQL_SHORT_WITH_VALUE);
             let chosen = !parsed.positional.is_empty() || parsed.has_short('D') || parsed.has_long("database");
             let site = if chosen { SiteDatabase::None } else { SiteDatabase::of(m, folders) };
-            let mut inv = mysql_client(m, "mysql", args, site.usable().map(|d| format!("--database={d}")));
+            let mut inv = mysql_client(m, "mysql", args, &parsed, site.usable().map(|d| format!("--database={d}")));
             if let SiteDatabase::Missing(name) = site {
                 inv.notice = Some(mysql_database::missing_notice(name));
             }
@@ -251,7 +262,7 @@ pub mod tools {
             let m = service(target, "mysqldump", &ServiceKind::MYSQL)?;
             let parsed = mysql_args::parse(args, mysql_args::MYSQLDUMP_SHORT_WITH_VALUE);
             let names_something = !parsed.positional.is_empty() || parsed.has_short('A') || parsed.has_short('B') || parsed.has_long("all-databases") || parsed.has_long("databases");
-            let mut inv = mysql_client(m, "mysqldump", args, None);
+            let mut inv = mysql_client(m, "mysqldump", args, &parsed, None);
             if !names_something {
                 inv.args.extend(SiteDatabase::of(m, folders).usable().map(str::to_string));
             }
@@ -268,7 +279,7 @@ pub mod tools {
             let r = service(target, "redis-cli", &ServiceKind::REDIS)?;
             let mut a = vec!["-h".to_string(), r.host.clone(), "-p".to_string(), r.port.to_string()];
             a.extend_from_slice(args);
-            Ok(ShimInvocation { program: r.client_dir.join("redis-cli.exe"), args: a, env: Vec::new(), notice: None })
+            Ok(ShimInvocation { program: r.client_dir.join("redis-cli.exe"), args: a, env: Vec::new(), notice: None, stored_credentials: None })
         }
     }
 
@@ -421,6 +432,31 @@ pub(crate) mod tests {
         assert_eq!(inv.args, expected(&[], &["--port=3307", "shop"]));
         assert_eq!(mysql(&t, &["--default-character-set=latin1"]), expected(&["--database=shop"], &["--default-character-set=latin1"]));
         assert!(tools::RedisCli.invocation(&t, &[], &present()).is_err());
+    }
+
+    fn stored_credentials(tool: &dyn ShimTool, t: &ShimTarget, user: &[&str]) -> Option<ServiceId> {
+        tool.invocation(t, &args(user), &present()).unwrap().stored_credentials
+    }
+
+    #[test]
+    fn mysql_clients_offer_the_stored_root_password_only_for_lampos_own_connection() {
+        let t = target("8.3");
+        let instance = Some("mysql-8.4".parse().unwrap());
+        for tool in [&tools::Mysql as &dyn ShimTool, &tools::Mysqldump] {
+            for user in [&[][..], &["-e", "SELECT 1"], &["--protocol=TCP", "shop"], &["--database=blog"]] {
+                assert_eq!(stored_credentials(tool, &t, user), instance, "{} {user:?}", tool.name());
+            }
+            let chosen: [&[&str]; 7] = [&["-u", "app"], &["--user=root"], &["-psecret"], &["--password"], &["--host=db.example.com"], &["-P", "3307"], &["--no-defaults"]];
+            for user in chosen.into_iter().chain([&["--defaults-extra-file=C:/my.cnf"][..], &["--print-defaults"], &["--login-path=remote"]]) {
+                assert_eq!(stored_credentials(tool, &t, user), None, "{} {user:?}", tool.name());
+            }
+        }
+        let mut other_user = t.clone();
+        other_user.services.get_mut(&ServiceKind::MYSQL).unwrap().user = Some("app".into());
+        assert_eq!(stored_credentials(&tools::Mysql, &other_user, &[]), None, "the root password is for root only");
+        for tool in [&tools::Php as &dyn ShimTool, &tools::Composer] {
+            assert_eq!(stored_credentials(tool, &t, &[]), None);
+        }
     }
 
     #[test]

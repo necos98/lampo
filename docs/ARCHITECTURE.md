@@ -29,7 +29,7 @@ and `redis-cli`.
 | `crates/lampo-infra-store` | TOML repositories (projects, worktrees, settings, presets), app paths, app location file, shim index file, shim installer (shims + CLI copy), project detectors, git metadata reader, user PATH, clock, generated agent-plugin files | Lampo's own files |
 | `crates/lampo-infra-packages` | Embedded + windows.php.net catalogs, downloader, SHA-256, zip extraction, installed registry, VC++ runtime detection, post-install hooks | Where binaries come from |
 | `crates/lampo-infra-web` | Apache config templates + `httpd -t` + runner (an httpd driver on the `ServiceHost` of `lampo-infra-services`), php.ini rendering, hosts-file block via the elevated `lampo-hosts-helper` | Apache/PHP/hosts specifics |
-| `crates/lampo-infra-services` | Job Object supervisor, `ServiceHost` (start/restart/stop sequence shared by every service runner, Apache included), MySQL/Redis/Mailpit runners, port probe, log files, `DatabaseAdmin` (plain, `.sql.gz` and single-`.sql` `.zip` dumps, (de)compressed while streaming), control named pipe, headless app launcher, `claude` CLI runner, external desktop apps (PowerShell, Explorer, VS Code) | Local processes and IPC |
+| `crates/lampo-infra-services` | Job Object supervisor, `ServiceHost` (start/restart/stop sequence shared by every service runner, Apache included), MySQL/Redis/Mailpit runners, port probe, log files, `DatabaseAdmin` (plain, `.sql.gz` and single-`.sql` `.zip` dumps, (de)compressed while streaming), MySQL root passwords (DPAPI) and the option files handing them to the clients, control named pipe, headless app launcher, `claude` CLI runner, external desktop apps (PowerShell, Explorer, VS Code) | Local processes and IPC |
 | `crates/lampo-cli` | `lampo` CLI and `lampo-shim` (copied as `php.exe` etc.): two composition roots (`src/composition.rs`, `src/bin/lampo-shim.rs`, which registers the shim tools) | CLI surface |
 | `claude-plugin` | Claude Code plugin sources: `skills/<skill-id>/SKILL.md` + reference files and `icon.png` (embedded as is), trigger evals and a dev manifest (repository only) | What agents are taught |
 | `apps/desktop` | SvelteKit GUI (`src/lib/api` typed API, `src/lib/messages` Italian strings) and `src-tauri` (Tauri commands, tray, composition root) | GUI |
@@ -339,6 +339,21 @@ its parent's; `None` for the default target and sites without MySQL):
   tell (no data dir in an older index, a data dir that cannot be read, a non-ASCII or device
   name) it adds the database as before: a visible client error beats a silent change. No check
   runs when the user chose a database.
+
+### MySQL credentials of Lampo's own clients
+
+Instances start with `root` and no password (`--initialize-insecure`). When a root password is
+stored for an instance (`MysqlRootPasswordWriter`; `DpapiMysqlRootPasswords` keeps it in
+`secrets\<service-id>.root.dpapi`, encrypted with DPAPI for the current Windows user), every
+client Lampo runs as root authenticates with it: `MysqlCliAdmin` (statements, import, export,
+clone), the `mysqladmin shutdown` fallback and the `mysql`/`mysqldump` shims. The password never
+reaches a command line or a log: `ClientOptionFile` writes a `[client]` option file to `%TEMP%`,
+created with a descriptor granting access to the current user only, passed as the client's first
+argument and deleted after the client exits. Lampo's own clients use `--defaults-file=` (that file
+and no other, like the `--no-defaults` they use without a password); the shims use
+`--defaults-extra-file=`, so the user's own option files keep applying, and only when the user
+chose no account, password, server or option file (`ShimInvocation::stored_credentials`): the
+root password never reaches another account or server. Without a stored password nothing changes.
 
 `lampo exec` and `lampo env` need nothing extra: the shim dir is first on their PATH and
 `LAMPO_PROJECT`/`LAMPO_PROJECT_ROOT` are set, so `mysql` there is the shim with the same

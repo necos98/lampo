@@ -1,7 +1,7 @@
 //! Thin, safe wrappers over the Win32 calls the adapters share: UTF-16 strings, the current
 //! user's SID, a "current user only" security descriptor, process-exit waits on the system
-//! thread pool, process names, process trees and job membership, and the TCP listener table. No
-//! adapter logic lives here.
+//! thread pool, process names, process trees and job membership, the TCP listener table and DPAPI
+//! ([`dpapi`]). No adapter logic lives here.
 
 use std::collections::HashMap;
 use std::ffi::{OsStr, c_void};
@@ -47,6 +47,8 @@ pub(crate) fn owned(h: HANDLE) -> io::Result<OwnedHandle> {
         Ok(unsafe { OwnedHandle::from_raw_handle(h as RawHandle) })
     }
 }
+
+pub(crate) mod dpapi;
 
 struct LocalMem(*mut c_void);
 

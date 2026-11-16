@@ -28,6 +28,8 @@
 //!                                  (copies of lampo-shim.exe) and lampo.exe (copy of the CLI) —
 //!                                  added to the user PATH
 //!   bin\shim-index.json            read by the shims on every invocation
+//!   secrets\<service-id>.root.dpapi  password of a MySQL instance's root, when it has one,
+//!                                  encrypted for the Windows user (DPAPI)
 //!   app-location.txt               folder of the last started lampo-desktop.exe, read by copies
 //!                                  of the CLI that do not sit next to the app (bin\lampo.exe)
 //!   tools\laravel-installer\<php>\ Lampo's own `laravel/installer` (Composer project)
@@ -170,6 +172,17 @@ impl LampoPaths {
     /// [`Self::shim_index_file`] from the data root alone: the shims never compute the config root.
     pub fn shim_index_file_in(data_root: &Path) -> PathBuf {
         Self::shim_dir_in(data_root).join("shim-index.json")
+    }
+
+    /// Secrets Lampo keeps for its own clients, encrypted for the current Windows user (DPAPI):
+    /// `secrets\` (the MySQL root passwords, `secrets\mysql-8.4.root.dpapi`).
+    pub fn secrets_dir(&self) -> PathBuf {
+        Self::secrets_dir_in(&self.data_root)
+    }
+
+    /// [`Self::secrets_dir`] from the data root alone (the shims).
+    pub fn secrets_dir_in(data_root: &Path) -> PathBuf {
+        data_root.join("secrets")
     }
 
     /// Folder of the running app (`lampo-desktop.exe` and its helper executables), recorded

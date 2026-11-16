@@ -6,7 +6,8 @@
 //! crash recovery and data dictionary upgrades can take minutes: the status then reads
 //! `starting` / `recovery`); `stop`, or a start that gives up, asks for a clean InnoDB shutdown
 //! (the `MYSQLShutdown<pid>` event mysqld listens for on Windows, needing no credentials, then
-//! `mysqladmin shutdown` as a fallback) before the supervisor's forced termination.
+//! `mysqladmin shutdown` as a fallback, with the stored root password if any) before the
+//! supervisor's forced termination.
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -15,7 +16,8 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use lampo_domain::mysql::MysqlSeries;
-use lampo_domain::ports::{CommandRunner, CommandSpec, EventPublisher, ProcessSupervisor, ServiceRunner};
+use lampo_domain::mysql::credentials::ROOT_ACCOUNT;
+use lampo_domain::ports::{CommandRunner, CommandSpec, EventPublisher, MysqlRootPasswordReader, ProcessSupervisor, ServiceRunner};
 use lampo_domain::service::{ServiceId, ServiceKind, ServiceLaunch, ServiceStatus};
 use lampo_domain::tcp_port::Port;
 use lampo_domain::{PortError, PortResult};
@@ -24,6 +26,7 @@ use tokio::io::AsyncReadExt;
 use windows_sys::Win32::System::Threading::{EVENT_MODIFY_STATE, OpenEventW, SetEvent};
 
 use crate::config_path::config_file_path;
+use crate::client_option_file::ClientOptionFile;
 use crate::rotating_log::rotate_closed_log;
 use crate::service_host::{ServiceDriver, ServiceHost, find_executable, write_if_changed};
 use crate::win::{owned, raw, wide};
@@ -103,13 +106,17 @@ fn uses_monitor_process(series: MysqlSeries) -> bool {
     series.major() > 8 || (series.major() == 8 && series.minor() >= 1)
 }
 
-/// Client arguments common to `mysqladmin` / `mysql` / `mysqldump` on a local instance.
-pub(crate) fn client_args(port: Port, user: &str) -> Vec<String> {
-    vec!["--no-defaults".into(), "--protocol=TCP".into(), "--host=127.0.0.1".into(), format!("--port={port}"), format!("--user={user}")]
+/// Client arguments common to `mysqladmin` / `mysql` / `mysqldump` on a local instance. The first
+/// one decides the option files: only `option_file` (the stored password) when given, none
+/// otherwise, so a stray `my.ini` never changes the connection.
+pub(crate) fn client_args(port: Port, user: &str, option_file: Option<&ClientOptionFile>) -> Vec<String> {
+    let option_files = option_file.map_or_else(|| "--no-defaults".to_string(), ClientOptionFile::defaults_file_arg);
+    vec![option_files, "--protocol=TCP".into(), "--host=127.0.0.1".into(), format!("--port={port}"), format!("--user={user}")]
 }
 
 struct MysqlDriver {
     commands: Arc<dyn CommandRunner>,
+    passwords: Arc<dyn MysqlRootPasswordReader>,
 }
 
 #[async_trait]
@@ -161,7 +168,12 @@ impl ServiceDriver for MysqlDriver {
             return;
         }
         let Ok(admin) = find_executable(&launch.install_dir, "mysqladmin.exe") else { return };
-        let mut args = client_args(launch.port, "root");
+        // Unreadable credentials: still worth a try, the account may have no password.
+        let option_file = ClientOptionFile::for_instance(self.passwords.as_ref(), &launch.service).unwrap_or_else(|e| {
+            tracing::warn!(service = %launch.service, error = %e, "mysqladmin shutdown without the stored root password");
+            None
+        });
+        let mut args = client_args(launch.port, ROOT_ACCOUNT, option_file.as_ref());
         args.push("shutdown".into());
         match self.commands.run(CommandSpec { program: admin, args, ..Default::default() }, MYSQLADMIN_TIMEOUT).await {
             Ok(out) if out.success() => {}
@@ -186,8 +198,9 @@ pub struct MysqlRunner {
 }
 
 impl MysqlRunner {
-    pub fn new(supervisor: Arc<dyn ProcessSupervisor>, commands: Arc<dyn CommandRunner>, events: Arc<dyn EventPublisher>) -> Self {
-        Self { host: ServiceHost::new(supervisor, events), driver: MysqlDriver { commands: commands.clone() }, commands }
+    /// `passwords`: the stored root passwords, for `mysqladmin shutdown`.
+    pub fn new(supervisor: Arc<dyn ProcessSupervisor>, commands: Arc<dyn CommandRunner>, passwords: Arc<dyn MysqlRootPasswordReader>, events: Arc<dyn EventPublisher>) -> Self {
+        Self { host: ServiceHost::new(supervisor, events), driver: MysqlDriver { commands: commands.clone(), passwords }, commands }
     }
 
     /// Pure `my.ini` rendering (unit-testable).
@@ -332,12 +345,15 @@ impl ServiceRunner for MysqlRunner {
 }
 
 #[cfg(test)]
+mod credential_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::JobObjectSupervisor;
-    use lampo_domain::ports::NullEventPublisher;
+    use lampo_domain::ports::{NoMysqlRootPasswords, NullEventPublisher};
 
-    fn launch(series: MysqlSeries) -> ServiceLaunch {
+    pub(super) fn launch(series: MysqlSeries) -> ServiceLaunch {
         ServiceLaunch {
             service: series.service_id(),
             install_dir: r"C:\Lampo\packages\mysql".into(),
@@ -351,7 +367,7 @@ mod tests {
 
     fn runner() -> MysqlRunner {
         let sup = Arc::new(JobObjectSupervisor::new());
-        MysqlRunner::new(sup.clone(), sup, Arc::new(NullEventPublisher))
+        MysqlRunner::new(sup.clone(), sup, Arc::new(NoMysqlRootPasswords), Arc::new(NullEventPublisher))
     }
 
     #[test]
@@ -378,7 +394,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("bin")).unwrap();
         std::fs::write(dir.path().join("bin").join("mysqld.exe"), b"").unwrap();
-        let spec = |series| MysqlDriver { commands: Arc::new(JobObjectSupervisor::new()) }.command(&ServiceLaunch { install_dir: dir.path().to_path_buf(), ..launch(series) }).unwrap();
+        let spec = |series| {
+            MysqlDriver { commands: Arc::new(JobObjectSupervisor::new()), passwords: Arc::new(NoMysqlRootPasswords) }
+                .command(&ServiceLaunch { install_dir: dir.path().to_path_buf(), ..launch(series) })
+                .unwrap()
+        };
         let current = spec(MysqlSeries::DEFAULT);
         assert!(current.args[0].starts_with("--defaults-file="));
         assert_eq!(current.args[1], "--no-monitor");

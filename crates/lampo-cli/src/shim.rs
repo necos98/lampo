@@ -3,7 +3,8 @@
 //!
 //! Stateless and fast: no async runtime, no IPC, no logging setup. It reads the shim index,
 //! resolves the site (`LAMPO_PROJECT` while it holds -> cwd -> git worktree -> default), asks the
-//! matching [`ShimTool`] for the real invocation and runs it with inherited stdin/stdout/stderr,
+//! matching [`ShimTool`] for the real invocation (a MySQL client gets the stored root password
+//! through an option file, [`with_stored_credentials`]) and runs it with inherited stdin/stdout/stderr,
 //! tied to the shim's lifetime ([`crate::job`]), forwarding the exit code. It works when the app
 //! is not running.
 //!
@@ -11,9 +12,10 @@
 
 use std::sync::Arc;
 
-use lampo_domain::ports::ShimIndexReader;
+use lampo_domain::ports::{MysqlRootPasswordReader, ShimIndexReader};
 use lampo_domain::resolution::{GitInspector, PathCanonicalizer, ResolveRequest, ResolverChain};
 use lampo_domain::shim::{FolderProbe, ShimInvocation, ShimTool, tools};
+use lampo_infra_services::ClientOptionFile;
 
 use crate::{console, job};
 
@@ -75,6 +77,29 @@ fn tool_names(registered: &[Arc<dyn ShimTool>]) -> String {
     }
 }
 
+/// An invocation ready to launch, and the option file it reads: keep it until the tool exits.
+#[derive(Debug)]
+pub struct PreparedInvocation {
+    pub invocation: ShimInvocation,
+    /// Held for its lifetime only: dropping it deletes the file.
+    _option_file: Option<ClientOptionFile>,
+}
+
+/// Gives a MySQL client the stored root password its invocation asks for
+/// ([`ShimInvocation::stored_credentials`]), when one is stored: an option file only the user can
+/// open, read first (`--defaults-extra-file=`, so the user's own option files keep applying),
+/// never the command line. The error is the one-line reason for exit code 127.
+pub fn with_stored_credentials(mut invocation: ShimInvocation, passwords: &dyn MysqlRootPasswordReader) -> Result<PreparedInvocation, String> {
+    let option_file = match &invocation.stored_credentials {
+        Some(instance) => ClientOptionFile::for_instance(passwords, instance).map_err(|e| format!("cannot use the root password Lampo stored for {instance}: {e}"))?,
+        None => None,
+    };
+    if let Some(file) = &option_file {
+        invocation.args.insert(0, file.defaults_extra_file_arg());
+    }
+    Ok(PreparedInvocation { invocation, _option_file: option_file })
+}
+
 /// Runs the invocation with inherited stdio, tied to the shim ([`job::run_tied`]), and returns
 /// the tool's exit code. Ctrl+C is left to the child: the shim keeps waiting so the exit code is
 /// not lost.
@@ -110,10 +135,14 @@ mod tests {
     use std::path::PathBuf;
 
     use lampo_domain::PortResult;
+    use lampo_domain::mysql::credentials::MysqlPassword;
     use lampo_domain::php::{ComposerChannel, PhpMinor};
+    use lampo_domain::ports::NoMysqlRootPasswords;
     use lampo_domain::project::ProjectRoot;
     use lampo_domain::resolution::GitCheckout;
-    use lampo_domain::shim::{FolderState, ShimEntry, ShimIndex, ShimTarget};
+    use lampo_domain::service::{ServiceId, ServiceKind};
+    use lampo_domain::shim::{FolderState, ShimEntry, ShimIndex, ShimService, ShimTarget};
+    use lampo_domain::tcp_port::Port;
 
     use super::*;
 
@@ -255,5 +284,75 @@ mod tests {
             assert_eq!(planned.invocation.program, PathBuf::from(r"C:\php\7.4\php.exe"), "{cwd}");
             assert!(planned.notices.is_empty(), "{cwd}");
         }
+    }
+
+    struct StoredRootPassword;
+    impl MysqlRootPasswordReader for StoredRootPassword {
+        fn root_password(&self, _instance: &ServiceId) -> PortResult<Option<MysqlPassword>> {
+            Ok(Some(MysqlPassword::new("s3cret").unwrap()))
+        }
+    }
+
+    struct NeverAsked;
+    impl MysqlRootPasswordReader for NeverAsked {
+        fn root_password(&self, instance: &ServiceId) -> PortResult<Option<MysqlPassword>> {
+            panic!("no tool asked for the password of {instance}")
+        }
+    }
+
+    struct Unreadable;
+    impl MysqlRootPasswordReader for Unreadable {
+        fn root_password(&self, _instance: &ServiceId) -> PortResult<Option<MysqlPassword>> {
+            Err(lampo_domain::PortError::invalid_data("mysql-8.4.root.dpapi", "cannot be decrypted"))
+        }
+    }
+
+    fn mysql_invocation(args: &[&str]) -> ShimInvocation {
+        let mysql = ShimService {
+            service: "mysql-8.4".parse().unwrap(),
+            client_dir: PathBuf::from(r"C:\mysql\bin"),
+            host: "127.0.0.1".into(),
+            port: Port::of(3306),
+            user: Some("root".into()),
+            database: None,
+            data_dir: None,
+            env_prefix: "DB".into(),
+        };
+        let target = ShimTarget { services: [(ServiceKind::MYSQL, mysql)].into(), ..target(false) };
+        let entry = ShimEntry { site: "shop".parse().unwrap(), root: ProjectRoot::new(r"C:\work\shop").unwrap(), target };
+        let index = FakeIndex(ShimIndex { version: 1, default: None, projects: vec![entry] });
+        invocation(&request("mysql", r"C:\work\shop", args), &tools::all(), &index).unwrap()
+    }
+
+    #[test]
+    fn a_stored_root_password_is_read_from_an_option_file_given_first() {
+        let planned = mysql_invocation(&["-e", "SELECT 1"]);
+        let prepared = with_stored_credentials(planned.clone(), &StoredRootPassword).unwrap();
+        let path = prepared._option_file.as_ref().unwrap().path().to_path_buf();
+        assert_eq!(prepared.invocation.args[0], format!("--defaults-extra-file={}", path.display()));
+        assert_eq!(prepared.invocation.args[1..], planned.args[..], "the rest as planned");
+        assert!(!prepared.invocation.args.iter().any(|a| a.contains("s3cret") || a.starts_with("-p") || a.starts_with("--password")));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[client]\npassword=\"s3cret\"\n");
+        drop(prepared);
+        assert!(!path.exists(), "deleted after the tool");
+    }
+
+    #[test]
+    fn without_a_stored_password_or_a_request_for_it_the_invocation_is_unchanged() {
+        let planned = mysql_invocation(&["-e", "SELECT 1"]);
+        let prepared = with_stored_credentials(planned.clone(), &NoMysqlRootPasswords).unwrap();
+        assert_eq!((prepared.invocation, prepared._option_file.is_none()), (planned, true));
+
+        let own_account = mysql_invocation(&["-u", "app", "-e", "SELECT 1"]);
+        assert_eq!(with_stored_credentials(own_account.clone(), &NeverAsked).unwrap().invocation, own_account);
+        let php = invocation(&request("php", r"C:\work\shop", &["-v"]), &tools::all(), &index_with_project()).unwrap();
+        assert_eq!(with_stored_credentials(php.clone(), &NeverAsked).unwrap().invocation, php);
+    }
+
+    #[test]
+    fn an_unreadable_stored_password_is_a_one_line_failure() {
+        let err = with_stored_credentials(mysql_invocation(&[]), &Unreadable).unwrap_err();
+        assert!(!err.contains('\n'), "{err}");
+        assert!(err.contains("root password Lampo stored for mysql-8.4") && err.contains("cannot be decrypted"), "{err}");
     }
 }

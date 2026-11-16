@@ -4,16 +4,19 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use lampo_domain::mysql::{DatabaseName, is_system_schema};
-use lampo_domain::ports::{CommandOutput, CommandRunner, CommandSpec, DatabaseAdmin, DumpImportOptions, MysqlEndpoint, PipedCommand, PipedCommandRunner, ProgressSink};
+use lampo_domain::ports::{CommandOutput, CommandRunner, DatabaseAdmin, DumpImportOptions, MysqlEndpoint, MysqlRootPasswordReader, PipedCommand, PipedCommandRunner, ProgressSink};
 use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
 use lampo_domain::sql_dump::compat::{DumpCompat, suggest_compat};
 use lampo_domain::sql_dump::{DUMP_HEAD_BYTES, find_database_switch};
 use lampo_domain::{PortError, PortResult};
 
 use crate::compression;
-use crate::mysql::client_args;
+use connection::Clients;
 
 mod compat;
+mod connection;
+#[cfg(test)]
+mod credential_tests;
 
 const STATEMENT_TIMEOUT: Duration = Duration::from_secs(120);
 /// Imports/exports of big databases; the user cancels with the `CancelFlag`.
@@ -27,50 +30,25 @@ const TRANSFER_TIMEOUT: Duration = Duration::from_secs(12 * 60 * 60);
 ///
 /// Safety against odd names: names are already restricted by [`DatabaseName`]; they are also
 /// backtick-quoted (with backticks doubled) in SQL, passed as separate arguments (never through
-/// a shell), and `--no-defaults` keeps stray `my.ini` files from changing the connection.
+/// a shell), and only Lampo's option file (`--defaults-file=`, the stored root password) or none
+/// at all (`--no-defaults`) is read, so stray `my.ini` files cannot change the connection.
 pub struct MysqlCliAdmin {
     /// Single statements (`CREATE DATABASE`, `SHOW DATABASES`).
     commands: Arc<dyn CommandRunner>,
     /// Import / export / clone streams.
     pipes: Arc<dyn PipedCommandRunner>,
+    /// The stored root passwords, given to the clients through [`ClientOptionFile`](crate::ClientOptionFile)s.
+    passwords: Arc<dyn MysqlRootPasswordReader>,
 }
 
 impl MysqlCliAdmin {
-    pub fn new(commands: Arc<dyn CommandRunner>, pipes: Arc<dyn PipedCommandRunner>) -> Self {
-        Self { commands, pipes }
+    pub fn new(commands: Arc<dyn CommandRunner>, pipes: Arc<dyn PipedCommandRunner>, passwords: Arc<dyn MysqlRootPasswordReader>) -> Self {
+        Self { commands, pipes, passwords }
     }
 }
 
 fn quote_ident(name: &DatabaseName) -> String {
     format!("`{}`", name.as_str().replace('`', "``"))
-}
-
-fn client(endpoint: &MysqlEndpoint, exe: &str) -> PortResult<PathBuf> {
-    let path = endpoint.client_dir.join(exe);
-    if path.is_file() { Ok(path) } else { Err(PortError::not_found("executable", path.display().to_string())) }
-}
-
-fn base_args(endpoint: &MysqlEndpoint) -> Vec<String> {
-    let mut args = client_args(endpoint.port, &endpoint.user);
-    args.push("--default-character-set=utf8mb4".into());
-    args
-}
-
-fn mysql_spec(endpoint: &MysqlEndpoint, extra: &[String]) -> PortResult<CommandSpec> {
-    let mut args = base_args(endpoint);
-    args.extend_from_slice(extra);
-    Ok(CommandSpec { program: client(endpoint, "mysql.exe")?, args, ..Default::default() })
-}
-
-fn dump_spec(endpoint: &MysqlEndpoint, name: &DatabaseName) -> PortResult<CommandSpec> {
-    let mut args = base_args(endpoint);
-    args.extend(["--single-transaction", "--routines", "--triggers", "--events", "--hex-blob", "--set-gtid-purged=OFF"].map(String::from));
-    args.push(name.as_str().to_string());
-    Ok(CommandSpec { program: client(endpoint, "mysqldump.exe")?, args, ..Default::default() })
-}
-
-fn restore_spec(endpoint: &MysqlEndpoint, name: &DatabaseName) -> PortResult<CommandSpec> {
-    mysql_spec(endpoint, &["--max-allowed-packet=1073741824".into(), format!("--database={}", name.as_str())])
 }
 
 fn failure(program: &str, out: &CommandOutput) -> PortError {
@@ -116,26 +94,22 @@ fn partial_path(sql_file: &Path) -> PathBuf {
 }
 
 impl MysqlCliAdmin {
-    async fn execute(&self, endpoint: &MysqlEndpoint, statement: &str) -> PortResult<CommandOutput> {
-        let spec = mysql_spec(endpoint, &["--batch".into(), "--skip-column-names".into(), format!("--execute={statement}")])?;
+    fn clients<'a>(&self, endpoint: &'a MysqlEndpoint) -> PortResult<Clients<'a>> {
+        Clients::of(endpoint, self.passwords.as_ref())
+    }
+
+    async fn execute(&self, clients: &Clients<'_>, statement: &str) -> PortResult<CommandOutput> {
+        let spec = clients.mysql_spec(&["--batch".into(), "--skip-column-names".into(), format!("--execute={statement}")])?;
         self.commands.run(spec, STATEMENT_TIMEOUT).await
     }
 
-    async fn execute_ok(&self, endpoint: &MysqlEndpoint, statement: &str) -> PortResult<String> {
-        let out = self.execute(endpoint, statement).await?;
+    async fn execute_ok(&self, clients: &Clients<'_>, statement: &str) -> PortResult<String> {
+        let out = self.execute(clients, statement).await?;
         if out.success() { Ok(out.stdout) } else { Err(failure("mysql", &out)) }
     }
-}
 
-#[async_trait]
-impl DatabaseAdmin for MysqlCliAdmin {
-    async fn list(&self, endpoint: &MysqlEndpoint) -> PortResult<Vec<String>> {
-        let out = self.execute_ok(endpoint, "SHOW DATABASES").await?;
-        Ok(out.lines().map(str::trim).filter(|l| !l.is_empty() && !is_system_schema(l)).map(String::from).collect())
-    }
-
-    async fn create(&self, endpoint: &MysqlEndpoint, name: &DatabaseName) -> PortResult<()> {
-        let out = self.execute(endpoint, &format!("CREATE DATABASE {} CHARACTER SET utf8mb4", quote_ident(name))).await?;
+    async fn create_with(&self, clients: &Clients<'_>, name: &DatabaseName) -> PortResult<()> {
+        let out = self.execute(clients, &format!("CREATE DATABASE {} CHARACTER SET utf8mb4", quote_ident(name))).await?;
         if out.success() {
             Ok(())
         } else if out.stderr.contains("ERROR 1007") {
@@ -145,8 +119,24 @@ impl DatabaseAdmin for MysqlCliAdmin {
         }
     }
 
+    async fn drop_with(&self, clients: &Clients<'_>, name: &DatabaseName) -> PortResult<()> {
+        self.execute_ok(clients, &format!("DROP DATABASE IF EXISTS {}", quote_ident(name))).await.map(drop)
+    }
+}
+
+#[async_trait]
+impl DatabaseAdmin for MysqlCliAdmin {
+    async fn list(&self, endpoint: &MysqlEndpoint) -> PortResult<Vec<String>> {
+        let out = self.execute_ok(&self.clients(endpoint)?, "SHOW DATABASES").await?;
+        Ok(out.lines().map(str::trim).filter(|l| !l.is_empty() && !is_system_schema(l)).map(String::from).collect())
+    }
+
+    async fn create(&self, endpoint: &MysqlEndpoint, name: &DatabaseName) -> PortResult<()> {
+        self.create_with(&self.clients(endpoint)?, name).await
+    }
+
     async fn drop_database(&self, endpoint: &MysqlEndpoint, name: &DatabaseName) -> PortResult<()> {
-        self.execute_ok(endpoint, &format!("DROP DATABASE IF EXISTS {}", quote_ident(name))).await.map(drop)
+        self.drop_with(&self.clients(endpoint)?, name).await
     }
 
     async fn import(&self, endpoint: &MysqlEndpoint, name: &DatabaseName, sql_file: &Path, options: DumpImportOptions, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
@@ -160,9 +150,10 @@ impl DatabaseAdmin for MysqlCliAdmin {
         }
         let suggestion = if options.compat.is_none() { suggest_compat(&head, endpoint.series) } else { None };
         cancel.check()?;
+        let clients = self.clients(endpoint)?;
         let collation = compat::database_collation_clause(options.compat);
-        self.execute_ok(endpoint, &format!("CREATE DATABASE IF NOT EXISTS {} CHARACTER SET utf8mb4{collation}", quote_ident(name))).await?;
-        let mut restore = restore_spec(endpoint, name)?;
+        self.execute_ok(&clients, &format!("CREATE DATABASE IF NOT EXISTS {} CHARACTER SET utf8mb4{collation}", quote_ident(name))).await?;
+        let mut restore = clients.restore_spec(name)?;
         compat::add_session_settings(&mut restore, endpoint, options.compat);
         let stdin_rewrite = options.compat.map(DumpCompat::rewrite).unwrap_or_default();
         let command = PipedCommand { stages: vec![restore], stdin_file: Some(sql_file.to_path_buf()), stdin_compression, stdin_rewrite, ..Default::default() };
@@ -176,7 +167,8 @@ impl DatabaseAdmin for MysqlCliAdmin {
         let stdout_compression = compression::detect_output(sql_file)?;
         cancel.check()?;
         let partial = partial_path(sql_file);
-        let command = PipedCommand { stages: vec![dump_spec(endpoint, name)?], stdout_file: Some(partial.clone()), stdout_compression, ..Default::default() };
+        let clients = self.clients(endpoint)?;
+        let command = PipedCommand { stages: vec![clients.dump_spec(name)?], stdout_file: Some(partial.clone()), stdout_compression, ..Default::default() };
         let on_bytes = reporter(progress, None, format!("export {name}"));
         let result = match self.pipes.run_piped(command, &on_bytes, cancel, TRANSFER_TIMEOUT).await {
             Ok(outputs) => ensure_ok("mysqldump", &outputs),
@@ -193,8 +185,9 @@ impl DatabaseAdmin for MysqlCliAdmin {
 
     async fn clone_database(&self, endpoint: &MysqlEndpoint, source: &DatabaseName, target: &DatabaseName, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
         cancel.check()?;
-        let stages = vec![dump_spec(endpoint, source)?, restore_spec(endpoint, target)?];
-        self.create(endpoint, target).await?;
+        let clients = self.clients(endpoint)?;
+        let stages = vec![clients.dump_spec(source)?, clients.restore_spec(target)?];
+        self.create_with(&clients, target).await?;
         let command = PipedCommand { stages, ..Default::default() };
         let on_bytes = reporter(progress, None, format!("clone {source} -> {target}"));
         let result = match self.pipes.run_piped(command, &on_bytes, cancel, TRANSFER_TIMEOUT).await {
@@ -202,7 +195,7 @@ impl DatabaseAdmin for MysqlCliAdmin {
             Err(e) => Err(e),
         };
         if result.is_err() {
-            let _ = self.drop_database(endpoint, target).await;
+            let _ = self.drop_with(&clients, target).await;
         }
         result
     }
@@ -213,14 +206,14 @@ mod tests {
     use super::*;
     use lampo_domain::mysql::MysqlSeries;
     use lampo_domain::tcp_port::Port;
-    use lampo_domain::ports::{NullProgressSink, StreamCompression};
+    use lampo_domain::ports::{CommandSpec, NoMysqlRootPasswords, NullProgressSink, StreamCompression};
     use lampo_domain::sql_dump::rewrite::DumpRewrite;
     use std::sync::Mutex;
 
     /// Records invocations and answers with canned outputs.
     #[derive(Default)]
-    struct FakeRunner {
-        calls: Mutex<Vec<Vec<CommandSpec>>>,
+    pub(super) struct FakeRunner {
+        pub(super) calls: Mutex<Vec<Vec<CommandSpec>>>,
         /// `(stdin_compression, stdout_compression)` of every piped command.
         compressions: Mutex<Vec<(StreamCompression, StreamCompression)>>,
         /// `stdin_rewrite` of every piped command.
@@ -228,9 +221,18 @@ mod tests {
         reply: Mutex<Vec<CommandOutput>>,
         /// Returned by the next piped command after recording it (a cancellation mid-stream).
         pipe_error: Mutex<Option<PortError>>,
+        /// `(path, contents)` of the `--defaults-file=` of every stage, read while it "runs".
+        pub(super) option_files: Mutex<Vec<(PathBuf, String)>>,
     }
 
     impl FakeRunner {
+        fn record_option_files(&self, stages: &[CommandSpec]) {
+            for path in stages.iter().filter_map(|s| s.args[0].strip_prefix("--defaults-file=")) {
+                crate::client_option_file::tests::assert_user_only(Path::new(path));
+                self.option_files.lock().unwrap().push((PathBuf::from(path), std::fs::read_to_string(path).unwrap()));
+            }
+        }
+
         fn next(&self) -> CommandOutput {
             self.reply.lock().unwrap().pop().unwrap_or(CommandOutput { exit_code: Some(0), stdout: String::new(), stderr: String::new() })
         }
@@ -239,6 +241,7 @@ mod tests {
     #[async_trait]
     impl CommandRunner for FakeRunner {
         async fn run(&self, spec: CommandSpec, _timeout: Duration) -> PortResult<CommandOutput> {
+            self.record_option_files(std::slice::from_ref(&spec));
             self.calls.lock().unwrap().push(vec![spec]);
             Ok(self.next())
         }
@@ -254,6 +257,7 @@ mod tests {
             }
             self.compressions.lock().unwrap().push((command.stdin_compression, command.stdout_compression));
             self.rewrites.lock().unwrap().push(command.stdin_rewrite);
+            self.record_option_files(&command.stages);
             self.calls.lock().unwrap().push(command.stages);
             if let Some(error) = self.pipe_error.lock().unwrap().take() {
                 return Err(error);
@@ -262,7 +266,7 @@ mod tests {
         }
     }
 
-    fn endpoint(dir: &Path) -> MysqlEndpoint {
+    pub(super) fn endpoint(dir: &Path) -> MysqlEndpoint {
         std::fs::write(dir.join("mysql.exe"), b"").unwrap();
         std::fs::write(dir.join("mysqldump.exe"), b"").unwrap();
         MysqlEndpoint { series: MysqlSeries::DEFAULT, client_dir: dir.to_path_buf(), port: Port::of(3306), user: "root".into() }
@@ -273,7 +277,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let fake = Arc::new(FakeRunner::default());
         fake.reply.lock().unwrap().push(CommandOutput { exit_code: Some(0), stdout: "information_schema\nmysql\nperformance_schema\nshop\nsys\nshop_wt\n".into(), stderr: String::new() });
-        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone(), Arc::new(NoMysqlRootPasswords));
         assert_eq!(admin.list(&endpoint(dir.path())).await.unwrap(), ["shop", "shop_wt"]);
         let calls = fake.calls.lock().unwrap();
         let args = &calls[0][0].args;
@@ -287,7 +291,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let fake = Arc::new(FakeRunner::default());
         fake.reply.lock().unwrap().push(CommandOutput { exit_code: Some(0), stdout: "INFORMATION_SCHEMA\nMySQL\nPerformance_Schema\nSYS\nmysql_app\n".into(), stderr: String::new() });
-        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone(), Arc::new(NoMysqlRootPasswords));
         assert_eq!(admin.list(&endpoint(dir.path())).await.unwrap(), ["mysql_app"]);
     }
 
@@ -300,7 +304,7 @@ mod tests {
             stdout: String::new(),
             stderr: "ERROR 1007 (HY000) at line 1: Can't create database 'shop'; database exists".into(),
         });
-        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone(), Arc::new(NoMysqlRootPasswords));
         let name = DatabaseName::new("shop").unwrap();
         assert!(matches!(admin.create(&endpoint(dir.path()), &name).await, Err(PortError::AlreadyExists { entity: "database", .. })));
         let calls = fake.calls.lock().unwrap();
@@ -318,7 +322,7 @@ mod tests {
             CommandOutput { exit_code: Some(0), stdout: String::new(), stderr: String::new() },
             CommandOutput { exit_code: Some(0), stdout: String::new(), stderr: String::new() },
         ]);
-        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone(), Arc::new(NoMysqlRootPasswords));
         let (src, dst) = (DatabaseName::new("shop").unwrap(), DatabaseName::new("shop_wt").unwrap());
         let err = admin.clone_database(&endpoint(dir.path()), &src, &dst, &NullProgressSink, &CancelFlag::new()).await.unwrap_err();
         assert!(err.to_string().contains("ERROR 1064"));
@@ -337,7 +341,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let fake = Arc::new(FakeRunner::default());
         fake.reply.lock().unwrap().push(CommandOutput { exit_code: Some(2), stdout: String::new(), stderr: "mysqldump: Got error: 1049: Unknown database".into() });
-        let admin = MysqlCliAdmin::new(fake.clone(), fake);
+        let admin = MysqlCliAdmin::new(fake.clone(), fake, Arc::new(NoMysqlRootPasswords));
         let out = dir.path().join("dump.sql");
         assert!(admin.export(&endpoint(dir.path()), &DatabaseName::new("nope").unwrap(), &out, &NullProgressSink, &CancelFlag::new()).await.is_err());
         assert!(!out.exists());
@@ -355,7 +359,7 @@ mod tests {
     async fn import_streams_compressed_dumps_with_their_detected_format() {
         let dir = tempfile::tempdir().unwrap();
         let fake = Arc::new(FakeRunner::default());
-        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone(), Arc::new(NoMysqlRootPasswords));
         let name = DatabaseName::new("shop").unwrap();
         let plain = dir.path().join("dump.sql");
         std::fs::write(&plain, b"SELECT 1;").unwrap();
@@ -374,7 +378,7 @@ mod tests {
     async fn import_rejects_a_bad_archive_before_touching_the_server() {
         let dir = tempfile::tempdir().unwrap();
         let fake = Arc::new(FakeRunner::default());
-        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone(), Arc::new(NoMysqlRootPasswords));
         let zip_path = dir.path().join("two.zip");
         let mut w = zip::ZipWriter::new(std::fs::File::create(&zip_path).unwrap());
         for entry in ["a.sql", "b.sql"] {
@@ -392,7 +396,7 @@ mod tests {
     async fn import_refuses_a_dump_that_switches_database_before_touching_the_server() {
         let dir = tempfile::tempdir().unwrap();
         let fake = Arc::new(FakeRunner::default());
-        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone(), Arc::new(NoMysqlRootPasswords));
         let name = DatabaseName::new("shop").unwrap();
         let plain = dir.path().join("all.sql");
         std::fs::write(&plain, b"-- dump\nUSE `other_db`;\nDROP TABLE IF EXISTS users;\n").unwrap();
@@ -411,7 +415,7 @@ mod tests {
     async fn import_runs_a_dump_that_switches_database_when_allowed() {
         let dir = tempfile::tempdir().unwrap();
         let fake = Arc::new(FakeRunner::default());
-        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone(), Arc::new(NoMysqlRootPasswords));
         let file = dir.path().join("all.sql");
         std::fs::write(&file, MULTI_DATABASE_DUMP).unwrap();
         let allow = DumpImportOptions { allow_database_switch: true, ..Default::default() };
@@ -423,7 +427,7 @@ mod tests {
     async fn an_import_stopped_mid_stream_is_reported_as_interrupted() {
         let dir = tempfile::tempdir().unwrap();
         let fake = Arc::new(FakeRunner::default());
-        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone(), Arc::new(NoMysqlRootPasswords));
         let (ep, name, file) = (endpoint(dir.path()), DatabaseName::new("shop").unwrap(), dir.path().join("dump.sql"));
         std::fs::write(&file, b"SELECT 1;").unwrap();
         let import = |cancel: CancelFlag| {
@@ -451,7 +455,7 @@ mod tests {
     async fn export_gzips_a_gz_destination_and_refuses_zip() {
         let dir = tempfile::tempdir().unwrap();
         let fake = Arc::new(FakeRunner::default());
-        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone(), Arc::new(NoMysqlRootPasswords));
         let name = DatabaseName::new("shop").unwrap();
         let out = dir.path().join("shop.sql.gz");
         admin.export(&endpoint(dir.path()), &name, &out, &NullProgressSink, &CancelFlag::new()).await.unwrap();
@@ -477,7 +481,7 @@ mod tests {
     async fn import_with_compat_sets_the_session_and_rewrites_the_stream() {
         let dir = tempfile::tempdir().unwrap();
         let fake = Arc::new(FakeRunner::default());
-        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone(), Arc::new(NoMysqlRootPasswords));
         let file = dir.path().join("maria.sql.gz");
         std::fs::write(&file, gzipped(MARIADB_HEADER)).unwrap();
         let options = DumpImportOptions { compat: Some(DumpCompat::Mariadb), ..Default::default() };
@@ -507,7 +511,7 @@ mod tests {
         ];
         for (series, compat, expected) in cases {
             let fake = Arc::new(FakeRunner::default());
-            let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+            let admin = MysqlCliAdmin::new(fake.clone(), fake.clone(), Arc::new(NoMysqlRootPasswords));
             let options = DumpImportOptions { compat, ..Default::default() };
             admin.import(&endpoint_of(dir.path(), series), &DatabaseName::new("shop").unwrap(), &file, options, &NullProgressSink, &CancelFlag::new()).await.unwrap();
             let calls = fake.calls.lock().unwrap();
@@ -532,7 +536,7 @@ mod tests {
                 CommandOutput { exit_code: Some(1), stdout: String::new(), stderr: "ERROR at line 1: Unknown command '\\-'.".into() },
                 CommandOutput { exit_code: Some(0), stdout: String::new(), stderr: String::new() },
             ]);
-            MysqlCliAdmin::new(fake.clone(), fake)
+            MysqlCliAdmin::new(fake.clone(), fake, Arc::new(NoMysqlRootPasswords))
         };
         let name = DatabaseName::new("shop").unwrap();
 

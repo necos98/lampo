@@ -102,12 +102,22 @@ pub(super) struct ParsedArgs<'a> {
     pub positional: Vec<&'a str>,
 }
 
+/// Options through which the user picks the account, its password or the server (of `mysql` and
+/// `mysqldump` together).
+const CONNECTION_LONG: &[&str] = &["user", "password", "host", "port", "socket", "pipe", "shared-memory-base-name"];
+const CONNECTION_SHORT: &[char] = &['u', 'p', 'h', 'P', 'S', 'W'];
+
 impl ParsedArgs<'_> {
     pub fn has_long(&self, name: &str) -> bool {
         self.long.iter().any(|l| l == name)
     }
     pub fn has_short(&self, c: char) -> bool {
         self.short.contains(&c)
+    }
+    /// Whether the user chose the account, its password or the server: a stored password of
+    /// Lampo's instance would then reach another account or another server.
+    pub fn chooses_connection(&self) -> bool {
+        CONNECTION_LONG.iter().any(|name| self.has_long(name)) || CONNECTION_SHORT.iter().any(|&c| self.has_short(c))
     }
 }
 
@@ -206,6 +216,35 @@ mod tests {
         assert_eq!(positional(&["-e", "shop"], MYSQLDUMP_SHORT_WITH_VALUE), ["shop"]);
         assert_eq!(positional(&["-r", "out.sql", "-w", "id<10", "shop", "orders"], MYSQLDUMP_SHORT_WITH_VALUE), ["shop", "orders"]);
         assert_eq!(positional(&["--result-file", "out.sql", "--ignore-table", "shop.logs"], MYSQLDUMP_SHORT_WITH_VALUE), Vec::<String>::new());
+    }
+
+    #[test]
+    fn connection_choices_are_recognised_in_every_spelling() {
+        let chooses = |a: &[&str], short: &str| parse(&args(a), short).chooses_connection();
+        for a in [
+            &["-uapp"][..],
+            &["-u", "app"],
+            &["--user=app"],
+            &["--user", "app"],
+            &["-psecret"],
+            &["-p"],
+            &["--password"],
+            &["--host=db.example.com"],
+            &["-h", "db"],
+            &["-NBh", "db"],
+            &["-P", "3307"],
+            &["--port=3307"],
+            &["--loose-socket=x"],
+            &["-W"],
+            &["--pipe"],
+        ] {
+            assert!(chooses(a, MYSQL_SHORT_WITH_VALUE), "{a:?}");
+        }
+        for a in [&[][..], &["-e", "SELECT 1"], &["-NBe", "SELECT -u"], &["--execute=SELECT 1", "shop"], &["-D", "shop"], &["--protocol=TCP"], &["--", "-uapp"]] {
+            assert!(!chooses(a, MYSQL_SHORT_WITH_VALUE), "{a:?}");
+        }
+        assert!(chooses(&["-u", "app", "shop"], MYSQLDUMP_SHORT_WITH_VALUE));
+        assert!(!chooses(&["--single-transaction", "shop"], MYSQLDUMP_SHORT_WITH_VALUE));
     }
 
     #[test]

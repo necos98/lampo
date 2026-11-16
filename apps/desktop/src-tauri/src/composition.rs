@@ -80,12 +80,14 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let pipes: Arc<dyn PipedCommandRunner> = supervisor.clone();
     let streaming: Arc<dyn StreamingCommandRunner> = supervisor;
     let port_probe: Arc<dyn PortProbe> = Arc::new(services::TcpPortProbe);
-    let db_admin: Arc<dyn DatabaseAdmin> = Arc::new(services::MysqlCliAdmin::new(commands.clone(), pipes));
+    // The stored root passwords (DPAPI) Lampo's own MySQL clients authenticate with.
+    let mysql_passwords: Arc<dyn MysqlRootPasswordReader> = Arc::new(services::DpapiMysqlRootPasswords::new(paths.secrets_dir()));
+    let db_admin: Arc<dyn DatabaseAdmin> = Arc::new(services::MysqlCliAdmin::new(commands.clone(), pipes, mysql_passwords.clone()));
     // The registered service kinds and one runner per kind.
     let service_catalog = Arc::new(ServiceCatalog::new(lampo_domain::service::builtin::all()));
     let runners: Vec<Arc<dyn ServiceRunner>> = vec![
         Arc::new(web::ApacheRunner::new(process_supervisor.clone(), events.clone())),
-        Arc::new(services::MysqlRunner::new(process_supervisor.clone(), commands.clone(), events.clone())),
+        Arc::new(services::MysqlRunner::new(process_supervisor.clone(), commands.clone(), mysql_passwords, events.clone())),
         Arc::new(services::RedisRunner::new(process_supervisor.clone(), events.clone())),
         Arc::new(services::MailpitRunner::new(process_supervisor, events.clone())),
     ];

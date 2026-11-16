@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use lampo_domain::mysql::{DatabaseName, MysqlSeries};
-use lampo_domain::ports::{DatabaseAdmin, DumpImportOptions, MysqlEndpoint, NullEventPublisher, NullProgressSink, ServiceRunner};
+use lampo_domain::ports::{DatabaseAdmin, DumpImportOptions, MysqlEndpoint, NoMysqlRootPasswords, NullEventPublisher, NullProgressSink, ServiceRunner};
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::service::{ServiceLaunch, ServiceState};
 use lampo_domain::tcp_port::Port;
@@ -49,7 +49,7 @@ async fn mysql_end_to_end() {
         log_dir: root.path().join("logs").join("mysql"),
     };
     let sup = Arc::new(JobObjectSupervisor::new());
-    let runner = MysqlRunner::new(sup.clone(), sup.clone(), Arc::new(NullEventPublisher));
+    let runner = MysqlRunner::new(sup.clone(), sup.clone(), Arc::new(NoMysqlRootPasswords), Arc::new(NullEventPublisher));
 
     let t = Instant::now();
     runner.prepare(&launch).await.unwrap();
@@ -66,7 +66,7 @@ async fn mysql_end_to_end() {
 
     let client_dir = launch.install_dir.join("bin");
     let endpoint = MysqlEndpoint { series, client_dir, port: launch.port, user: "root".into() };
-    let admin = MysqlCliAdmin::new(sup.clone(), sup.clone());
+    let admin = MysqlCliAdmin::new(sup.clone(), sup.clone(), Arc::new(NoMysqlRootPasswords));
     let shop = DatabaseName::new("shop").unwrap();
     admin.create(&endpoint, &shop).await.unwrap();
     assert!(matches!(admin.create(&endpoint, &shop).await, Err(lampo_domain::PortError::AlreadyExists { .. })));
