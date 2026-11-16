@@ -301,6 +301,10 @@ impl ShimAdmin for Fake {
         self.shim_installed.store(true, Ordering::SeqCst);
         ShimAdmin::status(self)
     }
+    fn uninstall(&self) -> AppResult<ShimStatusDto> {
+        self.shim_installed.store(false, Ordering::SeqCst);
+        ShimAdmin::status(self)
+    }
 }
 
 #[async_trait]

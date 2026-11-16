@@ -98,6 +98,9 @@ pub trait ShimInstaller: Send + Sync {
     /// when nothing is installed at all (the user never installed the shims). Returns whether a
     /// file changed.
     fn refresh(&self, shim_dir: &Path) -> PortResult<bool>;
+    /// Deletes `shim_dir` with every copy in it (and the shim index). Idempotent: a missing
+    /// folder is not an error.
+    fn uninstall(&self, shim_dir: &Path) -> PortResult<()>;
 }
 
 /// Records where the running app is installed, so that a copy of the CLI placed elsewhere (the
@@ -112,6 +115,9 @@ pub trait UserPathEditor: Send + Sync {
     fn contains(&self, dir: &Path) -> PortResult<bool>;
     /// Appends `dir` if missing and broadcasts the environment change.
     fn append(&self, dir: &Path) -> PortResult<()>;
+    /// Removes every entry equal to `dir` (the others are kept verbatim) and broadcasts the
+    /// environment change. Idempotent: nothing is written when `dir` is not on the PATH.
+    fn remove(&self, dir: &Path) -> PortResult<()>;
 }
 
 /// Recognises one kind of project from the files in its folder. One implementation per

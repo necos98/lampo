@@ -261,6 +261,7 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         c("lampo doctor", "lampo doctor [--json]", "Diagnose the installation (VC++ runtimes, ports, PATH shadowing…).", false, false),
         c("lampo shims status", "lampo shims status [--json]", "Whether the php/composer/mysql shims are installed, on PATH and not shadowed.", false, false),
         c("lampo shims install", "lampo shims install", "Install the shims and add their folder to the user PATH (no elevation).", true, false),
+        c("lampo shims uninstall", "lampo shims uninstall [--json]", "Remove the shim folder from the user PATH and delete it (the app is untouched).", true, false),
         c(
             "lampo settings get",
             "lampo settings [get] [--json]",

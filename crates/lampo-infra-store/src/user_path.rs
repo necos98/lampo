@@ -36,15 +36,31 @@ impl UserPathEditor for WindowsUserPath {
             }
             None => PathValue { text: dir.to_string_lossy().into_owned(), expandable: true },
         };
-        registry::write_user_path(&updated)?;
-        registry::broadcast_environment_change();
-        Ok(())
+        write_and_broadcast(&updated)
     }
+
+    fn remove(&self, dir: &Path) -> PortResult<()> {
+        let Some(current) = registry::read_path(Hive::User)? else {
+            return Ok(());
+        };
+        if !path_list::contains(&current.text, dir, &process_env) {
+            return Ok(());
+        }
+        let updated = PathValue { text: path_list::remove(&current.text, dir, &process_env), expandable: current.expandable };
+        write_and_broadcast(&updated)
+    }
+}
+
+/// Writes the user PATH (keeping its registry type) and tells running programs about it.
+fn write_and_broadcast(value: &PathValue) -> PortResult<()> {
+    registry::write_user_path(value)?;
+    registry::broadcast_environment_change();
+    Ok(())
 }
 
 /// For isolated data roots (`LAMPO_HOME`: tests, portable setups): never touches the registry.
 /// `contains` looks at the current process `PATH` (what the caller's shell put there), `append`
-/// only logs. Composition roots choose it instead of [`WindowsUserPath`].
+/// and `remove` only log. Composition roots choose it instead of [`WindowsUserPath`].
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ProcessOnlyUserPath;
 
@@ -55,6 +71,11 @@ impl UserPathEditor for ProcessOnlyUserPath {
 
     fn append(&self, dir: &Path) -> PortResult<()> {
         tracing::info!("isolated data root: the user PATH is left unchanged (add {} to PATH in your own shell)", dir.display());
+        Ok(())
+    }
+
+    fn remove(&self, dir: &Path) -> PortResult<()> {
+        tracing::info!("isolated data root: the user PATH is left unchanged (remove {} from PATH in your own shell)", dir.display());
         Ok(())
     }
 }

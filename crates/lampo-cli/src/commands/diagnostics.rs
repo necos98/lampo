@@ -37,6 +37,7 @@ pub fn shims(c: &Cmd<'_>, command: ShimsCommand) -> AppResult<i32> {
     let status = match command {
         ShimsCommand::Status => c.ctx.shims.status()?,
         ShimsCommand::Install => c.ctx.shims.install()?,
+        ShimsCommand::Uninstall => c.ctx.shims.uninstall()?,
     };
     c.io.emit(&status, render::shim_status);
     Ok(0)

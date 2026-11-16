@@ -86,4 +86,14 @@ impl ShimSetup {
         }
         self.status()
     }
+
+    /// Idempotent undo of [`Self::install`]: takes the shim dir off the user PATH first (so a
+    /// copy still running, which cannot be deleted, never leaves a stale PATH entry behind),
+    /// then deletes the folder.
+    pub fn uninstall(&self) -> AppResult<ShimStatusDto> {
+        let dir = self.paths.shim_dir();
+        self.user_path.remove(&dir)?;
+        self.installer.uninstall(&dir)?;
+        self.status()
+    }
 }

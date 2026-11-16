@@ -66,6 +66,13 @@ pub fn append(list: &str, dir: &Path, env: EnvLookup) -> String {
     if base.trim().is_empty() { dir.into_owned() } else { format!("{base};{dir}") }
 }
 
+/// `list` without any entry equal to `dir` (same comparison as [`contains`]); every other
+/// segment, empty ones included, is kept verbatim and in order.
+pub fn remove(list: &str, dir: &Path, env: EnvLookup) -> String {
+    let wanted = key(&dir.to_string_lossy(), env);
+    list.split(';').filter(|segment| segment.trim().is_empty() || key(segment, env) != wanted).collect::<Vec<_>>().join(";")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,6 +112,29 @@ mod tests {
         let once = append("C:\\a;%SystemRoot%", dir, &env);
         assert_eq!(once, "C:\\a;%SystemRoot%;D:\\Lampo\\bin");
         assert_eq!(append(&once, Path::new("d:\\lampo\\bin\\"), &env), once);
+    }
+
+    #[test]
+    fn remove_drops_every_matching_entry_and_keeps_the_rest_verbatim() {
+        let dir = Path::new("C:\\Users\\Me\\AppData\\Local\\Lampo\\bin");
+        assert_eq!(remove("C:\\a;%LOCALAPPDATA%\\Lampo\\bin;%SystemRoot%", dir, &env), "C:\\a;%SystemRoot%");
+        assert_eq!(remove("\"c:\\users\\me\\appdata\\local\\lampo\\bin\\\";C:\\a", dir, &env), "C:\\a");
+        assert_eq!(remove("C:\\a;C:/Users/Me/AppData/Local/Lampo/bin;C:\\b;C:\\Users\\Me\\AppData\\Local\\Lampo\\bin", dir, &env), "C:\\a;C:\\b");
+        assert_eq!(remove("C:\\a;;C:\\b;", dir, &env), "C:\\a;;C:\\b;", "nothing to remove: unchanged");
+        assert_eq!(remove("C:\\a;C:\\Users\\Me\\AppData\\Local\\Lampo\\bin;", dir, &env), "C:\\a;");
+        assert_eq!(remove("%LOCALAPPDATA%\\Lampo\\bin", dir, &env), "");
+        assert_eq!(remove("", dir, &env), "");
+        assert_eq!(remove("C:\\Users\\Me\\AppData\\Local\\Lampo\\bin2", dir, &env), "C:\\Users\\Me\\AppData\\Local\\Lampo\\bin2");
+    }
+
+    #[test]
+    fn remove_undoes_append() {
+        let dir = Path::new("D:\\Lampo\\bin");
+        for list in ["C:\\a;C:\\b", "C:\\a;%SystemRoot%", "C:\\äöü\\日本"] {
+            let appended = append(list, dir, &env);
+            assert_eq!(remove(&appended, dir, &env), list);
+            assert!(!contains(&remove(&appended, dir, &env), dir, &env));
+        }
     }
 
     #[test]

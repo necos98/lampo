@@ -94,6 +94,9 @@ impl ShimAdmin for ShimSetup {
     fn install(&self) -> AppResult<ShimStatusDto> {
         ShimSetup::install(self)
     }
+    fn uninstall(&self) -> AppResult<ShimStatusDto> {
+        ShimSetup::uninstall(self)
+    }
 }
 
 impl SettingsReader for SettingsQuery {

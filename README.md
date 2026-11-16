@@ -70,8 +70,9 @@ altrove e sopravvivono ad aggiornamenti e disinstallazione: configurazione e pro
 
 `lampo.exe` si trova nella cartella di installazione, accanto all'app. **Installa nel PATH** (o
 `lampo shims install`) ne mette una copia nella cartella degli shim (`%LOCALAPPDATA%\Lampo\bin`),
-già nel PATH, e l'app la aggiorna a ogni avvio dopo un aggiornamento. I comandi che cambiano
-stato passano dall'app, che viene avviata in background se non è già aperta.
+già nel PATH, e l'app la aggiorna a ogni avvio dopo un aggiornamento. `lampo shims uninstall`
+toglie la cartella dal PATH e la cancella; la disinstallazione di Lampo lo fa da sé. I comandi
+che cambiano stato passano dall'app, che viene avviata in background se non è già aperta.
 
 ```powershell
 lampo status                          # servizi e progetti

@@ -119,7 +119,7 @@ pub enum Command {
     #[command(subcommand)]
     Agent(AgentCommand),
     /// Install the php/composer/mysql/mysqldump/redis-cli shims (and a copy of `lampo`) and add
-    /// their folder to the user PATH.
+    /// their folder to the user PATH (or remove them).
     #[command(subcommand)]
     Shims(ShimsCommand),
     /// Lampo's global settings: ports (Apache, MySQL instances, Redis, Mailpit), default PHP, loopback
@@ -632,6 +632,9 @@ pub enum ShimsCommand {
     /// Install the shims and a copy of `lampo`, and add their folder to the user PATH (no
     /// elevation needed).
     Install,
+    /// Remove the shim folder from the user PATH and delete it (shims, the `lampo` copy, the shim
+    /// index). The app and its own `lampo.exe` are untouched; `shims install` puts them back.
+    Uninstall,
 }
 
 #[derive(Debug, Subcommand)]

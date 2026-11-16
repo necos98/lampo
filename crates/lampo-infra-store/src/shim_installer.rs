@@ -82,6 +82,14 @@ fn place_copy(source: &Path, target: &Path) -> PortResult<()> {
     }
 }
 
+/// Why deleting `shim_dir` most likely failed: `lampo` typed in a terminal is the copy in the shim
+/// dir, which cannot delete itself; otherwise another shim or CLI copy is still running.
+fn locked_copy_hint(shim_dir: &Path) -> &'static str {
+    let canonical_dir = |dir: &Path| std::fs::canonicalize(dir).ok();
+    let running_inside = std::env::current_exe().ok().and_then(|exe| exe.parent().and_then(canonical_dir)).is_some_and(|exe_dir| Some(exe_dir) == canonical_dir(shim_dir));
+    if running_inside { "this lampo is the copy in that folder: run the lampo.exe in the Lampo install folder instead" } else { "is a shim or the lampo copy in it running?" }
+}
+
 fn same_content(a: &Path, b: &Path) -> bool {
     match (std::fs::read(a), std::fs::read(b)) {
         (Ok(x), Ok(y)) => x == y,
@@ -123,6 +131,16 @@ impl ShimInstaller for ExeShimInstaller {
             return Ok(false);
         }
         self.sync_copies(shim_dir)
+    }
+
+    /// The whole folder goes, the shim index included: it only exists for the shims. A copy that
+    /// is running cannot be deleted on Windows, so that failure names the likely cause.
+    fn uninstall(&self, shim_dir: &Path) -> PortResult<()> {
+        match std::fs::remove_dir_all(shim_dir) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(PortError::io(format!("deleting {}", shim_dir.display()), format!("{e} ({})", locked_copy_hint(shim_dir)))),
+        }
     }
 
     /// True when every copy exists and has the size of its executable (so an app update that
@@ -249,6 +267,28 @@ mod tests {
         installer.install(&bin).unwrap();
         assert!(installer.is_installed(&bin).unwrap());
         assert!(!bin.join("lampo.exe").exists());
+    }
+
+    #[test]
+    fn uninstall_deletes_the_folder_and_is_idempotent() {
+        let (d, exe, bin) = setup();
+        let (installer, cli) = with_cli(&exe, d.path());
+        installer.install(&bin).unwrap();
+        std::fs::write(bin.join("shim-index.json"), b"{}").unwrap();
+        installer.uninstall(&bin).unwrap();
+        assert!(!bin.exists());
+        assert!(!installer.is_installed(&bin).unwrap());
+        installer.uninstall(&bin).unwrap();
+        assert!(exe.is_file() && cli.is_file(), "the shipped executables are never touched");
+    }
+
+    #[test]
+    fn locked_copy_hint_tells_when_the_running_cli_is_the_copy_itself() {
+        let (_d, _exe, bin) = setup();
+        std::fs::create_dir_all(&bin).unwrap();
+        assert!(locked_copy_hint(&bin).starts_with("is a shim"));
+        let own_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        assert!(locked_copy_hint(&own_dir).contains("install folder"));
     }
 
     #[test]

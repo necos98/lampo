@@ -271,9 +271,10 @@ impl ProjectTransfer for FakeTransfer {
     }
 }
 
-/// `.0`: installed; `.1`: how many refreshes changed something (only when installed).
+/// `.0`: installed; `.1`: how many refreshes changed something (only when installed); `.2`:
+/// uninstall fails (a copy is running).
 #[derive(Default)]
-pub struct FakeShimInstaller(pub AtomicBool, pub AtomicUsize);
+pub struct FakeShimInstaller(pub AtomicBool, pub AtomicUsize, pub AtomicBool);
 impl ShimInstaller for FakeShimInstaller {
     fn refresh(&self, _shim_dir: &Path) -> PortResult<bool> {
         let installed = self.0.load(Ordering::SeqCst);
@@ -288,6 +289,13 @@ impl ShimInstaller for FakeShimInstaller {
     }
     fn is_installed(&self, _shim_dir: &Path) -> PortResult<bool> {
         Ok(self.0.load(Ordering::SeqCst))
+    }
+    fn uninstall(&self, shim_dir: &Path) -> PortResult<()> {
+        if self.2.load(Ordering::SeqCst) {
+            return Err(PortError::io(format!("deleting {}", shim_dir.display()), "access denied"));
+        }
+        self.0.store(false, Ordering::SeqCst);
+        Ok(())
     }
 }
 
@@ -309,6 +317,10 @@ impl UserPathEditor for FakeUserPath {
     }
     fn append(&self, dir: &Path) -> PortResult<()> {
         lock(&self.0).push(dir.to_path_buf());
+        Ok(())
+    }
+    fn remove(&self, dir: &Path) -> PortResult<()> {
+        lock(&self.0).retain(|d| key(d) != key(dir));
         Ok(())
     }
 }

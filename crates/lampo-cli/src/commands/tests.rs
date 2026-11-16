@@ -510,6 +510,10 @@ async fn shims_install_then_status() {
     assert_eq!(parse(&out)["installed"], false);
     let (_, out, _) = run_cli(&fake, &["shims", "install", "--json"]).await;
     assert_eq!(parse(&out)["installed"], true);
+    let (code, out, _) = run_cli(&fake, &["shims", "uninstall", "--json"]).await;
+    assert_eq!(code, 0);
+    let doc = parse(&out);
+    assert_eq!((doc["installed"].as_bool(), doc["onPath"].as_bool()), (Some(false), Some(false)));
 }
 
 #[tokio::test]

@@ -62,6 +62,7 @@ fn every_subcommand_renders_help() {
         &["shims"],
         &["shims", "status"],
         &["shims", "install"],
+        &["shims", "uninstall"],
         &["settings"],
         &["settings", "get"],
         &["settings", "set"],

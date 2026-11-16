@@ -356,6 +356,32 @@ fn shim_setup_installs_and_puts_the_dir_on_path_once() {
     assert_eq!(user_path.0.lock().unwrap().len(), 1);
 }
 
+#[test]
+fn shim_setup_uninstall_takes_the_dir_off_path_and_deletes_it_idempotently() {
+    let w = World::new();
+    let other = PathBuf::from("C:\\Tools");
+    let user_path = Arc::new(FakeUserPath(Mutex::new(vec![other.clone()])));
+    let setup = ShimSetup::new(Arc::new(FakeShimInstaller::default()), user_path.clone(), Arc::new(FakeLocator::default()), w.paths.clone(), lampo_domain::shim::tools::all());
+    setup.install().unwrap();
+    let after = setup.uninstall().unwrap();
+    assert!(!after.installed && !after.on_path);
+    assert_eq!(*user_path.0.lock().unwrap(), vec![other], "the other entries stay");
+    let again = setup.uninstall().unwrap();
+    assert!(!again.installed && !again.on_path);
+}
+
+#[test]
+fn shim_setup_uninstall_cleans_the_path_even_when_a_running_copy_blocks_the_delete() {
+    let w = World::new();
+    let installer = Arc::new(FakeShimInstaller::default());
+    let user_path = Arc::new(FakeUserPath::default());
+    let setup = ShimSetup::new(installer.clone(), user_path.clone(), Arc::new(FakeLocator::default()), w.paths.clone(), lampo_domain::shim::tools::all());
+    setup.install().unwrap();
+    installer.2.store(true, Ordering::SeqCst);
+    assert!(setup.uninstall().is_err());
+    assert!(user_path.0.lock().unwrap().is_empty());
+}
+
 // --- control dispatcher ----------------------------------------------------------------------
 
 #[derive(Default)]

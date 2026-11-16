@@ -71,6 +71,7 @@ pub trait HookInput: Send + Sync {
 pub trait ShimAdmin: Send + Sync {
     fn status(&self) -> AppResult<ShimStatusDto>;
     fn install(&self) -> AppResult<ShimStatusDto>;
+    fn uninstall(&self) -> AppResult<ShimStatusDto>;
 }
 
 /// The stored global settings (`settings get`, file-based).
