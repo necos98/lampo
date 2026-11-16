@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use lampo_domain::ports::ShimIndexReader;
 use lampo_domain::resolution::{GitInspector, PathCanonicalizer, ResolveRequest, ResolverChain};
-use lampo_domain::shim::{ShimInvocation, ShimTool, tools};
+use lampo_domain::shim::{FolderProbe, ShimInvocation, ShimTool, tools};
 
 use crate::{console, job};
 
@@ -34,17 +34,20 @@ pub struct ShimRequest {
     pub inherited_root: Option<String>,
 }
 
-/// The file-system facts resolution reads besides the index.
+/// The file-system facts the shim reads besides the index: for resolution, and the folders a
+/// tool's defaults depend on (the site's database in MySQL's data dir).
 pub struct ShimFacts {
     pub git: Arc<dyn GitInspector>,
     pub canonicalizer: Arc<dyn PathCanonicalizer>,
+    pub folders: Arc<dyn FolderProbe>,
 }
 
-/// What to run, and the note to print first (`LAMPO_PROJECT` was ignored for this folder).
+/// What to run, and the notes to print first (`LAMPO_PROJECT` was ignored for this folder, the
+/// site's database does not exist yet).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShimPlan {
     pub invocation: ShimInvocation,
-    pub notice: Option<String>,
+    pub notices: Vec<String>,
 }
 
 /// Resolves the real process to run. The error is the one-line reason for exit code 127.
@@ -57,8 +60,9 @@ pub fn plan(request: &ShimRequest, registered: &[Arc<dyn ShimTool>], index: &dyn
         .resolve(&resolve, &index)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("no Lampo project for this folder and no default PHP: install one in Lampo first (`lampo package install php 8.3`), then run `{}` again", tool.name()))?;
-    let invocation = tool.invocation(&resolution.target, &request.args).map_err(|e| e.to_string())?;
-    Ok(ShimPlan { invocation, notice: resolution.ignored_inherited_notice() })
+    let mut invocation = tool.invocation(&resolution.target, &request.args, facts.folders.as_ref()).map_err(|e| e.to_string())?;
+    let notices = resolution.ignored_inherited_notice().into_iter().chain(invocation.notice.take()).collect();
+    Ok(ShimPlan { invocation, notices })
 }
 
 /// `php, composer, mysql, mysqldump or redis-cli`, from the registered tools.
@@ -109,7 +113,7 @@ mod tests {
     use lampo_domain::php::{ComposerChannel, PhpMinor};
     use lampo_domain::project::ProjectRoot;
     use lampo_domain::resolution::GitCheckout;
-    use lampo_domain::shim::{ShimEntry, ShimIndex, ShimTarget};
+    use lampo_domain::shim::{FolderState, ShimEntry, ShimIndex, ShimTarget};
 
     use super::*;
 
@@ -134,8 +138,15 @@ mod tests {
         }
     }
 
+    struct EveryFolder;
+    impl FolderProbe for EveryFolder {
+        fn state(&self, _path: &std::path::Path) -> FolderState {
+            FolderState::Present
+        }
+    }
+
     fn facts() -> ShimFacts {
-        ShimFacts { git: Arc::new(NoGit), canonicalizer: Arc::new(SameName) }
+        ShimFacts { git: Arc::new(NoGit), canonicalizer: Arc::new(SameName), folders: Arc::new(EveryFolder) }
     }
 
     fn invocation(request: &ShimRequest, registered: &[Arc<dyn ShimTool>], index: &FakeIndex) -> Result<ShimInvocation, String> {
@@ -230,7 +241,7 @@ mod tests {
         req.inherited_root = Some(r"C:\work\blog".into());
         let planned = plan(&req, &tools::all(), &index_with_two_projects(), facts()).unwrap();
         assert_eq!(planned.invocation.program, PathBuf::from(r"C:\php\8.3\php.exe"));
-        assert_eq!(planned.notice.as_deref(), Some("LAMPO_PROJECT=blog ignored: this folder belongs to shop (set LAMPO_QUIET=1 to hide this note)"));
+        assert_eq!(planned.notices, ["LAMPO_PROJECT=blog ignored: this folder belongs to shop (set LAMPO_QUIET=1 to hide this note)"]);
     }
 
     #[test]
@@ -241,7 +252,7 @@ mod tests {
             req.inherited_root = Some(r"C:\work\blog".into());
             let planned = plan(&req, &tools::all(), &index_with_two_projects(), facts()).unwrap();
             assert_eq!(planned.invocation.program, PathBuf::from(r"C:\php\7.4\php.exe"), "{cwd}");
-            assert_eq!(planned.notice, None, "{cwd}");
+            assert!(planned.notices.is_empty(), "{cwd}");
         }
     }
 }

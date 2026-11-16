@@ -316,6 +316,16 @@ its parent's; `None` for the default target and sites without MySQL):
   positional database override the earlier `--database`.
 * `mysqldump` appends the database as the positional argument only when there is no positional
   and no `-A`/`--all-databases`/`-B`/`--databases`; existing positionals are never touched.
+* Only a database that exists is added: without connecting, the shim looks for its folder in
+  the instance's data dir (`ShimService.data_dir`, `shim/mysql_database.rs`; one `metadata`
+  call, the name in MySQL's file-name encoding, `-` → `@002d`). A missing folder means the
+  database has not been created yet: `mysql` connects without a default database and prints
+  `lampo-shim: database '<db>' does not exist yet, connecting without a default database`
+  (hidden by `LAMPO_QUIET`), so `mysql -e "CREATE DATABASE ..."` and dump imports work;
+  `mysqldump` appends nothing and the client prints its own usage error. When the shim cannot
+  tell (no data dir in an older index, a data dir that cannot be read, a non-ASCII or device
+  name) it adds the database as before: a visible client error beats a silent change. No check
+  runs when the user chose a database.
 
 `lampo exec` and `lampo env` need nothing extra: the shim dir is first on their PATH and
 `LAMPO_PROJECT`/`LAMPO_PROJECT_ROOT` are set, so `mysql` there is the shim with the same

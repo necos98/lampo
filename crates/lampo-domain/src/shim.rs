@@ -39,6 +39,10 @@ pub struct ShimService {
     /// it as `LAMPO_<prefix>_DATABASE`. `None` for the default target and sites without one.
     #[serde(default)]
     pub database: Option<String>,
+    /// The instance's data dir, for kinds that keep one: the `mysql`/`mysqldump` shims look for
+    /// `database`'s folder there before selecting it. `None` in indexes written before it existed.
+    #[serde(default)]
+    pub data_dir: Option<PathBuf>,
     /// `DB` → `LAMPO_DB_HOST`, `LAMPO_DB_PORT`, … (from the kind's descriptor).
     pub env_prefix: String,
 }
@@ -107,6 +111,24 @@ pub struct ShimInvocation {
     pub args: Vec<String>,
     /// Variables to set on top of the inherited environment.
     pub env: Vec<(String, String)>,
+    /// One line for stderr before the tool starts (the defaults were adjusted).
+    pub notice: Option<String>,
+}
+
+/// What is at a path, as one file-system call can tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderState {
+    Present,
+    /// Nothing there, or a file: the parent folder exists and holds no folder of that name.
+    Missing,
+    /// Cannot tell: the parent folder is missing or cannot be read.
+    Unreadable,
+}
+
+/// The file-system fact the shim tools may read before running (`lampo-infra-store`'s
+/// `LocalFileSystem`). Must be cheap: one `metadata` call per question.
+pub trait FolderProbe: Send + Sync {
+    fn state(&self, path: &Path) -> FolderState;
 }
 
 /// One shimmed tool.
@@ -114,7 +136,9 @@ pub trait ShimTool: Send + Sync {
     /// Executable name without extension (`php`, `redis-cli`); the shim binary is copied as
     /// `<name>.exe` and dispatches on its own file name.
     fn name(&self) -> &'static str;
-    fn invocation(&self, target: &ShimTarget, args: &[String]) -> Result<ShimInvocation, DomainError>;
+    /// `folders` answers the few file-system questions a tool's defaults depend on (whether the
+    /// site's database exists).
+    fn invocation(&self, target: &ShimTarget, args: &[String], folders: &dyn FolderProbe) -> Result<ShimInvocation, DomainError>;
 }
 
 fn phprc_env(target: &ShimTarget) -> Vec<(String, String)> {
@@ -126,9 +150,11 @@ fn unavailable(tool: &str, reason: &str) -> DomainError {
 }
 
 mod mysql_args;
+mod mysql_database;
 
 /// Built-in shim tools.
 pub mod tools {
+    use super::mysql_database::{self, SiteDatabase};
     use super::*;
 
     pub struct Php;
@@ -136,8 +162,8 @@ pub mod tools {
         fn name(&self) -> &'static str {
             "php"
         }
-        fn invocation(&self, target: &ShimTarget, args: &[String]) -> Result<ShimInvocation, DomainError> {
-            Ok(ShimInvocation { program: target.php_exe.clone(), args: args.to_vec(), env: phprc_env(target) })
+        fn invocation(&self, target: &ShimTarget, args: &[String], _folders: &dyn FolderProbe) -> Result<ShimInvocation, DomainError> {
+            Ok(ShimInvocation { program: target.php_exe.clone(), args: args.to_vec(), env: phprc_env(target), notice: None })
         }
     }
 
@@ -146,11 +172,11 @@ pub mod tools {
         fn name(&self) -> &'static str {
             "composer"
         }
-        fn invocation(&self, target: &ShimTarget, args: &[String]) -> Result<ShimInvocation, DomainError> {
+        fn invocation(&self, target: &ShimTarget, args: &[String], _folders: &dyn FolderProbe) -> Result<ShimInvocation, DomainError> {
             let phar = target.composer_phar.as_ref().ok_or_else(|| unavailable("composer", "Composer is not installed for this PHP version"))?;
             let mut a = vec![phar.display().to_string()];
             a.extend_from_slice(args);
-            Ok(ShimInvocation { program: target.php_exe.clone(), args: a, env: phprc_env(target) })
+            Ok(ShimInvocation { program: target.php_exe.clone(), args: a, env: phprc_env(target), notice: None })
         }
     }
 
@@ -177,41 +203,50 @@ pub mod tools {
         a.push(format!("--default-character-set={MYSQL_CLIENT_CHARSET}"));
         a.extend(extra);
         a.extend_from_slice(rest);
-        ShimInvocation { program: m.client_dir.join(format!("{binary}.exe")), args: a, env: Vec::new() }
+        ShimInvocation { program: m.client_dir.join(format!("{binary}.exe")), args: a, env: Vec::new(), notice: None }
     }
 
     /// `mysql`: also selects the site's database unless the user chose one (a positional
     /// database, `-D`, `--database`; `--database=` with no name means none). The default target
     /// and sites without a database get none. The database goes with the defaults, before the
-    /// user's arguments: a positional database the parser missed still overrides it.
+    /// user's arguments: a positional database the parser missed still overrides it. A site
+    /// database whose folder is missing from the instance's data dir is not selected (the client
+    /// would refuse to connect, failing even `CREATE DATABASE`): the shim says so in one line.
     pub struct Mysql;
     impl ShimTool for Mysql {
         fn name(&self) -> &'static str {
             "mysql"
         }
-        fn invocation(&self, target: &ShimTarget, args: &[String]) -> Result<ShimInvocation, DomainError> {
+        fn invocation(&self, target: &ShimTarget, args: &[String], folders: &dyn FolderProbe) -> Result<ShimInvocation, DomainError> {
             let m = service(target, "mysql", &ServiceKind::MYSQL)?;
             let parsed = mysql_args::parse(args, mysql_args::MYSQL_SHORT_WITH_VALUE);
             let chosen = !parsed.positional.is_empty() || parsed.has_short('D') || parsed.has_long("database");
-            let database = m.database.as_ref().filter(|_| !chosen).map(|d| format!("--database={d}"));
-            Ok(mysql_client(m, "mysql", args, database))
+            let site = if chosen { SiteDatabase::None } else { SiteDatabase::of(m, folders) };
+            let mut inv = mysql_client(m, "mysql", args, site.usable().map(|d| format!("--database={d}")));
+            if let SiteDatabase::Missing(name) = site {
+                inv.notice = Some(mysql_database::missing_notice(name));
+            }
+            Ok(inv)
         }
     }
 
     /// `mysqldump`: dumps the site's database when the command names nothing to dump (no
     /// positional argument, no `--all-databases`/`-A`, no `--databases`/`-B`), by appending it as
-    /// the positional argument; existing positional arguments are never reinterpreted.
+    /// the positional argument; existing positional arguments are never reinterpreted. A site
+    /// database whose folder is missing is not appended: the client gives its own usage error.
     pub struct Mysqldump;
     impl ShimTool for Mysqldump {
         fn name(&self) -> &'static str {
             "mysqldump"
         }
-        fn invocation(&self, target: &ShimTarget, args: &[String]) -> Result<ShimInvocation, DomainError> {
+        fn invocation(&self, target: &ShimTarget, args: &[String], folders: &dyn FolderProbe) -> Result<ShimInvocation, DomainError> {
             let m = service(target, "mysqldump", &ServiceKind::MYSQL)?;
             let parsed = mysql_args::parse(args, mysql_args::MYSQLDUMP_SHORT_WITH_VALUE);
             let names_something = !parsed.positional.is_empty() || parsed.has_short('A') || parsed.has_short('B') || parsed.has_long("all-databases") || parsed.has_long("databases");
             let mut inv = mysql_client(m, "mysqldump", args, None);
-            inv.args.extend(m.database.iter().filter(|_| !names_something).cloned());
+            if !names_something {
+                inv.args.extend(SiteDatabase::of(m, folders).usable().map(str::to_string));
+            }
             Ok(inv)
         }
     }
@@ -221,11 +256,11 @@ pub mod tools {
         fn name(&self) -> &'static str {
             "redis-cli"
         }
-        fn invocation(&self, target: &ShimTarget, args: &[String]) -> Result<ShimInvocation, DomainError> {
+        fn invocation(&self, target: &ShimTarget, args: &[String], _folders: &dyn FolderProbe) -> Result<ShimInvocation, DomainError> {
             let r = service(target, "redis-cli", &ServiceKind::REDIS)?;
             let mut a = vec!["-h".to_string(), r.host.clone(), "-p".to_string(), r.port.to_string()];
             a.extend_from_slice(args);
-            Ok(ShimInvocation { program: r.client_dir.join("redis-cli.exe"), args: a, env: Vec::new() })
+            Ok(ShimInvocation { program: r.client_dir.join("redis-cli.exe"), args: a, env: Vec::new(), notice: None })
         }
     }
 
@@ -280,7 +315,13 @@ impl ShimTarget {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use super::mysql_database::tests::FakeFolders;
     use super::*;
+
+    /// Every folder asked about exists: the site's database is there.
+    fn present() -> FakeFolders {
+        FakeFolders::new(FolderState::Present)
+    }
 
     pub(crate) fn target(php: &str) -> ShimTarget {
         let php = PhpMinor::parse(php).unwrap();
@@ -291,6 +332,7 @@ pub(crate) mod tests {
             port: 3306,
             user: Some("root".into()),
             database: Some("shop".into()),
+            data_dir: Some(PathBuf::from(r"C:\mysql\data")),
             env_prefix: "DB".into(),
         };
         ShimTarget {
@@ -332,24 +374,24 @@ pub(crate) mod tests {
     #[test]
     fn php_and_composer_invocations() {
         let t = target("8.3");
-        let php = tools::Php.invocation(&t, &args(&["-v"])).unwrap();
+        let php = tools::Php.invocation(&t, &args(&["-v"]), &present()).unwrap();
         assert_eq!(php.program, PathBuf::from("C:\\php\\8.3").join("php.exe"));
         assert_eq!(php.env, vec![("PHPRC".to_string(), "C:\\ini".to_string())]);
-        let c = tools::Composer.invocation(&t, &args(&["install"])).unwrap();
+        let c = tools::Composer.invocation(&t, &args(&["install"]), &present()).unwrap();
         assert_eq!(c.args, args(&["C:\\composer\\composer.phar", "install"]));
         let mut no_composer = t.clone();
         no_composer.composer_phar = None;
-        assert!(tools::Composer.invocation(&no_composer, &[]).is_err());
+        assert!(tools::Composer.invocation(&no_composer, &[], &present()).is_err());
     }
 
     const DEFAULTS: [&str; 4] = ["--host=127.0.0.1", "--port=3306", "--user=root", "--default-character-set=utf8mb4"];
 
     fn mysql(t: &ShimTarget, user: &[&str]) -> Vec<String> {
-        tools::Mysql.invocation(t, &args(user)).unwrap().args
+        tools::Mysql.invocation(t, &args(user), &present()).unwrap().args
     }
 
     fn mysqldump(t: &ShimTarget, user: &[&str]) -> Vec<String> {
-        tools::Mysqldump.invocation(t, &args(user)).unwrap().args
+        tools::Mysqldump.invocation(t, &args(user), &present()).unwrap().args
     }
 
     /// The defaults, then `extra`, then the user's arguments.
@@ -360,11 +402,11 @@ pub(crate) mod tests {
     #[test]
     fn mysql_defaults_come_before_user_args() {
         let t = target("8.3");
-        let inv = tools::Mysqldump.invocation(&t, &args(&["--port=3307", "shop"])).unwrap();
+        let inv = tools::Mysqldump.invocation(&t, &args(&["--port=3307", "shop"]), &present()).unwrap();
         assert_eq!(inv.program, PathBuf::from(r"C:\mysql\bin").join("mysqldump.exe"));
         assert_eq!(inv.args, expected(&[], &["--port=3307", "shop"]));
         assert_eq!(mysql(&t, &["--default-character-set=latin1"]), expected(&["--database=shop"], &["--default-character-set=latin1"]));
-        assert!(tools::RedisCli.invocation(&t, &[]).is_err());
+        assert!(tools::RedisCli.invocation(&t, &[], &present()).is_err());
     }
 
     #[test]
@@ -406,6 +448,49 @@ pub(crate) mod tests {
         let t = target("8.3");
         assert_eq!(mysql(&t, &["--database=", "-e", "CREATE DATABASE x"]), expected(&[], &["--database=", "-e", "CREATE DATABASE x"]));
         assert_eq!(mysql(&t, &["-D", "information_schema", "-e", "SHOW DATABASES"]), expected(&[], &["-D", "information_schema", "-e", "SHOW DATABASES"]));
+    }
+
+    #[test]
+    fn mysql_connects_without_a_site_database_that_does_not_exist_yet() {
+        let t = target("8.3");
+        let missing = FakeFolders::new(FolderState::Missing);
+        let inv = tools::Mysql.invocation(&t, &args(&["-e", "CREATE DATABASE shop"]), &missing).unwrap();
+        assert_eq!(inv.args, expected(&[], &["-e", "CREATE DATABASE shop"]));
+        assert_eq!(inv.notice.as_deref(), Some("database 'shop' does not exist yet, connecting without a default database"));
+        assert_eq!(missing.asked(), [PathBuf::from(r"C:\mysql\data").join("shop")]);
+
+        let present = present();
+        let inv = tools::Mysql.invocation(&t, &args(&["-e", "SHOW TABLES"]), &present).unwrap();
+        assert_eq!((inv.args, inv.notice), (expected(&["--database=shop"], &["-e", "SHOW TABLES"]), None));
+    }
+
+    #[test]
+    fn mysql_keeps_the_site_database_when_the_data_dir_cannot_be_read() {
+        let t = target("8.3");
+        let inv = tools::Mysql.invocation(&t, &args(&["-e", "SHOW TABLES"]), &FakeFolders::new(FolderState::Unreadable)).unwrap();
+        assert_eq!((inv.args, inv.notice), (expected(&["--database=shop"], &["-e", "SHOW TABLES"]), None));
+    }
+
+    #[test]
+    fn a_database_the_user_chose_is_never_looked_up() {
+        let t = target("8.3");
+        let missing = FakeFolders::new(FolderState::Missing);
+        for user in [&["--database=", "-e", "CREATE DATABASE x"][..], &["-D", "blog"], &["blog"]] {
+            let inv = tools::Mysql.invocation(&t, &args(user), &missing).unwrap();
+            assert_eq!((inv.args, inv.notice), (expected(&[], user), None), "{user:?}");
+        }
+        let inv = tools::Mysqldump.invocation(&t, &args(&["blog"]), &missing).unwrap();
+        assert_eq!(inv.args, expected(&[], &["blog"]));
+        assert!(missing.asked().is_empty(), "no file-system call: {:?}", missing.asked());
+    }
+
+    #[test]
+    fn mysqldump_leaves_a_missing_site_database_to_the_clients_error() {
+        let t = target("8.3");
+        let inv = tools::Mysqldump.invocation(&t, &args(&["--no-data"]), &FakeFolders::new(FolderState::Missing)).unwrap();
+        assert_eq!((inv.args, inv.notice), (expected(&[], &["--no-data"]), None));
+        let inv = tools::Mysqldump.invocation(&t, &args(&["--no-data"]), &FakeFolders::new(FolderState::Unreadable)).unwrap();
+        assert_eq!(inv.args, expected(&[], &["--no-data", "shop"]));
     }
 
     #[test]

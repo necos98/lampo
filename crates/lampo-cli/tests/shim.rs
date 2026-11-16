@@ -182,12 +182,18 @@ fn startup_overhead_is_small() {
     assert!(shimmed.saturating_sub(plain) < std::time::Duration::from_millis(250));
 }
 
-#[test]
-fn mysql_gets_the_sites_instance_and_database_and_forwards_stdin_and_exit_code() {
+/// The project `shop` with a MySQL instance whose client is the test tool installed as
+/// `mysql.exe`, database `shop_feature` and data dir `<sandbox>\mysql-data` (with the database's
+/// folder only when `database_exists`). Returns the installed `mysql` shim.
+fn install_mysql(sb: &Sandbox, database_exists: bool) -> PathBuf {
     use lampo_domain::service::ServiceKind;
     use lampo_domain::shim::ShimService;
-    let sb = Sandbox::new(false);
     std::fs::copy(argecho(), sb.php_dir.join("mysql.exe")).unwrap();
+    let data_dir = sb.home.join("mysql-data");
+    std::fs::create_dir_all(&data_dir).unwrap();
+    if database_exists {
+        std::fs::create_dir(data_dir.join("shop_feature")).unwrap();
+    }
     let mysql = ShimService {
         service: "mysql-8.4".parse().unwrap(),
         client_dir: sb.php_dir.clone(),
@@ -195,6 +201,7 @@ fn mysql_gets_the_sites_instance_and_database_and_forwards_stdin_and_exit_code()
         port: 3307,
         user: Some("root".into()),
         database: Some("shop_feature".into()),
+        data_dir: Some(data_dir),
         env_prefix: "DB".into(),
     };
     let mut target = target(&sb.php_dir);
@@ -202,7 +209,13 @@ fn mysql_gets_the_sites_instance_and_database_and_forwards_stdin_and_exit_code()
     let entry = ShimEntry { site: "shop".parse().unwrap(), root: ProjectRoot::new(sb.project.to_str().unwrap()).unwrap(), target };
     let index = ShimIndex { version: 2, default: None, projects: vec![entry] };
     std::fs::write(sb.home.join("data").join("bin").join("shim-index.json"), serde_json::to_string(&index).unwrap()).unwrap();
-    let shim = sb.install_shim("mysql.exe");
+    sb.install_shim("mysql.exe")
+}
+
+#[test]
+fn mysql_gets_the_sites_instance_and_database_and_forwards_stdin_and_exit_code() {
+    let sb = Sandbox::new(false);
+    let shim = install_mysql(&sb, true);
 
     let mut command = sb.command(&shim, &sb.project);
     command.args(["-N", "-B", "-e", "SHOW TABLES"]).env("ARGECHO_EXIT", "1");
@@ -218,6 +231,31 @@ fn mysql_gets_the_sites_instance_and_database_and_forwards_stdin_and_exit_code()
     let (_, out, _) = run(command, b"");
     let echoed: Vec<String> = serde_json::from_str(out.trim()).unwrap();
     assert!(!echoed.iter().any(|a| a == "--database=shop_feature"), "an explicit (empty) database wins: {echoed:?}");
+}
+
+/// `mysql -e "CREATE DATABASE ..."` (or a dump import) before the site's database exists must
+/// not fail on `ERROR 1049 Unknown database`: the shim connects without a default database.
+#[test]
+fn mysql_connects_without_the_sites_database_until_it_exists() {
+    let sb = Sandbox::new(false);
+    let shim = install_mysql(&sb, false);
+    let defaults = ["--host=127.0.0.1", "--port=3307", "--user=root", "--default-character-set=utf8mb4"];
+
+    let mut command = sb.command(&shim, &sb.project);
+    command.args(["-e", "CREATE DATABASE shop_feature"]).env("ARGECHO_EXIT", "3").env_remove("LAMPO_QUIET");
+    let (code, out, err) = run(command, b"");
+    assert_eq!(code, 3, "the client's exit code is forwarded; stderr: {err}");
+    let echoed: Vec<String> = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(echoed, [&defaults[..], &["-e", "CREATE DATABASE shop_feature"]].concat());
+    assert!(err.starts_with("lampo-shim: database 'shop_feature' does not exist yet, connecting without a default database\n"), "{err}");
+
+    std::fs::create_dir(sb.home.join("mysql-data").join("shop_feature")).unwrap();
+    let mut command = sb.command(&shim, &sb.project);
+    command.args(["-e", "SHOW TABLES"]).env_remove("LAMPO_QUIET");
+    let (_, out, err) = run(command, b"");
+    let echoed: Vec<String> = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(echoed, [&defaults[..], &["--database=shop_feature", "-e", "SHOW TABLES"]].concat(), "once created it is selected again");
+    assert!(!err.contains("lampo-shim:"), "{err}");
 }
 
 /// A second project, `blog`, next to `shop`, with its own php.ini dir (echoed as `phprc=`).

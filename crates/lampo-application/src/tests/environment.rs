@@ -315,6 +315,8 @@ async fn shim_index_lists_projects_worktrees_and_the_default_with_the_right_comp
     let wt = index.by_site(&"shop@fix-1".parse::<SiteId>().unwrap()).unwrap();
     assert_eq!(wt.root.as_str(), "D:\\wt\\fix");
     assert_eq!(wt.target.services[&ServiceKind::MYSQL].database.as_deref(), Some("shop"));
+    let shop_mysql = &shop.target.services[&ServiceKind::MYSQL];
+    assert_eq!(shop_mysql.data_dir.as_ref(), Some(&w.paths.service_data_dir(&shop_mysql.service)), "the shim looks for the database there");
     assert_eq!(index.default.as_ref().unwrap().php, php("8.4"));
     assert!(index.default.as_ref().unwrap().services.contains_key(&ServiceKind::REDIS));
 }

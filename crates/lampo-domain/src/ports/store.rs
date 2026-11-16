@@ -16,6 +16,7 @@ use crate::site::WorktreeSlug;
 use crate::worktree::WorktreeEnvironment;
 
 pub use crate::resolution::{GitInspector, PathCanonicalizer, ProjectResolver};
+pub use crate::shim::FolderProbe;
 
 /// A project file that exists but does not load: malformed TOML, or values the domain rejects
 /// (an empty address list, a database without MySQL, …). The project is hidden, not gone.

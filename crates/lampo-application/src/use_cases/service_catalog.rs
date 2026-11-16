@@ -142,9 +142,16 @@ impl ServiceCatalog {
     }
 
     /// Client defaults per kind for a target: the site's instance of each kind it uses (with
-    /// `database` for MySQL), the default instance of the other kinds. Only installed
-    /// instances with a client are listed.
-    pub fn shim_services(&self, env: Option<&ProjectEnvironment>, database: Option<String>, settings: &Settings, installed: &[InstalledPackage]) -> BTreeMap<ServiceKind, ShimService> {
+    /// `database` for MySQL), the default instance of the other kinds, each with its data dir
+    /// when it keeps one. Only installed instances with a client are listed.
+    pub fn shim_services(
+        &self,
+        env: Option<&ProjectEnvironment>,
+        database: Option<String>,
+        settings: &Settings,
+        installed: &[InstalledPackage],
+        paths: &LampoPaths,
+    ) -> BTreeMap<ServiceKind, ShimService> {
         let mut out = BTreeMap::new();
         for d in &self.descriptors {
             let Some(client) = d.client() else { continue };
@@ -155,10 +162,9 @@ impl ServiceCatalog {
             let Some(port) = self.port(&id, settings) else { continue };
             let Some(client_dir) = newest_of(installed, &d.package_kind(), id.version(), None).and_then(|p| p.entry(client.client_dir)).map(Path::to_path_buf) else { continue };
             let database = if uses && kind == ServiceKind::MYSQL { database.clone() } else { None };
-            out.insert(
-                kind,
-                ShimService { service: id, client_dir, host: "127.0.0.1".into(), port, user: client.user.map(str::to_string), database, env_prefix: client.env_prefix.to_string() },
-            );
+            let data_dir = d.has_data_dir().then(|| paths.service_data_dir(&id));
+            let user = client.user.map(str::to_string);
+            out.insert(kind, ShimService { service: id, client_dir, host: "127.0.0.1".into(), port, user, database, data_dir, env_prefix: client.env_prefix.to_string() });
         }
         out
     }

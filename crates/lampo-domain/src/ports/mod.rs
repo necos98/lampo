@@ -19,7 +19,7 @@
 //!
 //! | Module       | Implemented by          |
 //! |--------------|-------------------------|
-//! | [`store`]    | `lampo-infra-store` (also `GitInspector`, `PathCanonicalizer`, `ExecutableLocator`, `ScaffoldFiles`) |
+//! | [`store`]    | `lampo-infra-store` (also `GitInspector`, `PathCanonicalizer`, `FolderProbe`, `ExecutableLocator`, `ScaffoldFiles`) |
 //! | [`system`]   | `lampo-infra-store` (`SystemClock`), `lampo-infra-services` (`TokioTimer`) |
 //! | [`packages`] | `lampo-infra-packages`  |
 //! | [`web`]      | `lampo-infra-web` (also Apache's `ServiceRunner`) |
@@ -57,7 +57,7 @@ pub use services::{
     PortProbe, ProcessObserver, ProcessSupervisor, ServiceRunner, SpawnedChild, StreamCompression, StreamingCommandRunner,
 };
 pub use store::{
-    AppLocationRecorder, CustomPresetRepository, ExecutableLocator, FileSystemInspector, GitInspector, PathCanonicalizer, ProjectDetector, ProjectListing, ProjectRepository,
+    AppLocationRecorder, CustomPresetRepository, ExecutableLocator, FileSystemInspector, FolderProbe, GitInspector, PathCanonicalizer, ProjectDetector, ProjectListing, ProjectRepository,
     ProjectResolver, ProjectTransfer, ScaffoldFiles, SettingsRepository, ShimIndexReader, ShimIndexWriter, ShimInstaller, UnreadableProject, UserPathEditor, WorktreeRepository,
 };
 pub use web::{HostsFileReader, HostsFileWriter, PhpIniWriter, WebServerConfigurator};

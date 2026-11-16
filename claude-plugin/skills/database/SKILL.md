@@ -26,7 +26,9 @@ Inside a worktree environment with its own database these are that database's va
 The `mysql` shim runs the site's client with `--host=127.0.0.1 --port=<the series' port>
 --user=root --default-character-set=utf8mb4` and **selects the site's database** (in a worktree
 environment with its own database, that one). Your options come after these defaults, so they
-win. Outside any project (the default PHP) no database is selected.
+win. Outside any project (the default PHP) no database is selected. While the site's database
+does not exist yet the shim connects without one and prints `lampo-shim: database '<db>' does
+not exist yet, connecting without a default database` on stderr.
 
 ```powershell
 mysql -e "SHOW TABLES"

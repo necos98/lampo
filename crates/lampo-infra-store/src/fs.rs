@@ -1,8 +1,9 @@
 use std::path::Path;
 use std::time::Duration;
 
-use lampo_domain::ports::{AgentPluginFiles, FileSystemInspector, ScaffoldFiles};
+use lampo_domain::ports::{AgentPluginFiles, FileSystemInspector, FolderProbe, ScaffoldFiles};
 use lampo_domain::scaffold::PathState;
+use lampo_domain::shim::FolderState;
 use lampo_domain::{PortError, PortResult};
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -12,6 +13,31 @@ impl FileSystemInspector for LocalFileSystem {
     fn is_dir(&self, path: &Path) -> bool {
         path.is_dir()
     }
+}
+
+/// One `metadata` call. On Windows a missing last component is `ERROR_FILE_NOT_FOUND`, a missing
+/// parent `ERROR_PATH_NOT_FOUND`: only the former means "the parent exists and has no such
+/// folder". Elsewhere every error is [`FolderState::Unreadable`].
+impl FolderProbe for LocalFileSystem {
+    fn state(&self, path: &Path) -> FolderState {
+        match std::fs::metadata(path) {
+            Ok(meta) if meta.is_dir() => FolderState::Present,
+            Ok(_) => FolderState::Missing,
+            Err(e) if is_missing_last_component(&e) => FolderState::Missing,
+            Err(_) => FolderState::Unreadable,
+        }
+    }
+}
+
+#[cfg(windows)]
+fn is_missing_last_component(e: &std::io::Error) -> bool {
+    use windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND;
+    e.raw_os_error().and_then(|code| u32::try_from(code).ok()) == Some(ERROR_FILE_NOT_FOUND)
+}
+
+#[cfg(not(windows))]
+fn is_missing_last_component(_: &std::io::Error) -> bool {
+    false
 }
 
 /// Removal attempts: a just-killed process tree may hold files open for a moment.
@@ -150,6 +176,20 @@ mod tests {
         fs.remove_dir_all(&dir).unwrap();
         assert_eq!(fs.path_state(&dir), PathState::Missing);
         fs.remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn folder_states_tell_a_missing_folder_from_an_unreadable_parent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path().join("data");
+        std::fs::create_dir_all(data.join("shop")).unwrap();
+        std::fs::write(data.join("notes.txt"), "x").unwrap();
+        let fs = LocalFileSystem;
+        assert_eq!(fs.state(&data.join("shop")), FolderState::Present);
+        assert_eq!(fs.state(&data.join("SHOP")), FolderState::Present, "NTFS names ignore case, like MySQL on Windows");
+        assert_eq!(fs.state(&data.join("blog")), FolderState::Missing);
+        assert_eq!(fs.state(&data.join("notes.txt")), FolderState::Missing, "a file is not a database");
+        assert_eq!(fs.state(&tmp.path().join("no-data").join("shop")), FolderState::Unreadable, "no data dir: cannot tell");
     }
 
     #[test]

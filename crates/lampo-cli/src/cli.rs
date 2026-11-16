@@ -120,6 +120,12 @@ pub enum Command {
     Agent(AgentCommand),
     /// Install the php/composer/mysql/mysqldump/redis-cli shims (and a copy of `lampo`) and add
     /// their folder to the user PATH (or remove them).
+    ///
+    /// Inside a project the `mysql` shim selects the site's database unless the command names
+    /// one (`-D <db>`, `--database=<db>`, a database as the last argument); `--database=` with
+    /// nothing after `=` connects without one. While the site's database does not exist yet the
+    /// shim connects without it and says so in one line on stderr. `mysqldump` dumps the site's
+    /// database when the command names nothing to dump.
     #[command(subcommand)]
     Shims(ShimsCommand),
     /// Lampo's global settings: ports (Apache, MySQL instances, Redis, Mailpit), default PHP, loopback

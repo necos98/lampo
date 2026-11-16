@@ -114,7 +114,15 @@ pub(crate) fn php_ini_specs(snap: &ConfigSnapshot, catalog: &ServiceCatalog, pat
     specs
 }
 
-fn shim_target(snap: &ConfigSnapshot, catalog: &ServiceCatalog, php: PhpMinor, phprc_dir: PathBuf, env: Option<&ProjectEnvironment>, database: Option<String>) -> Option<ShimTarget> {
+fn shim_target(
+    snap: &ConfigSnapshot,
+    catalog: &ServiceCatalog,
+    paths: &LampoPaths,
+    php: PhpMinor,
+    phprc_dir: PathBuf,
+    env: Option<&ProjectEnvironment>,
+    database: Option<String>,
+) -> Option<ShimTarget> {
     let package = php_package(&snap.installed, php)?;
     Some(ShimTarget {
         php,
@@ -123,7 +131,7 @@ fn shim_target(snap: &ConfigSnapshot, catalog: &ServiceCatalog, php: PhpMinor, p
         phprc_dir: Some(phprc_dir),
         composer_phar: composer_phar_for(&snap.installed, php),
         composer_channel: php.composer_channel(),
-        services: catalog.shim_services(env, database, &snap.settings, &snap.installed),
+        services: catalog.shim_services(env, database, &snap.settings, &snap.installed, paths),
     })
 }
 
@@ -136,11 +144,11 @@ pub(crate) fn shim_index(snap: &ConfigSnapshot, catalog: &ServiceCatalog, paths:
         .into_iter()
         .filter_map(|site| {
             let env = site.environment();
-            let target = shim_target(snap, catalog, env.php, paths.php_ini_dir(&site.id), Some(env), site.database().map(|d| d.to_string()))?;
+            let target = shim_target(snap, catalog, paths, env.php, paths.php_ini_dir(&site.id), Some(env), site.database().map(|d| d.to_string()))?;
             Some(ShimEntry { site: site.id.clone(), root: site.root().clone(), target })
         })
         .collect();
-    let default = snap.default_php().and_then(|php| shim_target(snap, catalog, php, paths.default_php_ini_dir(), None, None));
+    let default = snap.default_php().and_then(|php| shim_target(snap, catalog, paths, php, paths.default_php_ini_dir(), None, None));
     ShimIndex { version: SHIM_INDEX_VERSION, default, projects }
 }
 
