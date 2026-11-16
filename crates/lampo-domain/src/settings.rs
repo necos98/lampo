@@ -15,7 +15,7 @@ use crate::hostname::Tld;
 use crate::mysql::MysqlSeries;
 use crate::php::PhpMinor;
 use crate::service::{ServiceDescriptor, ServiceId, ServiceKind};
-use crate::worktree::PortRange;
+use crate::tcp_port::PortRange;
 
 /// One configured service instance (shared by all projects using it).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -215,7 +215,6 @@ impl Settings {
                 return Err(DomainError::DuplicatePort { port: *port, first: first.clone(), second: owner.clone() });
             }
         }
-        PortRange::new(self.loopback_ports.start, self.loopback_ports.end)?;
         if !self.services.iter().any(|s| s.always_on && s.service.kind() == &ServiceKind::MYSQL) {
             return Err(DomainError::InvalidSettings("one MySQL instance must be always on".into()));
         }

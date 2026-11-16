@@ -234,33 +234,6 @@ fn within_database_name_limit(name: &str) -> String {
     format!("{}_{:08x}", head.trim_end_matches('_'), fnv32(name))
 }
 
-/// Inclusive TCP port range for dedicated loopback listeners (worktree environments and
-/// projects with a `LoopbackPort` address).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PortRange {
-    pub start: u16,
-    pub end: u16,
-}
-
-impl PortRange {
-    pub fn new(start: u16, end: u16) -> Result<Self, DomainError> {
-        if start < 1024 || end < start {
-            return Err(DomainError::InvalidSettings(format!("invalid port range {start}-{end}")));
-        }
-        Ok(Self { start, end })
-    }
-
-    pub fn contains(&self, port: u16) -> bool {
-        (self.start..=self.end).contains(&port)
-    }
-}
-
-impl Default for PortRange {
-    fn default() -> Self {
-        Self { start: crate::address::LOOPBACK_PORT_RANGE_START, end: 8199 }
-    }
-}
-
 /// Every loopback port already assigned to a project address or a worktree environment.
 pub fn used_loopback_ports(projects: &[Project], worktrees: &[WorktreeEnvironment]) -> BTreeSet<u16> {
     projects.iter().flat_map(|p| p.addresses().iter().filter_map(SiteAddress::loopback)).chain(worktrees.iter().map(|w| w.loopback_port)).collect()
@@ -269,9 +242,12 @@ pub fn used_loopback_ports(projects: &[Project], worktrees: &[WorktreeEnvironmen
 /// Lowest port of the configured range that is not assigned and not a service port.
 /// `PortProbe` still has to confirm the OS port is free.
 pub fn allocate_loopback_port(used: &BTreeSet<u16>, settings: &Settings) -> Result<u16, DomainError> {
-    (settings.loopback_ports.start..=settings.loopback_ports.end)
+    let range = settings.loopback_ports;
+    range
+        .ports()
+        .map(u16::from)
         .find(|p| !used.contains(p) && settings.service_on_port(*p).is_none())
-        .ok_or(DomainError::NoFreeLoopbackPort { start: settings.loopback_ports.start, end: settings.loopback_ports.end })
+        .ok_or(DomainError::NoFreeLoopbackPort { start: range.start().get(), end: range.end().get() })
 }
 
 #[cfg(test)]
@@ -279,6 +255,7 @@ mod tests {
     use super::*;
     use crate::mysql::MysqlSeries;
     use crate::project::tests::project;
+    use crate::tcp_port::PortRange;
 
     fn root(s: &str) -> ProjectRoot {
         ProjectRoot::new(s).unwrap()

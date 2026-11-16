@@ -13,7 +13,8 @@ use lampo_domain::php::PhpMinor;
 use lampo_domain::project::Project;
 use lampo_domain::service::{ServiceId, ServiceKind};
 use lampo_domain::settings::Settings;
-use lampo_domain::worktree::{PortRange, WorktreeEnvironment};
+use lampo_domain::tcp_port::PortRange;
+use lampo_domain::worktree::WorktreeEnvironment;
 
 use super::environment::EnvironmentSync;
 use super::service_catalog::ServiceCatalog;
@@ -139,8 +140,7 @@ fn describe_changes(before: &Settings, after: &Settings, catalog: &ServiceCatalo
         out.push(change("default-php".into(), show(before.default_php), show(after.default_php)));
     }
     if before.loopback_ports != after.loopback_ports {
-        let show = |r: PortRange| format!("{}-{}", r.start, r.end);
-        out.push(change("loopback-port-range".into(), show(before.loopback_ports), show(after.loopback_ports)));
+        out.push(change("loopback-port-range".into(), before.loopback_ports.to_string(), after.loopback_ports.to_string()));
     }
     out
 }

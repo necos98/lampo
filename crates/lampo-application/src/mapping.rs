@@ -12,7 +12,8 @@ use lampo_domain::project::{ApacheDirectives, ProjectEnvironment, PublicDir, Tls
 use lampo_domain::service::{ServiceId, ServiceKind};
 use lampo_domain::settings::{MailConnection, ServiceInstanceSettings, Settings};
 use lampo_domain::version::{PackageVersion, VersionSeries};
-use lampo_domain::worktree::{DatabaseMode, PortRange};
+use lampo_domain::tcp_port::PortRange;
+use lampo_domain::worktree::DatabaseMode;
 use lampo_domain::DomainError;
 
 use crate::dto::*;
@@ -108,7 +109,7 @@ pub fn settings_to_dto(s: &Settings, catalog: &ServiceCatalog) -> SettingsDto {
             .iter()
             .map(|i| ServiceInstanceDto { service: i.service.to_string(), label: catalog.label(&i.service), port: i.port, always_on: i.always_on, ui_port: catalog.ui_port(&i.service, s) })
             .collect(),
-        loopback_port_range: PortRangeDto { start: s.loopback_ports.start, end: s.loopback_ports.end },
+        loopback_port_range: PortRangeDto { start: s.loopback_ports.start().get(), end: s.loopback_ports.end().get() },
         close_to_tray: s.close_to_tray,
         first_run_completed: s.first_run_completed,
     }
