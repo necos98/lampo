@@ -98,6 +98,8 @@ pub fn build() -> AppResult<CliContext> {
             services: services.clone(),
         })),
         hook_input: Arc::new(crate::local::StdinHookInput),
+        // `which`: the shims' own tools and folder probe (the site's database in the data dir).
+        shim_tools: Arc::new(ShimToolQuery::new(resolver.clone(), shim_tools.clone(), Arc::new(store::LocalFileSystem))),
         toolchain: Arc::new(ToolchainQuery::new(resolver, paths.clone())),
         logs: Arc::new(LogQueries::new(Arc::new(FileLogReader), projects_repo.clone(), settings_repo.clone(), services.clone(), paths.clone())),
         doctor: Arc::new(Doctor::new(DoctorDeps {

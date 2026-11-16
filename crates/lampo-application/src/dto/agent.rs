@@ -150,3 +150,39 @@ pub struct ExecPlanDto {
     pub args: Vec<String>,
     pub env: ToolchainEnvDto,
 }
+
+/// Why the site of a [`WhichDto`] was chosen: the resolution step that answered, telling
+/// `--project` apart from `LAMPO_PROJECT` (both are `explicit` in [`ResolvedSiteDto::via`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ResolutionReasonDto {
+    /// The global `--project` flag.
+    ProjectFlag,
+    /// `LAMPO_PROJECT`, inside its `LAMPO_PROJECT_ROOT` or outside every project.
+    LampoProject,
+    /// The current folder is inside the site's folder.
+    Directory,
+    /// The current folder is inside a git worktree (without an environment) of the project.
+    GitWorktree,
+    /// No project matched: the global default PHP.
+    GlobalDefault,
+}
+
+/// `lampo which <tool>`: what the shim of `tool` would run from the current folder, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WhichDto {
+    /// `php`, `composer`, `mysql`, `mysqldump`, `redis-cli`.
+    pub tool: String,
+    pub resolution: ResolvedSiteDto,
+    pub reason: ResolutionReasonDto,
+    /// PHP minor of the resolved site (or of the global default).
+    pub php_version: String,
+    /// Absolute path of the executable the shim starts (`php.exe` for `composer`).
+    pub binary: String,
+    /// Arguments the shim passes before the user's when the command line has none
+    /// (`composer.phar`, `--host=`/`--port=`, the site's database).
+    pub default_args: Vec<String>,
+    /// Notes the shim prints on stderr (`LAMPO_PROJECT` ignored, site database missing).
+    pub notices: Vec<String>,
+}

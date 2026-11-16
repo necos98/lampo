@@ -71,6 +71,7 @@ pub struct CliContext {
     pub packages: Arc<dyn PackageReader>,
     pub php_extensions: Arc<dyn PhpExtensionReader>,
     pub toolchain: Arc<dyn ToolchainReader>,
+    pub shim_tools: Arc<dyn ShimToolReader>,
     pub doctor: Arc<dyn DoctorRunner>,
     pub agent: Arc<dyn AgentContextReader>,
     pub hook_input: Arc<dyn HookInput>,

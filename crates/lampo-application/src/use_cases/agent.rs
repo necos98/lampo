@@ -186,6 +186,14 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         c("lampo agent context", "lampo agent context [--json]", "Everything about the current project/worktree in one call.", false, false),
         c("lampo env", "lampo env [--json|--shell powershell|cmd|bash]", "Print the toolchain environment (PATH, PHPRC, LAMPO_*).", false, false),
         c("lampo exec", "lampo exec -- <command> [args...]", "Run a command with the project's PHP/Composer/MySQL on PATH.", false, false),
+        c(
+            "lampo which",
+            "lampo which <php|composer|mysql|mysqldump|redis-cli> [--json]",
+            "Which site and binary the shim of a tool would use here, and why (--project, LAMPO_PROJECT, folder, git worktree, global default).",
+            false,
+            false,
+        ),
+        c("lampo completions", "lampo completions <powershell|bash|zsh|fish>", "Print the shell completion script for lampo.", false, false),
         c("lampo project list", "lampo project list [--json]", "List projects.", false, false),
         c("lampo project info", "lampo project info [<id>] [--json]", "Show one project.", false, false),
         c(

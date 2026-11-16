@@ -50,6 +50,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 flate2 = "1"
 minijinja = "2"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 winreg = "0.55"
 windows-sys = "0.59"
 # TypeScript declarations of the DTOs (test-only: see lampo-application `ts_bindings`).

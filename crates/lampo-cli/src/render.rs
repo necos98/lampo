@@ -8,6 +8,8 @@ use crate::exit_code::ExitCode;
 
 mod detection;
 pub use detection::detection;
+mod which;
+pub use which::which;
 
 /// Left-aligned columns separated by two spaces; the last column is not padded.
 pub fn table(rows: &[Vec<String>]) -> String {
@@ -381,7 +383,7 @@ pub fn cli_guide() -> serde_json::Value {
         "exitCodes": exit_codes,
         "jsonErrorShape": { "error": { "code": "kebab-case error code", "message": "what failed", "hint": "what to do next", "exitCode": 0, "details": "optional" } },
         "rules": [
-            "Add --json to any command (except exec) for exactly one JSON document on stdout; diagnostics go to stderr; errors are JSON too.",
+            "Add --json to any command (except exec and completions) for exactly one JSON document on stdout; diagnostics go to stderr; errors are JSON too.",
             "Nothing prompts. Destructive commands need an explicit flag (--yes, --drop-database).",
             "No UAC prompt unless --allow-elevation is given (exit code 7 tells you it is needed).",
             "Read-only commands work without the app; mutating ones start it headless unless --no-start (exit code 9).",

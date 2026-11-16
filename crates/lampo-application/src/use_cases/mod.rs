@@ -46,6 +46,7 @@ pub(crate) mod support;
 pub(crate) mod sync_outcome;
 pub(crate) mod web_apply;
 pub(crate) mod web_state;
+pub mod which;
 pub mod worktrees;
 
 pub use agent::{AgentContextDeps, AgentContextQuery, ToolchainQuery};
@@ -81,4 +82,5 @@ pub use settings_patch::PatchSettings;
 pub use settings_writer::SettingsWriter;
 pub use shims::ShimSetup;
 pub use status::StatusQuery;
+pub use which::ShimToolQuery;
 pub use worktrees::{PruneWorktrees, WorktreeDatabases, WorktreeDown, WorktreeQueries, WorktreeUp, WorktreeUpDeps};

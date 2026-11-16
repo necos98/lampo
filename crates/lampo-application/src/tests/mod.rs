@@ -17,6 +17,7 @@ mod store_reads;
 mod uninstall;
 mod untrusted_config;
 mod web_isolation;
+mod which;
 mod worktrees;
 
 use crate::context::CallContext;

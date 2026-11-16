@@ -115,6 +115,8 @@ pub struct Fake {
     pub settings: Mutex<Value>,
     /// `LAMPO_QUIET` of the context.
     pub quiet: AtomicBool,
+    /// The request and tool of every `which`.
+    pub which_requests: Mutex<Vec<(ResolveRequestDto, String)>>,
 }
 
 impl Fake {
@@ -147,6 +149,7 @@ impl Fake {
             toolchain: Mutex::new(toolchain_json()),
             settings: Mutex::new(settings_json()),
             quiet: AtomicBool::new(false),
+            which_requests: Mutex::new(Vec::new()),
         })
     }
 
@@ -179,6 +182,7 @@ impl Fake {
             packages: self.clone(),
             php_extensions: self.clone(),
             toolchain: self.clone(),
+            shim_tools: self.clone(),
             doctor: self.clone(),
             agent: self.clone(),
             hook_input: self.clone(),
@@ -265,6 +269,26 @@ impl ToolchainReader for Fake {
     }
     fn exec_plan(&self, _: &ResolveRequestDto, command: &[String]) -> AppResult<ExecPlanDto> {
         Ok(ExecPlanDto { program: command[0].clone(), args: command[1..].to_vec(), env: dto(self.toolchain.lock().unwrap().clone()) })
+    }
+}
+
+/// `php` or `mysql` (with the site's database) of `shop`, resolved from the folder.
+pub fn which_json(tool: &str) -> Value {
+    let (binary, args): (&str, Vec<&str>) = match tool {
+        "php" => (r"C:\php\8.3\php.exe", vec![]),
+        "mysql" => (r"C:\mysql\8.4\bin\mysql.exe", vec!["--host=127.0.0.1", "--port=3306", "--user=root", "--default-character-set=utf8mb4", "--database=shop"]),
+        _ => unreachable!("no canned `which` for {tool}"),
+    };
+    json!({"tool": tool, "resolution": site_json(Some("shop")), "reason": "directory", "phpVersion": "8.3", "binary": binary, "defaultArgs": args, "notices": []})
+}
+
+impl ShimToolReader for Fake {
+    fn which(&self, request: &ResolveRequestDto, tool: &str) -> AppResult<WhichDto> {
+        self.which_requests.lock().unwrap().push((request.clone(), tool.to_string()));
+        match tool {
+            "php" | "mysql" => Ok(dto(which_json(tool))),
+            other => Err(AppError::new(ErrorCode::PackageMissing, format!("{other} is not available: not installed for this project"))),
+        }
     }
 }
 

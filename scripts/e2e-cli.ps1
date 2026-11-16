@@ -15,7 +15,7 @@
     2. installs mod_fcgid, the newest PHP, PHP 7.4, MySQL 8.4 and Composer; installs the shims;
     3. creates two projects from fresh folders on different PHP versions (`.localhost` + port);
     4. fetches a page of each over HTTP (right PHP version, `.htaccess` rewrite working);
-    5. `php` and `composer` through the shims resolve per folder;
+    5. `php` and `composer` through the shims resolve per folder, as `lampo which php` reports;
     6. checks `project create` created the project's database and queries it through the
        `mysql` shim;
     7. creates a git worktree, `lampo worktree up --db clone:<db>`, fetches its own URL and sees
@@ -206,6 +206,8 @@ foreach ($case in @(@('alpha', $newMinor), @('beta', '7.4'))) {
     # Composer prints the PHP line on stderr.
     $c = In $dir { composer --version --no-ansi 2>&1 | ForEach-Object { "$_" } }
     Check ($c -match 'Composer version' -and $c -match "PHP version $([regex]::Escape($minor))\.") "composer --version in $name runs on PHP $minor"
+    $which = In $dir { & $lampo which php --json } | ConvertFrom-Json
+    Check ($which.reason -eq 'directory' -and $which.resolution.site -eq $name -and $which.phpVersion -eq $minor -and (Test-Path $which.binary)) "lampo which php in $name -> $($which.binary)"
 }
 $out = (In $DataRoot { php $cliProbe }).Trim()
 Check ($out -like "$newMinor.*|*\generated\php\_default\php.ini") "php outside projects uses the default PHP -> $out"

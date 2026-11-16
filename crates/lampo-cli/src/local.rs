@@ -74,6 +74,12 @@ impl ToolchainReader for ToolchainQuery {
     }
 }
 
+impl ShimToolReader for ShimToolQuery {
+    fn which(&self, request: &ResolveRequestDto, tool: &str) -> AppResult<WhichDto> {
+        ShimToolQuery::which(self, request, tool)
+    }
+}
+
 #[async_trait]
 impl DoctorRunner for Doctor {
     async fn run(&self) -> AppResult<DoctorReportDto> {

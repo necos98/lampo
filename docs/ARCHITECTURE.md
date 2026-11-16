@@ -361,6 +361,11 @@ terminal of `shop`, `cd ..\blog`), so it holds only while the cwd is inside `LAM
 folder of another project that project wins, and the shim or `lampo` prints one line on stderr
 (`LAMPO_PROJECT=shop ignored: this folder belongs to blog`), hidden by `LAMPO_QUIET=1`.
 
+`lampo which <tool>` (`ShimToolQuery`) runs this chain and the tool's `ShimTool::invocation`
+without starting anything, and reports the step that answered: `ResolutionSource::Explicit`
+is split back into `--project` and `LAMPO_PROJECT` (the flag is tried first, so an explicit
+answer comes from it whenever it was given).
+
 The shims read only `%LOCALAPPDATA%` (from the environment; the known folder is the fallback)
 and never compute the config root. The tool a shim or `lampo exec` starts is tied to it by a
 Job Object (`lampo_cli::job`): the launcher joins the job before the spawn, so if an IDE, Node or

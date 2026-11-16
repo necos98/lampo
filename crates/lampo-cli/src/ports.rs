@@ -53,6 +53,12 @@ pub trait ToolchainReader: Send + Sync {
     fn exec_plan(&self, request: &ResolveRequestDto, command: &[String]) -> AppResult<ExecPlanDto>;
 }
 
+/// What a shim would run from a folder, and why (`which`), file-based.
+pub trait ShimToolReader: Send + Sync {
+    /// `tool`: a shim name (`php`, `composer`, `mysql`, `mysqldump`, `redis-cli`).
+    fn which(&self, request: &ResolveRequestDto, tool: &str) -> AppResult<WhichDto>;
+}
+
 #[async_trait]
 pub trait DoctorRunner: Send + Sync {
     async fn run(&self) -> AppResult<DoctorReportDto>;

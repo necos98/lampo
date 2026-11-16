@@ -36,7 +36,9 @@ what to run next (for example "project is not active", "no worktree environment 
 
 Other read-only views: `lampo status` (services and projects), `lampo project list`,
 `lampo project info`, `lampo project detect` (what Lampo would detect in a folder, without
-registering it), `lampo worktree list`, `lampo logs`, `lampo doctor`, `lampo env`.
+registering it), `lampo worktree list`, `lampo logs`, `lampo doctor`, `lampo env`,
+`lampo which php` (which site and binary a shim would run here, and why; also `composer`,
+`mysql`, `mysqldump`, `redis-cli`).
 
 ## 2. Which site a command acts on
 
@@ -54,13 +56,16 @@ Resolution order, for both the CLI and the shims:
 5. otherwise the global default PHP (no project: `projectId` is null).
 
 So `cd` into the project (or pass `--project`) before running commands. `resolution.kind` in
-`agent context` tells you which case applied.
+`agent context` tells you which case applied; `lampo which php --json` (or `composer`, `mysql`,
+`mysqldump`, `redis-cli`) names the step that answered in `reason` (`project-flag`,
+`lampo-project`, `directory`, `git-worktree`, `global-default`) and the exact `binary` the shim
+starts.
 
 ## 3. Output and exit codes
 
-- Add `--json` to any command except `exec`: exactly one JSON document on stdout, diagnostics
-  on stderr. Errors in JSON mode are `{"error": {"code", "message", "hint", "exitCode",
-  "details"?}}`; `hint` is always an actionable sentence.
+- Add `--json` to any command except `exec` and `completions`: exactly one JSON document on
+  stdout, diagnostics on stderr. Errors in JSON mode are `{"error": {"code", "message", "hint",
+  "exitCode", "details"?}}`; `hint` is always an actionable sentence.
 - `lampo` never prompts and never blocks on input. Destructive commands need an explicit flag
   (`--yes`, `--drop-database`). Nothing triggers UAC without `--allow-elevation`.
 - Read-only commands run in-process. Commands that change state go to the Lampo app, which is
@@ -92,7 +97,7 @@ Shims return the tool's own exit code, or 127 when they cannot resolve a PHP or 
 You MAY, without asking:
 
 - run any read-only `lampo` command (`agent context`, `status`, `project list`, `project info`,
-  `project detect`, `worktree list`, `logs`, `doctor`, `env`, `package list`, `package extensions`, `db list`, `db export`, `shims status`);
+  `project detect`, `worktree list`, `logs`, `doctor`, `env`, `which`, `package list`, `package extensions`, `db list`, `db export`, `shims status`);
 - start or restart services: `lampo up`, `lampo restart`;
 - read the global settings (ports, default PHP): `lampo settings`;
 - create databases (`lampo db create`) and worktree environments (`lampo worktree up` with any

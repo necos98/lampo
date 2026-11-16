@@ -1,11 +1,14 @@
 //! Command-line surface (clap). Non-interactive by design: no prompts ever; destructive commands
 //! require an explicit flag (`--yes`, `--drop-database`); nothing triggers UAC unless
-//! `--allow-elevation` is passed. Every command except `exec` supports `--json` (stable DTOs
-//! from `lampo_application::dto`).
+//! `--allow-elevation` is passed. Every command except `exec` and `completions` supports `--json`
+//! (stable DTOs from `lampo_application::dto`).
 
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 
 use crate::exit_code::ExitCode;
+
+mod introspection;
+pub use introspection::{CompletionShell, CompletionsArgs, WhichArgs};
 
 const ABOUT: &str = "Lampo: local PHP environments for Windows (CLI for coding agents and terminals)";
 
@@ -112,6 +115,31 @@ pub enum Command {
     ///   Git Bash:   eval "$(lampo env --shell bash)"
     ///   cmd:        lampo env --shell cmd > %TEMP%\lampo-env.cmd & call %TEMP%\lampo-env.cmd
     Env(EnvArgs),
+    /// Show which site and binary the shim of a tool would run here, and why
+    ///
+    /// Runs the shims' own resolution without starting anything: `--project`, then
+    /// `LAMPO_PROJECT` (inside `LAMPO_PROJECT_ROOT` or outside every project), then the current
+    /// folder or git worktree, then the global default PHP. Prints the site, the reason, the PHP
+    /// version, the executable and the arguments the shim puts before yours (`composer.phar`,
+    /// the MySQL/Redis host and port, the site's database). Read-only, no app needed. Exit 6
+    /// when nothing resolves, 10 when the site has no such tool (no Composer, no MySQL).
+    ///
+    /// Examples:
+    ///   lampo which php
+    ///   lampo which mysql --json
+    ///   lampo which composer --project shop
+    #[command(verbatim_doc_comment)]
+    Which(WhichArgs),
+    /// Print the shell completion script of `lampo` on stdout
+    ///
+    /// Load it in the current session, or add the line to the shell's profile to keep it:
+    ///   PowerShell: lampo completions powershell | Out-String | Invoke-Expression
+    ///   bash:       eval "$(lampo completions bash)"
+    ///   zsh:        lampo completions zsh > "${fpath[1]}/_lampo"
+    ///   fish:       lampo completions fish > ~/.config/fish/completions/lampo.fish
+    /// `--json` does not apply: the output is a script.
+    #[command(verbatim_doc_comment)]
+    Completions(CompletionsArgs),
     /// Diagnose the installation (VC++ runtimes, ports, PATH shadowing, hosts file...). Exit 14
     /// when problems are found.
     Doctor,

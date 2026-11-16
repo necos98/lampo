@@ -25,6 +25,9 @@ mysql -e "SHOW DATABASES"
 
 - Exit code 127 from a shim: it could not resolve a PHP or the tool (no project and no default
   PHP, or the package is missing). Run `lampo agent context --json` and read `hints`.
+- Which PHP would run here, and why? `lampo which php --json`: the resolved site, the `reason`
+  (`--project`, `LAMPO_PROJECT`, the folder, a git worktree or the global default), the PHP
+  version and the `binary` the shim starts (`composer`, `mysql`, `mysqldump`, `redis-cli` too).
 - Wrong version? `lampo shims status` and `lampo doctor` (check `path-shadowing`): another
   `php.exe` earlier on PATH (XAMPP, Laragon, Herd, a manual install) shadows the shim. Do not
   edit the user's PATH yourself; report what `where.exe php` shows and suggest removing the

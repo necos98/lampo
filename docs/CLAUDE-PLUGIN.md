@@ -31,7 +31,7 @@ Tutte in inglese (descrizioni comprese), invocate come `lampo:<id>`:
 | Skill | Contenuto |
 |-------|-----------|
 | `lampo` | Orientamento (`lampo agent context --json`), risoluzione del sito, `--json`, exit code e cosa fare per ciascuno, regole di autonomia, indice delle altre skill |
-| `php` | Shim, `lampo exec`/`lampo env`, versioni di PHP (`package list --installed`, `package install/uninstall`), estensioni (`package extensions`) e componenti aggiuntivi (Xdebug, php-redis), valori php.ini (anche `mail()` verso Mailpit), cambio versione |
+| `php` | Shim, `lampo exec`/`lampo env`/`lampo which`, versioni di PHP (`package list --installed`, `package install/uninstall`), estensioni (`package extensions`) e componenti aggiuntivi (Xdebug, php-redis), valori php.ini (anche `mail()` verso Mailpit), cambio versione |
 | `database` | Credenziali, `lampo db list/create/import/export/drop`, `.env`, database per i test, modalità dei worktree, regole di sicurezza |
 | `worktrees` | `lampo worktree up/down/list/prune`, modalità shared/fresh/clone, flusso consigliato con più agent |
 | `services-logs` | Servizi, log, `lampo doctor`, posta raccolta da Mailpit (interfaccia web, API), playbook (500, 404/rewrite, porte occupate, MySQL, PHP sbagliato, estensioni) |

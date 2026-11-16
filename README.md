@@ -92,13 +92,17 @@ lampo settings                        # impostazioni globali: porte, PHP predefi
 lampo settings set --apache-port 8080 --mysql-port 8.4=3310   # cambia le porte (riavvia i servizi)
 lampo worktree up --db clone:shop     # ambiente per il git worktree corrente
 lampo exec -- composer install        # comando con il PHP e il Composer del progetto
+lampo which php                       # quale PHP (o composer, mysql...) userebbe lo shim qui, e perché
 lampo logs error -f                   # log degli errori del sito, in tempo reale
 lampo doctor                          # diagnostica (exit code 14 se trova problemi)
+lampo completions powershell | Out-String | Invoke-Expression   # completamento dei comandi
 ```
 
-Ogni comando accetta `--json` (tranne `exec`) e restituisce exit code stabili, elencati in
-`lampo --help` e in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#lampo-exit-codes-stable).
+Ogni comando accetta `--json` (tranne `exec` e `completions`) e restituisce exit code stabili,
+elencati in `lampo --help` e in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#lampo-exit-codes-stable).
 `lampo` non chiede mai conferme e non apre il prompt UAC senza `--allow-elevation`.
+Per avere il completamento in ogni sessione aggiungi la riga di `lampo completions powershell` al
+tuo `$PROFILE`; `lampo completions --help` mostra come farlo anche in bash, zsh e fish.
 
 ## Integrazione Claude Code
 

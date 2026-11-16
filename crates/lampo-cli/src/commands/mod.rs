@@ -6,6 +6,7 @@
 mod addressing;
 mod db;
 mod diagnostics;
+mod introspection;
 mod packages;
 mod project_import;
 mod projects;
@@ -14,6 +15,8 @@ mod settings;
 mod toolchain;
 mod worktrees;
 
+#[cfg(test)]
+mod introspection_tests;
 #[cfg(test)]
 mod project_env_tests;
 #[cfg(test)]
@@ -106,6 +109,8 @@ pub async fn run(cli: Cli, ctx: &CliContext, io: &Io) -> AppResult<i32> {
         Command::Db(c) => db::run(&cmd, c).await,
         Command::Exec(a) => toolchain::exec(&cmd, a),
         Command::Env(a) => toolchain::env(&cmd, a),
+        Command::Which(a) => introspection::which(&cmd, a),
+        Command::Completions(a) => introspection::completions(&cmd, a),
         Command::Doctor => diagnostics::doctor(&cmd).await,
         Command::Agent(AgentCommand::Context(a)) if a.hook => diagnostics::agent_context_hook(&cmd).await,
         Command::Agent(AgentCommand::Context(_)) => diagnostics::agent_context(&cmd),
