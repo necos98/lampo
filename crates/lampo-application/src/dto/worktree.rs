@@ -5,6 +5,7 @@ use super::database::DatabaseConnectionDto;
 /// Database mode chosen when a worktree environment is created.
 /// Wire form: `{ "mode": "shared" }`, `{ "mode": "fresh" }`, `{ "mode": "clone", "source": "shop" }`.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DatabaseMode"))]
 #[serde(tag = "mode", rename_all = "kebab-case")]
 pub enum DatabaseModeDto {
     #[default]
@@ -16,6 +17,7 @@ pub enum DatabaseModeDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "WorktreeEnvironment"))]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeEnvironmentDto {
     /// `shop@feature-login`.
@@ -41,17 +43,21 @@ pub struct WorktreeEnvironmentDto {
 
 /// `lampo worktree up [path]`: idempotent.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", default)]
 pub struct WorktreeUpRequest {
     /// Any folder inside the worktree.
     pub path: String,
     /// Parent project; default: resolved from the worktree's main repository.
+    #[cfg_attr(test, ts(optional = nullable))]
     pub project_id: Option<String>,
     /// Ignored when the environment already exists.
+    #[cfg_attr(test, ts(optional = nullable))]
     pub database: DatabaseModeDto,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "WorktreeUpResult"))]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeUpResultDto {
     pub environment: WorktreeEnvironmentDto,
@@ -60,16 +66,19 @@ pub struct WorktreeUpResultDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeDownRequest {
     /// Worktree folder or site id (`shop@feature-login`).
     pub target: String,
     /// Also drop the environment's own database (never the parent's).
     #[serde(default)]
+    #[cfg_attr(test, ts(optional = nullable))]
     pub drop_database: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "WorktreeDownResult"))]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeDownResultDto {
     pub site: String,
@@ -77,15 +86,20 @@ pub struct WorktreeDownResultDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", default)]
 pub struct PruneWorktreesRequest {
     /// Limit to one project.
+    #[cfg_attr(test, ts(optional = nullable))]
     pub project_id: Option<String>,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub dry_run: bool,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub drop_databases: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "PruneReport"))]
 #[serde(rename_all = "camelCase")]
 pub struct PruneReportDto {
     pub dry_run: bool,
@@ -100,6 +114,7 @@ pub struct PruneReportDto {
 
 /// One environment `prune` could not remove.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "PruneFailure"))]
 #[serde(rename_all = "camelCase")]
 pub struct PruneFailureDto {
     /// Site id (`shop@feature-x`).

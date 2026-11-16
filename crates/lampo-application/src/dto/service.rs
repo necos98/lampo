@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::project::ProjectSummaryDto;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ServiceState"))]
 #[serde(rename_all = "lowercase")]
 pub enum ServiceStateDto {
     Stopped,
@@ -15,6 +16,7 @@ pub enum ServiceStateDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ServiceStatus"))]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceStatusDto {
     /// `apache`, `redis`, `mysql-8.4`.
@@ -41,6 +43,7 @@ pub struct ServiceStatusDto {
 
 /// Selects services; empty = every service in the current plan.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", default)]
 pub struct ServicesRequest {
     pub services: Vec<String>,
@@ -48,6 +51,7 @@ pub struct ServicesRequest {
 
 /// What an environment sync / up / down did.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "SyncReport"))]
 #[serde(rename_all = "camelCase")]
 pub struct SyncReportDto {
     pub started: Vec<String>,
@@ -59,6 +63,7 @@ pub struct SyncReportDto {
 
 /// `lampo status`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "Status"))]
 #[serde(rename_all = "camelCase")]
 pub struct StatusDto {
     pub app_running: bool,

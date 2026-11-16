@@ -218,7 +218,8 @@ impl ScaffoldProject {
             message.push_str(": ");
             message.push_str(&tail.join(" | "));
         }
-        Err(AppError::new(ErrorCode::ProcessFailed, message).with_details(serde_json::json!({ "output": tail })))
+        // `details.output` is a string for every error code (`config-rejected` too): one line each.
+        Err(AppError::new(ErrorCode::ProcessFailed, message).with_details(serde_json::json!({ "output": tail.join("\n") })))
     }
 }
 

@@ -302,8 +302,12 @@ export function createMockBackend({ fresh }: Options): Backend {
 				if (source.url.includes('nogit')) fail('package-missing', 'Git not found: install it from git-scm.com', { tool: 'git' });
 				const percent = [8, 23, 47, 69, 88, 100];
 				const lines = [`> git clone`, `Cloning into '${dest}'...`, 'remote: Enumerating objects: 1342, done.', ...percent.map((p) => `Receiving objects: ${String(p).padStart(3)}% (${Math.round(13.42 * p)}/1342)`), 'Resolving deltas: 100% (512/512), done.'];
-				const failWith = source.url.includes('fail') ? ({ code: 'process-failed', message: "git clone failed (exit code 128): fatal: repository 'x' not found", details: { output: ["fatal: repository 'x' not found"] } } satisfies AppError) : undefined;
-				return startLogTask({ kind: 'scaffold-project', request: r }, [{ subject: 'git clone', lines: failWith ? lines.slice(0, 3).concat("fatal: repository 'x' not found") : lines }], { failWith });
+				// A URL containing "fail" simulates a clone that fails after a few lines of output.
+				const failing = source.url.includes('fail');
+				const failedLines = lines.slice(0, 3).concat("fatal: repository 'x' not found");
+				// Like the backend: `details.output` is the program's last lines as one string ("> git clone" is Lampo's own line).
+				const failWith = failing ? ({ code: 'process-failed', message: "git clone failed (exit code 128): fatal: repository 'x' not found", details: { output: failedLines.slice(1).join('\n') } } satisfies AppError) : undefined;
+				return startLogTask({ kind: 'scaffold-project', request: r }, [{ subject: 'git clone', lines: failing ? failedLines : lines }], { failWith });
 			}
 			const php = source.phpVersion ?? '8.4';
 			if (!installed.some((i) => i.kind === 'php' && i.version.startsWith(`${php}.`))) fail('package-missing', `PHP ${php} is not installed`);

@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ClaudeCodeState"))]
 #[serde(rename_all = "kebab-case")]
 pub enum ClaudeCodeStateDto {
     /// Isolated data root (`LAMPO_HOME`): the real Claude Code is never touched.
@@ -16,6 +17,7 @@ pub enum ClaudeCodeStateDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ClaudeCodeStatus"))]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeCodeStatusDto {
     pub state: ClaudeCodeStateDto,
@@ -36,6 +38,7 @@ pub struct ClaudeCodeStatusDto {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "StepOutcome"))]
 #[serde(rename_all = "kebab-case")]
 pub enum StepOutcomeDto {
     Ok,
@@ -46,6 +49,7 @@ pub enum StepOutcomeDto {
 
 /// One line of the step log shown in the GUI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ClaudeCodeStep"))]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeCodeStepDto {
     /// Stable kebab-case id (`detect-claude`, `check-cli`, `write-files`, `validate-plugin`,
@@ -60,6 +64,7 @@ pub struct ClaudeCodeStepDto {
 
 /// Result of an install/update/removal: never an error for a failing step (the log says which).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ClaudeCodeAction"))]
 #[serde(rename_all = "camelCase")]
 pub struct ClaudeCodeActionDto {
     pub ok: bool,

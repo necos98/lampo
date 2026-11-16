@@ -16,11 +16,12 @@ export function describeError(value: unknown): string {
 	return m.errors[err.code];
 }
 
-/** Raw tool output attached to a `config-rejected` error, if any. */
+/** Raw program output attached to an error (`details.output`: `httpd -t` for `config-rejected`,
+ *  the last lines of a failed clone or Laravel Installer for `process-failed`), if any. */
 export function errorOutput(value: unknown): string | null {
 	const err: AppError = toAppError(value);
 	const d = err.details as { output?: unknown } | undefined;
-	return typeof d?.output === 'string' ? d.output : null;
+	return typeof d?.output === 'string' && d.output.trim() !== '' ? d.output : null;
 }
 
 /** `details.field` of a validation error about the project's custom Apache directives. */

@@ -8,6 +8,7 @@ use super::worktree::WorktreeEnvironmentDto;
 /// How a site is reached. Wire form: `{ "kind": "hostname", "host": "shop.test" }`,
 /// `{ "kind": "localhost", "host": "shop.localhost" }`, `{ "kind": "loopback-port", "port": 8101 }`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "SiteAddress"))]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum SiteAddressDto {
     /// Listed in the hosts file (changing it needs a UAC prompt).
@@ -20,6 +21,7 @@ pub enum SiteAddressDto {
 
 /// Default addresses for a new project when none are given explicitly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "Addressing"))]
 #[serde(rename_all = "kebab-case")]
 pub enum AddressingDto {
     /// `<id>.<tld>` (hosts file) + `<id>.localhost`. Used when the field is omitted (protocol
@@ -32,6 +34,7 @@ pub enum AddressingDto {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "TlsMode"))]
 #[serde(rename_all = "kebab-case")]
 pub enum TlsModeDto {
     #[default]
@@ -42,6 +45,7 @@ pub enum TlsModeDto {
 
 /// The environment a preset carries and a project copies.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ProjectEnvironment"))]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectEnvironmentDto {
     /// PHP minor, e.g. `"8.3"`.
@@ -60,6 +64,7 @@ pub struct ProjectEnvironmentDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "Project"))]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectDto {
     pub id: String,
@@ -90,6 +95,7 @@ pub struct ProjectDto {
 /// A project file that does not load (malformed, or edited into invalid values). The project is
 /// hidden until the file is repaired; its loopback ports stay reserved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "UnreadableProject"))]
 #[serde(rename_all = "camelCase")]
 pub struct UnreadableProjectDto {
     pub file: String,
@@ -98,6 +104,7 @@ pub struct UnreadableProjectDto {
 
 /// Every registered project: the ones that load and the files that do not.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ProjectList"))]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectListDto {
     pub projects: Vec<ProjectDto>,
@@ -106,6 +113,7 @@ pub struct ProjectListDto {
 
 /// Compact row for `lampo status` / `lampo project list`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ProjectSummary"))]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSummaryDto {
     pub id: String,
@@ -121,25 +129,35 @@ pub struct ProjectSummaryDto {
 /// Create a project. Only `root` is required: anything omitted is filled from the preset
 /// (`preset_id`, else the detected one, else `generic-php`), detection and settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", default)]
 pub struct CreateProjectRequest {
     pub root: String,
     /// Default: folder name.
+    #[cfg_attr(test, ts(optional = nullable))]
     pub name: Option<String>,
     /// Default: derived from the name.
+    #[cfg_attr(test, ts(optional = nullable))]
     pub id: Option<String>,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub preset_id: Option<String>,
     /// Overrides the preset's PHP minor.
+    #[cfg_attr(test, ts(optional = nullable))]
     pub php_version: Option<String>,
     /// Full environment; when present the preset is only recorded as origin.
+    #[cfg_attr(test, ts(optional = nullable))]
     pub environment: Option<ProjectEnvironmentDto>,
     /// Explicit addresses; when absent `addressing` decides.
+    #[cfg_attr(test, ts(optional = nullable))]
     pub addresses: Option<Vec<SiteAddressDto>>,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub addressing: AddressingDto,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub activate: bool,
     /// Create the project's MySQL database (if it uses MySQL), starting the instance on demand.
     /// Default `true` (also when the field is omitted). A failure never fails the creation: it
     /// is reported in [`CreateProjectResultDto::database_setup`].
+    #[cfg_attr(test, ts(optional = nullable))]
     pub create_database: bool,
 }
 
@@ -163,6 +181,7 @@ impl Default for CreateProjectRequest {
 /// Result of creating a project: the project itself (flattened, so on the wire this *is* a
 /// [`ProjectDto`] plus one optional field) and what happened to its database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "CreateProjectResult"))]
 #[serde(rename_all = "camelCase")]
 pub struct CreateProjectResultDto {
     #[serde(flatten)]
@@ -175,6 +194,7 @@ pub struct CreateProjectResultDto {
 
 /// Result of removing a project: what was kept on purpose and is no longer reachable from Lampo.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DeleteProjectResult"))]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteProjectResultDto {
     /// The own databases of its worktree environments, left in MySQL (a removal never drops a
@@ -184,6 +204,7 @@ pub struct DeleteProjectResultDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateProjectRequest {
     pub project_id: String,
@@ -277,6 +298,7 @@ impl ProjectPatchRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SetProjectActiveRequest {
     pub project_id: String,
@@ -284,6 +306,7 @@ pub struct SetProjectActiveRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SetProjectPhpRequest {
     pub project_id: String,
@@ -291,6 +314,7 @@ pub struct SetProjectPhpRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct RelinkProjectRequest {
     pub project_id: String,
@@ -298,6 +322,7 @@ pub struct RelinkProjectRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ExportProjectRequest {
     pub project_id: String,
@@ -306,6 +331,7 @@ pub struct ExportProjectRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ImportProjectRequest {
     pub file: String,
@@ -317,6 +343,7 @@ pub struct ImportProjectRequest {
 /// left out because they could run code here. Front-ends show them so the user can add them
 /// back knowingly.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ImportProjectResult"))]
 #[serde(rename_all = "camelCase")]
 pub struct ImportProjectResultDto {
     #[serde(flatten)]
@@ -331,6 +358,7 @@ pub struct ImportProjectResultDto {
 
 /// Result of analysing a folder before creating a project.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "Detection"))]
 #[serde(rename_all = "camelCase")]
 pub struct DetectionDto {
     pub folder: String,
@@ -352,6 +380,7 @@ pub struct DetectionDto {
 
 /// One service a project uses: its kind and, for versioned kinds, the series.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ServiceUse"))]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceUseDto {
     pub kind: String,
@@ -373,6 +402,7 @@ impl ProjectEnvironmentDto {
 /// Addresses to offer for a project id, built by the domain rules and the port allocator
 /// (`project suggest-addresses`): one per kind, plus the two default sets.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "AddressSuggestions"))]
 #[serde(rename_all = "camelCase")]
 pub struct AddressSuggestionsDto {
     /// `<id>.<tld>` (hosts file, needs the UAC prompt once).

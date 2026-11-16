@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "PackageId"))]
 #[serde(rename_all = "camelCase")]
 pub struct PackageIdDto {
     /// `php`, `apache`, `mod-fcgid`, `mysql`, `redis`, `composer`, `xdebug`, `php-redis`.
@@ -11,6 +12,7 @@ pub struct PackageIdDto {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "CatalogChannel"))]
 #[serde(rename_all = "lowercase")]
 pub enum CatalogChannelDto {
     Frozen,
@@ -18,6 +20,7 @@ pub enum CatalogChannelDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "CatalogEntry"))]
 #[serde(rename_all = "camelCase")]
 pub struct CatalogEntryDto {
     pub id: PackageIdDto,
@@ -39,6 +42,7 @@ pub struct CatalogEntryDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "InstalledPackage"))]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledPackageDto {
     pub id: PackageIdDto,
@@ -52,12 +56,16 @@ pub struct InstalledPackageDto {
 
 /// Install a package. Without `version`: newest in `series` (if given) else newest overall.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase", default)]
 pub struct InstallPackageRequest {
     pub kind: String,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub version: Option<String>,
     /// `"8.3"` → latest 8.3.x.
+    #[cfg_attr(test, ts(optional = nullable))]
     pub series: Option<String>,
+    #[cfg_attr(test, ts(optional = nullable))]
     pub php_version: Option<String>,
 }
 
@@ -74,6 +82,7 @@ pub struct UninstallPackageRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "UpdateAvailable"))]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAvailableDto {
     pub kind: String,
@@ -85,6 +94,7 @@ pub struct UpdateAvailableDto {
 
 /// An extension an installed PHP minor can load (from its `ext` folder).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "PhpExtension"))]
 #[serde(rename_all = "camelCase")]
 pub struct PhpExtensionDto {
     /// As written in a project's extension list (`intl`, `pdo_mysql`).
@@ -119,6 +129,7 @@ pub struct PhpExtensionStateDto {
 
 /// Returned by commands that start a background task; progress arrives as events.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "TaskStarted"))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskStartedDto {
     pub task_id: String,
@@ -130,6 +141,7 @@ pub struct TaskStartedDto {
 /// `{ "kind": "worktree-up", "request": {...} }`, `{ "kind": "scaffold-project", "request": {...} }`,
 /// `{ "kind": "uninstall-package", "id": {...} }`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "TaskOperation"))]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum TaskOperationDto {
     InstallPackage { request: InstallPackageRequest },
@@ -141,6 +153,7 @@ pub enum TaskOperationDto {
 
 /// A background task that has not finished yet.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "RunningTask"))]
 #[serde(rename_all = "camelCase")]
 pub struct RunningTaskDto {
     pub task_id: String,
@@ -152,6 +165,7 @@ pub struct RunningTaskDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "FirstRunItem"))]
 #[serde(rename_all = "camelCase")]
 pub struct FirstRunItemDto {
     pub kind: String,
@@ -161,6 +175,7 @@ pub struct FirstRunItemDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "FirstRunStatus"))]
 #[serde(rename_all = "camelCase")]
 pub struct FirstRunStatusDto {
     pub completed: bool,

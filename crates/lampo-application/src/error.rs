@@ -6,9 +6,11 @@
 use lampo_domain::{DomainError, PortError};
 use serde::{Deserialize, Serialize};
 
-/// Stable error categories. Adding a variant is a contract change: update the TS mirror
-/// (`src/lib/api/types.ts`), the Italian messages and the CLI exit-code table.
+/// Stable error categories. Adding a variant is a contract change: regenerate the TS bindings
+/// (`ts_bindings`), update the GUI's code list (`src/lib/api/errors.ts`), the Italian messages
+/// and the CLI exit-code table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum ErrorCode {
     /// Invalid input (bad version, hostname, path…).
@@ -43,12 +45,17 @@ pub enum ErrorCode {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, thiserror::Error)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 #[error("{code:?}: {message}")]
 pub struct AppError {
     pub code: ErrorCode,
+    /// English, developer-facing: front-ends show their own text for `code`.
     pub message: String,
+    /// Structured extras: `{ output }` (a string, the program's output) for `config-rejected`
+    /// and a failed `process-failed` step, `{ port, owner }` for `port-in-use`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(type = "unknown"))]
     pub details: Option<serde_json::Value>,
 }
 

@@ -11,7 +11,11 @@ pnpm build        # static build into build/ (needed before `cargo check` of src
 pnpm tauri dev    # run the app (Tauri CLI is a dev dependency)
 ```
 
-* `src/lib/api/` — typed mirror of every Tauri command, DTO and event. Never call `invoke` directly.
+* `src/lib/api/` — typed wrappers of every Tauri command and event. Never call `invoke` directly.
+  The DTO types are generated from Rust into `bindings.ts` (never edit it): after changing a DTO,
+  from the repository root run `cargo test -p lampo-application --lib ts_bindings -- --ignored`
+  (`cargo test` fails while it is out of date). The generator uses `ts-rs` (derives on the DTOs
+  only) rather than `tauri-specta`, which would rewrite the command signatures and registration.
 * `src/lib/messages/` — all Italian UI strings.
 * `src/lib/components/ui/` — shadcn-svelte components (`pnpm dlx shadcn-svelte@latest add <name> --yes`).
 

@@ -2,7 +2,10 @@
 //! control pipe. **These are a public contract**:
 //!
 //! * field names are `camelCase` on the wire, enums are `kebab-case` strings;
-//! * every type is mirrored by hand in `apps/desktop/src/lib/api/types.ts` — change both together;
+//! * the GUI's TypeScript types (`apps/desktop/src/lib/api/bindings.ts`) are generated from these
+//!   (see `ts_bindings`): after a change run
+//!   `cargo test -p lampo-application --lib ts_bindings -- --ignored` (`cargo test` fails until
+//!   then); a new type the GUI uses gets `#[cfg_attr(test, derive(ts_rs::TS))]` and an entry there;
 //! * `lampo --json` output is documented as stable: add optional fields, never rename/remove
 //!   (bump [`crate::dto::agent::AGENT_CONTEXT_SCHEMA_VERSION`] / the control protocol otherwise).
 //!

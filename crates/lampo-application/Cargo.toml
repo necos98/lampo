@@ -21,4 +21,7 @@ tokio = { workspace = true, features = ["sync", "time", "macros"] }
 futures-util = { workspace = true }
 
 [dev-dependencies]
+# Generates the desktop app's `bindings.ts` from the DTOs in a test (the derives are
+# `cfg_attr(test)`): the release binaries never link it.
+ts-rs = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }

@@ -26,6 +26,8 @@ pub mod use_cases;
 pub(crate) mod testing;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod ts_bindings;
 
 pub use context::{CallContext, ElevationPolicy, Origin};
 pub use error::{AppError, AppResult, ErrorCode};

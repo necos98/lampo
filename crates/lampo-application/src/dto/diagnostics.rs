@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum CheckStatus {
     Ok,
@@ -11,6 +12,7 @@ pub enum CheckStatus {
 /// One `doctor` check. `id` is stable (`vc-runtime`, `ports`, `path-shadowing`, `shims-on-path`,
 /// `hosts-block`, `packages`, `stale-worktrees`, `folders`, `app`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DoctorCheck"))]
 #[serde(rename_all = "camelCase")]
 pub struct DoctorCheckDto {
     pub id: String,
@@ -21,6 +23,7 @@ pub struct DoctorCheckDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "VcRuntimeIssue"))]
 #[serde(rename_all = "camelCase")]
 pub struct VcRuntimeIssueDto {
     pub redistributable: String,
@@ -30,6 +33,7 @@ pub struct VcRuntimeIssueDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "PortConflict"))]
 #[serde(rename_all = "camelCase")]
 pub struct PortConflictDto {
     pub port: u16,
@@ -40,6 +44,7 @@ pub struct PortConflictDto {
 
 /// A tool whose Lampo shim is shadowed by another executable earlier on PATH.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ShadowedTool"))]
 #[serde(rename_all = "camelCase")]
 pub struct ShadowedToolDto {
     /// `php`, `composer`, `mysql`, `mysqldump`, `redis-cli`.
@@ -49,6 +54,7 @@ pub struct ShadowedToolDto {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DoctorReport"))]
 #[serde(rename_all = "camelCase")]
 pub struct DoctorReportDto {
     /// No check has status `error`.
@@ -65,6 +71,7 @@ pub struct DoctorReportDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ShimStatus"))]
 #[serde(rename_all = "camelCase")]
 pub struct ShimStatusDto {
     pub shim_dir: String,

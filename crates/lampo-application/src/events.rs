@@ -24,6 +24,7 @@ pub mod names {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ProgressStage"))]
 #[serde(rename_all = "kebab-case")]
 pub enum ProgressStageDto {
     Resolving,
@@ -51,6 +52,7 @@ impl From<ProgressStage> for ProgressStageDto {
 
 /// Progress of a long operation (bytes while downloading/extracting, steps otherwise).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ProgressReport"))]
 #[serde(rename_all = "camelCase")]
 pub struct ProgressDto {
     pub stage: ProgressStageDto,
@@ -69,6 +71,7 @@ impl From<Progress> for ProgressDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskProgressPayload {
     pub task_id: String,
@@ -77,6 +80,7 @@ pub struct TaskProgressPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "TaskOutcome"))]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum TaskOutcomeDto {
     Succeeded,
@@ -85,6 +89,7 @@ pub enum TaskOutcomeDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskFinishedPayload {
     pub task_id: String,
@@ -92,6 +97,7 @@ pub struct TaskFinishedPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceStatusPayload {
     pub service: String,
@@ -103,6 +109,7 @@ pub struct ServiceStatusPayload {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "LogStream"))]
 #[serde(rename_all = "lowercase")]
 pub enum LogStreamDto {
     Stdout,
@@ -110,6 +117,7 @@ pub enum LogStreamDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceLogPayload {
     pub service: String,
@@ -119,12 +127,14 @@ pub struct ServiceLogPayload {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectsChangedPayload {
     pub project_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreesChangedPayload {
     pub project_id: String,

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Connection details shown to the user/agent. Lampo never writes them to `.env`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DatabaseConnection"))]
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseConnectionDto {
     pub mysql_version: String,
@@ -67,6 +68,7 @@ pub struct DatabaseImportRequest {
 
 /// What happened to a new project's database (`CreateProjectResultDto::database_setup`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DatabaseSetupStatus"))]
 #[serde(rename_all = "kebab-case")]
 pub enum DatabaseSetupStatusDto {
     Created,
@@ -86,6 +88,7 @@ impl DatabaseSetupStatusDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DatabaseSetup"))]
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseSetupDto {
     /// The project's database name.
@@ -97,6 +100,7 @@ pub struct DatabaseSetupDto {
 
 /// Where a site's mail goes (the shared Mailpit), shown like the database connection.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "MailConnection"))]
 #[serde(rename_all = "camelCase")]
 pub struct MailConnectionDto {
     pub host: String,

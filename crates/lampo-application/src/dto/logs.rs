@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "LogSource"))]
 #[serde(rename_all = "camelCase")]
 pub struct LogSourceDto {
     /// `apache`, `apache-error`, `mysql-8.4`, `mysql-8.4-error`, `redis`,
@@ -11,6 +12,7 @@ pub struct LogSourceDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct LogTailRequest {
     pub source: String,
@@ -19,6 +21,7 @@ pub struct LogTailRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "LogLine"))]
 #[serde(rename_all = "camelCase")]
 pub struct LogLineDto {
     pub text: String,
@@ -26,6 +29,7 @@ pub struct LogLineDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "LogLines"))]
 #[serde(rename_all = "camelCase")]
 pub struct LogLinesDto {
     pub source: String,

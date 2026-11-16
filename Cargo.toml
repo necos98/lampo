@@ -52,6 +52,8 @@ minijinja = "2"
 clap = { version = "4", features = ["derive"] }
 winreg = "0.55"
 windows-sys = "0.59"
+# TypeScript declarations of the DTOs (test-only: see lampo-application `ts_bindings`).
+ts-rs = "12"
 
 [profile.release]
 lto = "thin"

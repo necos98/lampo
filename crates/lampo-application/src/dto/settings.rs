@@ -6,6 +6,7 @@ use super::SyncReportDto;
 
 /// One configured service instance (`mysql-8.4`, `redis`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ServiceInstance"))]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceInstanceDto {
     /// Service id (`mysql-8.4`).
@@ -23,6 +24,7 @@ pub struct ServiceInstanceDto {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "PortRange"))]
 #[serde(rename_all = "camelCase")]
 pub struct PortRangeDto {
     pub start: u16,
@@ -30,6 +32,7 @@ pub struct PortRangeDto {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "Settings"))]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsDto {
     pub default_php_version: Option<String>,
@@ -47,6 +50,7 @@ pub struct SettingsDto {
 /// A registered kind of service, so front-ends offer what the backend knows (no hard-coded
 /// list): the project editor lists these, with the configured versions of versioned kinds.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ServiceKindInfo"))]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceKindDto {
     pub kind: String,

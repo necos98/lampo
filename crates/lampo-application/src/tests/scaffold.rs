@@ -193,6 +193,16 @@ async fn installer_failure_fails_and_removes_the_partial_folder() {
 }
 
 #[tokio::test]
+async fn a_failed_step_sends_its_last_output_lines_as_one_string() {
+    let s = Setup::new(World::with_basics());
+    s.runner.on(ScriptedCommand { matches: " clone ".into(), exit: Some(128), lines: vec!["Cloning into 'shop'...".into(), "fatal: repository 'x' not found".into()], ..Default::default() });
+    let err = s.run(clone_request("https://github.com/acme/shop.git", None), &CancelFlag::new()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::ProcessFailed);
+    let details = err.details.expect("details");
+    assert_eq!(details["output"], "Cloning into 'shop'...\nfatal: repository 'x' not found", "the same type as `config-rejected`: {details}");
+}
+
+#[tokio::test]
 async fn cancellation_removes_only_a_folder_this_run_created() {
     let s = Setup::new(World::with_basics());
     s.runner.on(ScriptedCommand {
