@@ -6,6 +6,9 @@ use lampo_application::dto::*;
 use crate::cli::ShellKind;
 use crate::exit_code::ExitCode;
 
+mod detection;
+pub use detection::detection;
+
 /// Left-aligned columns separated by two spaces; the last column is not padded.
 pub fn table(rows: &[Vec<String>]) -> String {
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
@@ -147,33 +150,6 @@ pub fn project(p: &ProjectDto) -> String {
     }
     for notice in &p.notices {
         out.push_str(&format!("  note:      {notice}\n"));
-    }
-    out
-}
-
-/// `project detect`: what `project create` would use for the folder, then the next step.
-pub fn detection(d: &DetectionDto) -> String {
-    let or_none = |value: &Option<String>, none: &str| value.clone().unwrap_or_else(|| none.to_string());
-    let list = |items: &[String]| if items.is_empty() { "none".to_string() } else { items.join(", ") };
-    let mut out = format!("{}\n", d.folder);
-    out.push_str(&format!("  type:       {}\n", or_none(&d.project_type, "not recognised")));
-    out.push_str(&format!("  preset:     {}\n", or_none(&d.preset_id, "none (project create falls back to generic-php)")));
-    out.push_str(&format!(
-        "  php:        {}\n",
-        d.php_version.as_ref().map(|p| format!("{p} (minimum: project create uses the preset's PHP if newer)")).unwrap_or_else(|| "not detected (the preset's PHP is used)".into())
-    ));
-    out.push_str(&format!("  name:       {} (id: {})\n", d.suggested_name, d.suggested_id));
-    out.push_str(&format!("  services:   {}\n", list(&d.services)));
-    out.push_str(&format!("  evidence:   {}\n", list(&d.evidence)));
-    for warning in &d.warnings {
-        out.push_str(&format!("  warning:    {warning}\n"));
-    }
-    match &d.already_registered {
-        Some(id) => out.push_str(&format!("  registered: yes, as `{id}` (see `lampo project info {id}`)\n")),
-        None => {
-            let folder = if d.folder.contains(' ') { format!("\"{}\"", d.folder) } else { d.folder.clone() };
-            out.push_str(&format!("  registered: no (register it with `lampo project create {folder}`)\n"));
-        }
     }
     out
 }

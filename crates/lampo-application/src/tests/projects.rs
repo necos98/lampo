@@ -3,7 +3,7 @@
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use lampo_domain::detection::DetectionHint;
+use lampo_domain::detection::{DetectedApp, DetectionHint};
 use lampo_domain::events::DomainEvent;
 use lampo_domain::package::PackageKind;
 use lampo_domain::ports::{CustomPresetRepository, ProjectRepository, WorktreeRepository};
@@ -68,6 +68,34 @@ async fn detected_services_and_warnings_are_reported_and_unversioned_ones_are_ad
     assert!(env.service("redis").is_some(), "redis added from the detection");
     assert!(env.service_version("mysql").is_some(), "MySQL keeps the preset's series");
     assert!(env.service("postgres").is_none(), "unknown kinds are never added");
+}
+
+#[tokio::test]
+async fn compose_apps_are_reported_and_left_out_of_the_json_when_there_are_none() {
+    let w = World::with_basics();
+    w.fs.add("C:\\sites\\stack");
+    let mut found = hint("docker", Some("8.3"));
+    found.apps = vec![DetectedApp {
+        service: "shop".into(),
+        folder: "apps/shop".into(),
+        php: Some(php("8.3")),
+        extensions: vec!["intl".into()],
+        document_root: Some("public".into()),
+        environment: [("DB_HOST".to_string(), "mysql".to_string())].into(),
+        service_hosts: vec!["mysql".into()],
+    }];
+    let dto = detect(&w, Some(found)).execute("C:\\sites\\stack").unwrap();
+    let json = serde_json::to_value(&dto).unwrap();
+    assert_eq!(
+        json["apps"],
+        serde_json::json!([{
+            "service": "shop", "folder": "apps/shop", "phpVersion": "8.3", "extensions": ["intl"],
+            "documentRoot": "public", "environment": {"DB_HOST": "mysql"}, "serviceHosts": ["mysql"]
+        }])
+    );
+
+    let single = detect(&w, Some(hint("laravel", None))).execute("C:\\sites\\stack").unwrap();
+    assert!(serde_json::to_value(&single).unwrap().get("apps").is_none(), "the single-project result keeps its shape");
 }
 
 #[tokio::test]

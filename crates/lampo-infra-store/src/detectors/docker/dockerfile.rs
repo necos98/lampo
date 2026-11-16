@@ -82,7 +82,7 @@ fn stages(text: &str) -> Vec<Stage> {
 
 /// `docker-php-ext-install` arguments (flags and variables left out), sorted and unique, named
 /// as Lampo's builds of `php` name them when it is known (`gd` is `gd2` before PHP 8.0).
-fn php_extensions(text: &str, php: Option<PhpMinor>) -> Vec<String> {
+pub(super) fn php_extensions(text: &str, php: Option<PhpMinor>) -> Vec<String> {
     let mut extensions: Vec<String> = Vec::new();
     for line in text.lines() {
         if let Some((_, rest)) = line.split_once("docker-php-ext-install") {
@@ -100,6 +100,11 @@ fn lampo_name(name: &str, php: Option<PhpMinor>) -> String {
         (Ok(extension), Some(php)) => extension.for_php(php).to_string(),
         _ => name.to_string(),
     }
+}
+
+/// What the final stage (the image `docker build` produces) stands for.
+pub(super) fn runtime(text: &str) -> Option<Component> {
+    stages(text).last().map(|stage| stage.component)
 }
 
 /// Records the stages of `file` (the last one as the runtime) and its PHP extensions.

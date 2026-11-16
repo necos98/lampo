@@ -87,7 +87,7 @@ fn declarations(cfg: &Config) -> Vec<(&'static str, Vec<Declaration>)> {
             DatabaseConnectionDto, MailConnectionDto, ProjectDto, UnreadableProjectDto, ProjectListDto, ProjectSummaryDto,
             CreateProjectRequest, DatabaseSetupStatusDto, DatabaseSetupDto, CreateProjectResultDto, DeleteProjectResultDto,
             UpdateProjectRequest, SetProjectActiveRequest, SetProjectPhpRequest, RelinkProjectRequest, ExportProjectRequest,
-            ImportProjectRequest, ImportProjectResultDto, DetectionDto,
+            ImportProjectRequest, ImportProjectResultDto, DetectionDto, DetectedAppDto,
         ),
         section!("New project setup": StarterKitDto, TestingFrameworkDto, ScaffoldSourceDto, ScaffoldProjectRequest, ScaffoldProjectResultDto),
         section!("Presets": PresetDto, SavePresetRequest),

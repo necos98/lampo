@@ -35,6 +35,46 @@ Lampo's reading of the same files, nothing registered (`services`, `warnings`, a
 lampo project detect C:\sites\shop --json
 ```
 
+### A compose file with several PHP apps
+
+When the compose file runs more than one PHP app, each from its own folder, `detect --json`
+adds `apps`: one proposed project per app. Without `apps` there is a single app (a queue
+worker or scheduler sharing the web service's folder is not a separate app): use the
+top-level fields as above.
+
+```json
+"apps": [
+  {"service": "shop", "folder": "apps/shop", "phpVersion": "8.3", "extensions": ["intl", "pdo_mysql"],
+   "documentRoot": "public", "environment": {"DB_HOST": "mysql", "DB_DATABASE": "shop"},
+   "serviceHosts": ["mysql", "redis"]}
+]
+```
+
+- `folder`: the app's code, relative to the analysed folder (from the volume mounted on
+  `/var/www/html`, `/app`... or the `build` context); a path written outside the folder is
+  kept as written: check it exists on Windows.
+- `phpVersion`, `extensions`: from the image, the Sail runtime or the context's Dockerfile
+  (`docker-php-ext-install`; `pecl install` and `install-php-extensions` lines are not read:
+  check the Dockerfile for those).
+- `documentRoot`: relative to `folder` (`.` = the folder itself), from `APACHE_DOCUMENT_ROOT`,
+  a mounted Apache `DocumentRoot` or the nginx `root` of the block passing PHP to the service;
+  `null` when none was found (ask, or look at the app: `public/`, `web/`).
+- `environment`: the service's `environment:` as written; values that name a compose service
+  (`DB_HOST=mysql`) become `127.0.0.1` on Lampo (see `.env` changes).
+- `serviceHosts`: the compose services the app reaches (databases, Redis, Mailpit): map each
+  one with the image table below.
+
+Register each app as its own project (one per folder), confirming the list with the user
+first; the plain-text `lampo project detect` prints the command for each app:
+
+```powershell
+lampo project create C:\sites\stack\apps\shop --php 8.3 --json
+lampo project set shop --public-dir public --ext intl,pdo_mysql --json
+```
+
+Each Lampo project gets its own database, even when the apps shared one database container:
+export and import each app's database separately (below).
+
 Image to Lampo mapping: `php:<x.y>-*` -> PHP x.y; `mysql:5.7` -> MySQL 5.7 (`--preset legacy`
 or the 5.7 service); `mysql:8.x` -> MySQL 8.4; `mariadb:*` -> MySQL 8.4 (caveats in
 SKILL.md); `postgres:*` -> **not supported** (stop, SKILL.md); `redis:*` / `valkey/*` -> Redis;

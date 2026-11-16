@@ -1,6 +1,8 @@
 //! Project-type detection results. Detectors themselves are ports
 //! ([`crate::ports::ProjectDetector`]); one implementation per framework (open-closed).
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::php::PhpMinor;
@@ -32,13 +34,37 @@ pub struct DetectionHint {
     /// What Lampo cannot provide for this project (PostgreSQL, search engines…), developer-facing.
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// One proposed project per PHP app of a Docker Compose file, only when the file holds
+    /// more than one (each in its own folder); empty otherwise.
+    #[serde(default)]
+    pub apps: Vec<DetectedApp>,
 }
 
 impl DetectionHint {
-    /// A hint without services or warnings.
+    /// A hint without services, warnings or apps.
     pub fn new(project_type: impl Into<String>, preset: PresetId, php: Option<PhpMinor>, confidence: u8, evidence: Vec<String>) -> Self {
-        Self { project_type: project_type.into(), preset, php, confidence, evidence, services: Vec::new(), warnings: Vec::new() }
+        Self { project_type: project_type.into(), preset, php, confidence, evidence, services: Vec::new(), warnings: Vec::new(), apps: Vec::new() }
     }
+}
+
+/// One PHP app of a Docker Compose file that holds several: what a project for it would need.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DetectedApp {
+    /// The compose service running it (`shop`).
+    pub service: String,
+    /// Its code, relative to the analysed folder, `/`-separated (`apps/shop`, `.`), or the
+    /// host path as written when it lies outside the folder.
+    pub folder: String,
+    /// PHP of its image, Sail runtime or Dockerfile.
+    pub php: Option<PhpMinor>,
+    /// Extensions its Dockerfile installs (`docker-php-ext-install`), sorted.
+    pub extensions: Vec<String>,
+    /// Document root relative to [`Self::folder`] (`public`, `.` for the folder itself).
+    pub document_root: Option<String>,
+    /// The service's `environment:` variables, as written in the compose file.
+    pub environment: BTreeMap<String, String>,
+    /// Services it reaches by host name (`depends_on`, `DB_HOST=mysql`), sorted.
+    pub service_hosts: Vec<String>,
 }
 
 /// Picks the most confident hint; ties are broken by detector order (first wins).
@@ -49,7 +75,7 @@ pub fn best_hint(hints: Vec<DetectionHint>) -> Option<DetectionHint> {
 /// The detection result of a folder: the most confident typed hint ([`best_hint`]), with every
 /// [`ENVIRONMENT_ONLY`] hint merged into it: the higher PHP (a container image shows the PHP
 /// the project really ran on, `require.php` only its minimum), the union of services, the
-/// warnings and the evidence. With environment hints only, the first one stands alone.
+/// warnings, the evidence and the first non-empty list of apps. With environment hints only, the first one stands alone.
 pub fn combine_hints(hints: Vec<DetectionHint>) -> Option<DetectionHint> {
     let (environment, typed): (Vec<_>, Vec<_>) = hints.into_iter().partition(|h| h.confidence == ENVIRONMENT_ONLY);
     let mut environment = environment.into_iter();
@@ -58,6 +84,9 @@ pub fn combine_hints(hints: Vec<DetectionHint>) -> Option<DetectionHint> {
         best.php = best.php.max(hint.php);
         best.evidence.extend(hint.evidence);
         best.warnings.extend(hint.warnings);
+        if best.apps.is_empty() {
+            best.apps = hint.apps;
+        }
         for service in hint.services {
             if !best.services.contains(&service) {
                 best.services.push(service);
@@ -96,12 +125,14 @@ mod tests {
         docker.evidence = vec!["compose image php:8.3-fpm".into()];
         docker.services = vec![ServiceKind::MYSQL, ServiceKind::REDIS];
         docker.warnings = vec!["PostgreSQL is not supported".into()];
+        docker.apps = vec![DetectedApp { service: "shop".into(), folder: "shop".into(), ..DetectedApp::default() }];
         let combined = combine_hints(vec![docker.clone(), hint("composer", 30), laravel]).unwrap();
         assert_eq!(combined.project_type, "laravel");
         assert_eq!(combined.php, php("8.3"), "the image's PHP beats the require.php minimum");
         assert_eq!(combined.evidence, ["found artisan", "compose image php:8.3-fpm"]);
         assert_eq!(combined.services, [ServiceKind::MYSQL, ServiceKind::REDIS]);
         assert_eq!(combined.warnings.len(), 1);
+        assert_eq!(combined.apps, docker.apps, "the compose apps reach the result");
 
         // A lower image PHP never lowers the composer minimum.
         let mut composer = hint("composer", 30);

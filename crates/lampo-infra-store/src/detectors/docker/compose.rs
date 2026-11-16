@@ -1,11 +1,13 @@
 //! The compose file Docker uses, read line by line into its services (no YAML parser: only
-//! `image:`, `build:` / `build.context`, `ports:` and `expose:` of each service matter).
+//! `image:`, `build:` (`context`, `dockerfile`), `ports:`, `expose:`, `environment:`,
+//! `depends_on:` and the bind mounts of `volumes:` of each service matter).
 
 use std::ops::RangeInclusive;
 use std::path::Path;
 
 use super::findings::{Findings, PhpRole};
 use super::image::{Component, classify_image, expand_defaults, sail_php};
+pub(super) use super::mount::Mount;
 
 /// Compose file names, in Docker's own lookup order: Docker reads only the first one present.
 const COMPOSE_FILES: &[&str] = &["compose.yaml", "compose.yml", "docker-compose.yml", "docker-compose.yaml"];
@@ -28,8 +30,23 @@ pub(super) struct ComposeService {
     pub builds: bool,
     /// The build context (`build: ./dir` or `build.context`).
     pub context: Option<String>,
+    /// `build.dockerfile`, relative to the context.
+    pub dockerfile: Option<String>,
     /// Container ports from `ports:` and `expose:`.
     pub ports: Vec<RangeInclusive<u16>>,
+    /// `environment:` (`KEY: value` map or `- KEY=value` list), in file order.
+    pub environment: Vec<(String, String)>,
+    /// Service names of `depends_on:` (list or map).
+    pub depends_on: Vec<String>,
+    /// Entries of `volumes:`, short (`./src:/var/www/html:ro`) and long (`source`/`target`)
+    /// syntax; named volumes included ([`Mount::is_bind`] tells them apart).
+    pub mounts: Vec<Mount>,
+}
+
+/// `KEY=value` (or `KEY` alone) of an `environment:` list item.
+fn env_item(item: &str) -> (String, String) {
+    let (key, value) = item.split_once('=').unwrap_or((item, ""));
+    (key.trim().to_string(), value.trim().to_string())
 }
 
 impl ComposeService {
@@ -39,6 +56,21 @@ impl ComposeService {
 
     pub fn exposes(&self, port: u16) -> bool {
         self.ports.iter().any(|range| range.contains(&port))
+    }
+
+    /// The build context when it is one of Laravel Sail's runtimes (it names the PHP).
+    pub fn sail_runtime(&self) -> Option<&str> {
+        self.context.as_deref().filter(|context| context.contains(SAIL_RUNTIMES))
+    }
+
+    /// The bind mounts of `volumes:`.
+    pub fn bind_mounts(&self) -> impl Iterator<Item = &Mount> {
+        self.mounts.iter().filter(|m| m.is_bind() && !m.target.is_empty())
+    }
+
+    /// The value of the `environment:` variable `key`, if set.
+    pub fn env(&self, key: &str) -> Option<&str> {
+        self.environment.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
     }
 
     /// How much this service's PHP says about the project's runtime.
@@ -63,18 +95,44 @@ impl ComposeService {
                 }
             }
             "ports" | "expose" => self.ports.extend(flow_list(value).filter_map(container_ports)),
+            "environment" => self.environment.extend(flow_list(value).map(env_item)),
+            "depends_on" => self.depends_on.extend(flow_list(value).map(str::to_string)),
+            "volumes" => self.mounts.extend(flow_list(value).filter_map(Mount::parse_short)),
             _ => {}
         }
     }
 
-    /// A line nested under the service-level `key` (`context: …`, `- "8080:80"`, `- target: 80`).
-    fn nested(&mut self, key: &str, line: &str) {
+    /// A line nested under the service-level `key` (`context: …`, `- "8080:80"`, `- target: 80`);
+    /// `direct` when it is a direct child of the key (not deeper: `condition:` of a
+    /// `depends_on` entry).
+    fn nested(&mut self, key: &str, line: &str, direct: bool) {
+        let item = line.strip_prefix('-').map(|item| unquote(strip_comment(item)));
         match key {
             "build" => {
                 if let Some(context) = yaml_value(line, "context").filter(|c| !c.is_empty()) {
                     self.context = Some(context.to_string());
                 }
+                if let Some(dockerfile) = yaml_value(line, "dockerfile").filter(|d| !d.is_empty()) {
+                    self.dockerfile = Some(dockerfile.to_string());
+                }
             }
+            "environment" if direct => match (item, line.split_once(':')) {
+                (Some(item), _) => self.environment.push(env_item(item)),
+                (None, Some((key, value))) => self.environment.push((unquote(key).to_string(), unquote(strip_comment(value)).to_string())),
+                (None, None) => {}
+            },
+            "depends_on" if direct => {
+                let name = item.or_else(|| strip_comment(line).strip_suffix(':').map(unquote));
+                self.depends_on.extend(name.filter(|n| !n.is_empty()).map(str::to_string));
+            }
+            "volumes" => match item {
+                Some(item) => self.mounts.extend(Mount::from_item(item)),
+                None => {
+                    if let Some(mount) = self.mounts.last_mut() {
+                        mount.long_key(line);
+                    }
+                }
+            },
             "ports" | "expose" => {
                 let port = match yaml_value(line, "target") {
                     Some(target) => container_ports(target),
@@ -106,6 +164,8 @@ struct Cursor {
     /// Indentation of the service-level keys.
     key_indent: Option<usize>,
     key: String,
+    /// Indentation of the direct children of `key`.
+    nested_indent: Option<usize>,
 }
 
 impl ComposeFile {
@@ -134,9 +194,13 @@ impl ComposeFile {
                 match trimmed.split_once(':').filter(|_| is_key) {
                     Some((key, value)) => {
                         at.key = key.trim().to_string();
+                        at.nested_indent = None;
                         service.key(&at.key, unquote(strip_comment(value)));
                     }
-                    None => service.nested(&at.key, trimmed),
+                    None => {
+                        let direct = indent <= *at.nested_indent.get_or_insert(indent);
+                        service.nested(&at.key, trimmed, direct);
+                    }
                 }
             }
         }
@@ -149,12 +213,13 @@ fn strip_comment(value: &str) -> &str {
     value.split(" #").next().unwrap_or(value).trim()
 }
 
-fn unquote(value: &str) -> &str {
+/// `"value"`, `'value'` → `value`.
+pub(super) fn unquote(value: &str) -> &str {
     value.trim().trim_matches(|c| c == '"' || c == '\'')
 }
 
 /// `key: value` of a YAML line (`- ` list markers, quotes and comments removed).
-fn yaml_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
+pub(super) fn yaml_value<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     let line = line.trim_start().trim_start_matches("- ").trim_start();
     let value = line.strip_prefix(key)?.strip_prefix(':')?;
     Some(unquote(strip_comment(value)))
@@ -177,8 +242,7 @@ fn container_ports(mapping: &str) -> Option<RangeInclusive<u16>> {
 }
 
 /// Records the components of `file`'s services (and of its loose images) into `findings`.
-pub(super) fn scan(file: &str, text: &str, findings: &mut Findings) {
-    let compose = ComposeFile::parse(text);
+pub(super) fn scan(file: &str, compose: &ComposeFile, findings: &mut Findings) {
     for image in &compose.loose_images {
         findings.component(classify_image(image), PhpRole::Accessory, file, image);
     }
@@ -188,7 +252,7 @@ pub(super) fn scan(file: &str, text: &str, findings: &mut Findings) {
         if let Some(image) = &service.image {
             findings.component(classify_image(image), role, &source, image);
         }
-        if let Some(context) = service.context.as_deref().filter(|c| c.contains(SAIL_RUNTIMES)) {
+        if let Some(context) = service.sail_runtime() {
             findings.component(Component::Php(sail_php(context)), role, &source, context);
         }
     }
@@ -233,6 +297,52 @@ volumes:
         assert_eq!((app.builds, app.context.as_deref(), &app.ports[..]), (true, Some("./docker/php"), &[9000..=9000][..]));
         assert_eq!(app.php_role(), PhpRole::BuiltService);
         assert_eq!((worker.context.as_deref(), &worker.ports[..]), (Some("."), &[8080..=8080][..]));
+    }
+
+    #[test]
+    fn environment_dependencies_and_mounts() {
+        let text = r#"
+services:
+  app:
+    build:
+      context: ./app
+      dockerfile: docker/Dockerfile
+    environment:
+      DB_HOST: mysql   # the compose service
+      'APP_URL': "http://localhost:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./app:/var/www/html:cached
+      - C:\sites\shared:/srv/shared
+      - vendor:/var/www/html/vendor
+      - /var/www/html/node_modules
+      - type: bind
+        source: ./docker/vhost.conf
+        target: /etc/apache2/sites-enabled/000-default.conf
+        read_only: true
+  worker:
+    environment:
+    - QUEUE=default
+    - DEBUG
+    depends_on: [app, "mysql"]
+    volumes: ["./app:/app"]
+"#;
+        let compose = ComposeFile::parse(text);
+        let [app, worker] = &compose.services[..] else { unreachable!() };
+        assert_eq!((app.context.as_deref(), app.dockerfile.as_deref()), (Some("./app"), Some("docker/Dockerfile")));
+        assert_eq!(app.environment, [("DB_HOST".to_string(), "mysql".to_string()), ("APP_URL".into(), "http://localhost:8080".into())]);
+        assert_eq!((app.env("DB_HOST"), app.env("MISSING")), (Some("mysql"), None));
+        assert_eq!(app.depends_on, ["mysql", "redis"], "conditions are not services");
+        let binds: Vec<_> = app.bind_mounts().map(|m| (m.source.as_str(), m.target.as_str())).collect();
+        assert_eq!(binds, [("./app", "/var/www/html"), ("C:\\sites\\shared", "/srv/shared"), ("./docker/vhost.conf", "/etc/apache2/sites-enabled/000-default.conf")]);
+        assert_eq!(app.mounts.len(), 4, "the named volume is kept, the anonymous one is not a mount: {:?}", app.mounts);
+        assert_eq!(worker.environment, [("QUEUE".to_string(), "default".to_string()), ("DEBUG".into(), String::new())]);
+        assert_eq!(worker.depends_on, ["app", "mysql"]);
+        assert_eq!(worker.bind_mounts().map(|m| m.target.as_str()).collect::<Vec<_>>(), ["/app"]);
     }
 
     #[test]

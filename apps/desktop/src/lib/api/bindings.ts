@@ -350,7 +350,42 @@ warnings: Array<string>,
 /**
  * Id of the project already registered for this folder, if any.
  */
-alreadyRegistered: string | null, };
+alreadyRegistered: string | null, 
+/**
+ * One proposed project per PHP app of a Docker Compose file that runs several, each from
+ * its own folder; omitted otherwise (the fields above describe the folder itself).
+ */
+apps?: Array<DetectedApp>, };
+
+/**
+ * One PHP app of a Docker Compose file: what `project create` would need for it.
+ */
+export type DetectedApp = { 
+/**
+ * The compose service running it (`shop`).
+ */
+service: string, 
+/**
+ * Its code, relative to the analysed folder (`apps/shop`), or the host path as written
+ * when it lies outside.
+ */
+folder: string, phpVersion: string | null, 
+/**
+ * Extensions its Dockerfile installs, sorted.
+ */
+extensions: Array<string>, 
+/**
+ * Relative to `folder` (`public`, `.`); `null` when not found.
+ */
+documentRoot: string | null, 
+/**
+ * The service's `environment:` variables, as written in the compose file.
+ */
+environment: { [key in string]: string }, 
+/**
+ * Services it reaches by host name (`depends_on`, `DB_HOST=mysql`), sorted.
+ */
+serviceHosts: Array<string>, };
 
 // --- New project setup ---
 

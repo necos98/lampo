@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use lampo_domain::address::SiteAddress;
-use lampo_domain::detection::combine_hints;
+use lampo_domain::detection::{DetectedApp, combine_hints};
 use lampo_domain::events::DomainEvent;
 use lampo_domain::mysql::DatabaseName;
 use lampo_domain::package::PackageKind;
@@ -142,9 +142,22 @@ impl DetectProject {
             suggested_name: name,
             services: best.as_ref().map(|h| h.services.iter().map(ToString::to_string).collect()).unwrap_or_default(),
             warnings: best.as_ref().map(|h| h.warnings.clone()).unwrap_or_default(),
+            apps: best.as_ref().map(|h| h.apps.iter().map(detected_app_dto).collect()).unwrap_or_default(),
             evidence: best.map(|h| h.evidence).unwrap_or_default(),
             already_registered: existing.iter().find(|p| p.root == root).map(|p| p.id.to_string()),
         })
+    }
+}
+
+fn detected_app_dto(app: &DetectedApp) -> DetectedAppDto {
+    DetectedAppDto {
+        service: app.service.clone(),
+        folder: app.folder.clone(),
+        php_version: app.php.map(|php| php.to_string()),
+        extensions: app.extensions.clone(),
+        document_root: app.document_root.clone(),
+        environment: app.environment.clone(),
+        service_hosts: app.service_hosts.clone(),
     }
 }
 

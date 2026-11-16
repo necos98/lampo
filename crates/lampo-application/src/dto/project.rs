@@ -388,6 +388,31 @@ pub struct DetectionDto {
     pub warnings: Vec<String>,
     /// Id of the project already registered for this folder, if any.
     pub already_registered: Option<String>,
+    /// One proposed project per PHP app of a Docker Compose file that runs several, each from
+    /// its own folder; omitted otherwise (the fields above describe the folder itself).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub apps: Vec<DetectedAppDto>,
+}
+
+/// One PHP app of a Docker Compose file: what `project create` would need for it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DetectedApp"))]
+#[serde(rename_all = "camelCase")]
+pub struct DetectedAppDto {
+    /// The compose service running it (`shop`).
+    pub service: String,
+    /// Its code, relative to the analysed folder (`apps/shop`), or the host path as written
+    /// when it lies outside.
+    pub folder: String,
+    pub php_version: Option<String>,
+    /// Extensions its Dockerfile installs, sorted.
+    pub extensions: Vec<String>,
+    /// Relative to `folder` (`public`, `.`); `null` when not found.
+    pub document_root: Option<String>,
+    /// The service's `environment:` variables, as written in the compose file.
+    pub environment: BTreeMap<String, String>,
+    /// Services it reaches by host name (`depends_on`, `DB_HOST=mysql`), sorted.
+    pub service_hosts: Vec<String>,
 }
 
 /// One service a project uses: its kind and, for versioned kinds, the series.

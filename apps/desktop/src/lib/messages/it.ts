@@ -225,6 +225,10 @@ export const it = {
 		notDetected: 'Nessun framework riconosciuto: useremo un sito PHP generico.',
 		evidence: 'Indizi trovati',
 		warnings: 'Da sapere',
+		composeApps: 'App del compose',
+		composeAppsHelp: 'Il file compose avvia più app PHP: registra ciascuna dalla sua cartella.',
+		composeApp: (folder: string, php: string | null, documentRoot: string | null) =>
+			[folder, php && `PHP ${php}`, documentRoot && `document root ${documentRoot}`].filter(Boolean).join(' · '),
 		preset: 'Preset',
 		php: 'Versione di PHP',
 		phpDefault: 'Predefinita',

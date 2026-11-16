@@ -294,6 +294,14 @@
 						</ul>
 					</FormRow>
 				{/if}
+				{#if d.apps?.length}
+					<FormRow label={m.create.composeApps}>
+						<p class="text-sm text-muted-foreground">{m.create.composeAppsHelp}</p>
+						<ul class="flex flex-col gap-1 text-sm">
+							{#each d.apps as app (app.service)}<li><span class="font-medium">{app.service}</span>: <code class="font-mono text-xs">{m.create.composeApp(app.folder, app.phpVersion, app.documentRoot)}</code></li>{/each}
+						</ul>
+					</FormRow>
+				{/if}
 				{#if d.warnings.length}
 					<FormRow label={m.create.warnings}>
 						<ul class="flex flex-col gap-1 text-sm text-amber-700 dark:text-amber-400">

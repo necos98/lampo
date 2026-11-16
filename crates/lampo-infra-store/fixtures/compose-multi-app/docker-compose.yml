@@ -1,0 +1,55 @@
+# Three PHP apps behind one compose file: Lampo proposes one project per app.
+services:
+  shop:
+    build: ./apps/shop
+    ports:
+      - "8080:80"
+    volumes:
+      - ./apps/shop:/var/www/html
+      - shop-cache:/var/www/html/var/cache
+    environment:
+      APP_ENV: local
+      DB_HOST: mysql
+      DB_DATABASE: shop
+      REDIS_HOST: redis
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+  shop-queue:
+    build: ./apps/shop
+    command: php artisan queue:work
+    volumes:
+      - ./apps/shop:/var/www/html
+  blog:
+    build:
+      context: ./apps/blog
+      dockerfile: ../../docker/blog/Dockerfile
+    volumes:
+      - type: bind
+        source: ./apps/blog
+        target: /var/www/blog
+    environment:
+      - WORDPRESS_DB_HOST=mysql
+      - WORDPRESS_DB_NAME=blog
+  legacy:
+    image: php:8.1-apache
+    volumes:
+      - ./legacy:/var/www/html:ro
+      - ./docker/legacy/vhost.conf:/etc/apache2/sites-enabled/000-default.conf
+    environment: [ "APP_DEBUG=1" ]
+    depends_on: [ mysql ]
+  nginx:
+    image: nginx:1.27
+    ports:
+      - "80:80"
+    volumes:
+      - ./docker/nginx/blog.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./apps/blog:/usr/share/nginx/blog
+  mysql:
+    image: mysql:8.0
+  redis:
+    image: redis:7-alpine
+volumes:
+  shop-cache:

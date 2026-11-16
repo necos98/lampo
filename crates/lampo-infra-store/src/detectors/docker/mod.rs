@@ -9,22 +9,30 @@
 //! publishing port 80, then the final stage of a Dockerfile, and only then accessory services
 //! and build stages ([`findings::PhpRole`]).
 //!
-//! Line-based on purpose (no YAML parser): it only looks at `image:`, `build:`/`context:`,
-//! `ports:`/`expose:` values, the service names under `services:` and `FROM` /
-//! `docker-php-ext-install` lines.
+//! A compose file running several PHP apps, each from its own folder, also yields one proposed
+//! project per app ([`DetectedApp`], [`apps`]); the hint itself stays the folder's.
+//!
+//! Line-based on purpose (no YAML parser): it only looks at `image:`, `build:`,
+//! `ports:`/`expose:`, `environment:`, `depends_on:` and `volumes:` values, the service names
+//! under `services:`, `FROM` / `ENV` / `docker-php-ext-install` lines and the document root of
+//! mounted Apache/nginx configs.
 
+mod apps;
 mod compose;
 mod dockerfile;
 mod findings;
 mod image;
+mod mount;
+mod webroot;
 
 use std::path::Path;
 
 use lampo_domain::PortResult;
-use lampo_domain::detection::{DetectionHint, ENVIRONMENT_ONLY};
+use lampo_domain::detection::{DetectedApp, DetectionHint, ENVIRONMENT_ONLY};
 use lampo_domain::ports::ProjectDetector;
 
 use super::manifest::preset;
+use compose::ComposeFile;
 use findings::Findings;
 
 /// Files larger than this are not configuration: skipped.
@@ -49,12 +57,18 @@ impl ProjectDetector for DockerDetector {
 
     fn detect(&self, folder: &Path) -> PortResult<Option<DetectionHint>> {
         let mut findings = Findings::default();
+        let mut apps = Vec::new();
         if let Some(file) = compose::compose_file(folder)
             && let Some(text) = read_small(&folder.join(file))
         {
+            let compose = ComposeFile::parse(&text);
             findings.found = true;
             findings.evidence.push(format!("found {file}"));
-            compose::scan(file, &text, &mut findings);
+            compose::scan(file, &compose, &mut findings);
+            apps = apps::apps(folder, &compose);
+            if !apps.is_empty() {
+                findings.evidence.push(apps_evidence(file, &apps));
+            }
         }
         for (name, path) in dockerfile::dockerfiles(folder) {
             if let Some(text) = read_small(&path) {
@@ -70,8 +84,15 @@ impl ProjectDetector for DockerDetector {
         let mut hint = DetectionHint::new("docker", preset("generic-php"), php, ENVIRONMENT_ONLY, evidence);
         hint.services = services;
         hint.warnings = warnings;
+        hint.apps = apps;
         Ok(Some(hint))
     }
+}
+
+/// `compose.yaml runs 2 PHP apps: shop (apps/shop), blog (apps/blog)`.
+fn apps_evidence(file: &str, apps: &[DetectedApp]) -> String {
+    let list: Vec<String> = apps.iter().map(|app| format!("{} ({})", app.service, app.folder)).collect();
+    format!("{file} runs {} PHP apps: {}", apps.len(), list.join(", "))
 }
 
 #[cfg(test)]
@@ -219,6 +240,67 @@ volumes:
         // The image built by the compose service wins over an accessory PHP image.
         let compose = "services:\n  app:\n    build: .\n  worker:\n    image: php:8.4-cli\n";
         assert_eq!(detect(&[("compose.yaml", compose), ("Dockerfile", "FROM php:7.4-apache\n")]).unwrap().php, php("7.4"));
+    }
+
+    fn fixture(name: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures").join(name)
+    }
+
+    fn env(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn a_compose_file_with_several_php_apps_proposes_one_project_each() {
+        let hint = DockerDetector.detect(&fixture("compose-multi-app")).unwrap().unwrap();
+        let summary: Vec<_> = hint.apps.iter().map(|a| (a.service.as_str(), a.folder.as_str(), a.php.map(|p| p.to_string()))).collect();
+        assert_eq!(
+            summary,
+            [("shop", "apps/shop", Some("8.3".into())), ("blog", "apps/blog", Some("7.4".into())), ("legacy", "legacy", Some("8.1".into()))],
+            "shop-queue shares shop's folder"
+        );
+        let [shop, blog, legacy] = &hint.apps[..] else { unreachable!() };
+
+        assert_eq!(shop.extensions, ["intl", "pdo_mysql"]);
+        assert_eq!(shop.document_root.as_deref(), Some("public"), "ENV APACHE_DOCUMENT_ROOT of its Dockerfile");
+        assert_eq!(shop.environment, env(&[("APP_ENV", "local"), ("DB_DATABASE", "shop"), ("DB_HOST", "mysql"), ("REDIS_HOST", "redis")]));
+        assert_eq!(shop.service_hosts, ["mysql", "redis"]);
+
+        assert_eq!(blog.extensions, ["gd2", "mysqli"], "named as PHP 7.4 names them");
+        assert_eq!(blog.document_root.as_deref(), Some("web"), "root of the nginx block passing PHP to it");
+        assert_eq!(blog.environment, env(&[("WORDPRESS_DB_HOST", "mysql"), ("WORDPRESS_DB_NAME", "blog")]));
+        assert_eq!(blog.service_hosts, ["mysql"]);
+
+        assert!(legacy.extensions.is_empty());
+        assert_eq!(legacy.document_root.as_deref(), Some("htdocs"), "DocumentRoot of its mounted vhost");
+        assert_eq!(legacy.environment, env(&[("APP_DEBUG", "1")]));
+        assert_eq!(legacy.service_hosts, ["mysql"]);
+
+        assert!(hint.evidence.contains(&"docker-compose.yml runs 3 PHP apps: shop (apps/shop), blog (apps/blog), legacy (legacy)".to_string()), "{:?}", hint.evidence);
+        assert_eq!(hint.services, [ServiceKind::MYSQL, ServiceKind::REDIS], "the folder's own result is unchanged");
+    }
+
+    #[test]
+    fn one_php_app_proposes_no_apps() {
+        // A web server and its queue worker share one folder: one app, the folder's own result.
+        let one = "services:\n  app:\n    build: .\n    volumes: [\".:/var/www/html\"]\n  worker:\n    build: .\n    volumes:\n      - .:/var/www/html\n";
+        assert!(detect(&[("compose.yaml", one), ("Dockerfile", "FROM php:8.3-cli\n")]).unwrap().apps.is_empty());
+        // Sail: the runtime context is not the code, the mounted folder is.
+        let sail = "services:\n  laravel.test:\n    build:\n      context: ./vendor/laravel/sail/runtimes/8.4\n    volumes:\n      - '.:/var/www/html'\n";
+        assert!(detect(&[("compose.yaml", sail)]).unwrap().apps.is_empty());
+    }
+
+    #[test]
+    fn apps_outside_the_folder_keep_their_path_and_nothing_outside_is_read() {
+        let compose = "services:\n  a:\n    image: php:8.2-fpm\n    volumes:\n      - ../shared/a:/app\n  b:\n    build:\n      context: ./b\n      dockerfile: ../../outside/Dockerfile\n    environment:\n      APACHE_DOCUMENT_ROOT: /var/www/html/public\n  c:\n    image: php:8.4-cli\n";
+        let hint = detect(&[("compose.yaml", compose), ("b/index.php", "")]).unwrap();
+        let summary: Vec<_> = hint.apps.iter().map(|a| (a.service.as_str(), a.folder.as_str(), a.php, a.document_root.as_deref())).collect();
+        // `b` has no readable Dockerfile (outside the folder): not a PHP service; `c` has no code folder.
+        assert!(summary.is_empty(), "{summary:?}");
+        let both = compose.replace("context: ./b\n      dockerfile: ../../outside/Dockerfile", "context: ./b");
+        let hint = detect(&[("compose.yaml", both.as_str()), ("b/Dockerfile", "FROM php:8.1-apache\n")]).unwrap();
+        let summary: Vec<_> = hint.apps.iter().map(|a| (a.service.as_str(), a.folder.as_str(), a.php, a.document_root.as_deref())).collect();
+        assert_eq!(summary, [("a", "../shared/a", php("8.2"), None), ("b", "b", php("8.1"), Some("public"))]);
     }
 
     #[test]

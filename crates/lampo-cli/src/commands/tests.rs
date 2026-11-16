@@ -126,6 +126,33 @@ async fn project_detect_human_lists_the_findings_and_the_next_step() {
     for needle in ["type:       not recognised", "falls back to generic-php", "php:        not detected", "registered: yes, as `shop`"] {
         assert!(out.contains(needle), "missing {needle:?} in:\n{out}");
     }
+    assert!(!out.contains("apps:"), "no compose apps, no apps block:\n{out}");
+}
+
+#[tokio::test]
+async fn project_detect_lists_the_compose_apps_in_text_and_json() {
+    let fake = Fake::new();
+    let mut stack = detection_json(r"C:\work\stack");
+    stack["apps"] = json!([
+        {"service": "shop", "folder": "apps/shop", "phpVersion": "8.3", "extensions": ["intl"], "documentRoot": "public", "environment": {"DB_HOST": "mysql"}, "serviceHosts": ["mysql"]},
+        {"service": "blog", "folder": "apps/blog", "phpVersion": null, "extensions": [], "documentRoot": null, "environment": {}, "serviceHosts": []}
+    ]);
+    *fake.detect_result.lock().unwrap() = Some(Ok(stack.clone()));
+    let (code, out, _) = run_cli(&fake, &["project", "detect", "--json"]).await;
+    assert_eq!((code, parse(&out)), (0, stack));
+
+    let (_, out, _) = run_cli(&fake, &["project", "detect"]).await;
+    for needle in [
+        "apps:       2 PHP apps in the compose file, one project each:",
+        "app:        shop (apps/shop)",
+        "document root: public",
+        "environment:   DB_HOST=mysql",
+        r"register:      lampo project create C:\work\stack\apps\shop --php 8.3",
+        "app:        blog (apps/blog)",
+        r"register:      lampo project create C:\work\stack\apps\blog",
+    ] {
+        assert!(out.contains(needle), "missing {needle:?} in:\n{out}");
+    }
 }
 
 #[tokio::test]

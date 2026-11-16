@@ -154,6 +154,15 @@ pub enum ProjectCommand {
     /// already registered for the folder, if any. Nothing is written. Run it before
     /// `project create` and pass `--preset` / `--php` there when a detected default is wrong.
     ///
+    /// A Docker Compose file running several PHP apps, each from its own folder (its `build`
+    /// context or the volume mounted on `/var/www/html`, `/app`...), also yields one proposed
+    /// project per app: text output adds an `app:` block each (service, folder, php, document
+    /// root, extensions, environment, services it reaches, the `project create` command);
+    /// `--json` adds `apps: [{service, folder, phpVersion, extensions, documentRoot,
+    /// environment, serviceHosts}]` (`folder` relative to the analysed one, `documentRoot`
+    /// relative to `folder`). `apps` is omitted when there is at most one app. Docker is never
+    /// run; only files inside the folder are read.
+    ///
     /// Example: lampo project detect C:\laragon\www\shop --json
     Detect {
         /// Folder to analyse (default: current directory; relative paths resolve against it).
