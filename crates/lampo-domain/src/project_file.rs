@@ -10,6 +10,7 @@ use serde::Deserialize;
 use crate::address::SiteAddress;
 use crate::error::DomainError;
 use crate::mysql::DatabaseName;
+use crate::mysql::accounts::MysqlCredentials;
 use crate::preset::PresetId;
 use crate::project::{DisplayName, Project, ProjectEnvironment, ProjectId, ProjectRoot, TlsMode};
 
@@ -31,6 +32,9 @@ pub struct ProjectFile {
     pub active: bool,
     #[serde(default)]
     pub origin_preset: Option<PresetId>,
+    /// Absent in files written before dedicated accounts: root, as they were created with.
+    #[serde(default)]
+    pub mysql_credentials: MysqlCredentials,
 }
 
 impl TryFrom<ProjectFile> for Project {
@@ -47,6 +51,7 @@ impl TryFrom<ProjectFile> for Project {
         project.tls = f.tls;
         project.active = f.active;
         project.origin_preset = f.origin_preset;
+        project.mysql_credentials = f.mysql_credentials;
         Ok(project)
     }
 }
@@ -65,8 +70,19 @@ mod tests {
         let mut p = project("shop", "C:\\sites\\shop");
         p.active = true;
         p.tls = TlsMode::LocalCa;
+        p.mysql_credentials = MysqlCredentials::Project;
         let back: Project = serde_json::from_value(json(&p)).unwrap();
         assert_eq!(back, p);
+    }
+
+    /// Projects created before dedicated accounts keep connecting as root (their `.env` says so).
+    #[test]
+    fn a_file_without_mysql_credentials_reads_as_root() {
+        let mut p = project("shop", "C:\\sites\\shop");
+        p.mysql_credentials = MysqlCredentials::Project;
+        let mut raw = json(&p);
+        raw.as_object_mut().unwrap().remove("mysql_credentials");
+        assert_eq!(serde_json::from_value::<Project>(raw).unwrap().mysql_credentials, MysqlCredentials::Root);
     }
 
     #[test]

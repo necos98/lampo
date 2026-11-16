@@ -19,7 +19,7 @@ use lampo_domain::site::SiteId;
 use lampo_domain::web::{ExtensionLoad, PhpIniSpec, VirtualHost, WebServerConfig, is_zend_extension, merge_ini, vhost_addressing};
 use lampo_domain::worktree::WorktreeEnvironment;
 
-use super::service_catalog::ServiceCatalog;
+use super::service_catalog::{ServiceCatalog, SiteMysqlClient};
 use super::support::{SiteRef, all_sites, composer_phar_for, installed_php_minors, newest_of, php_dir, php_package};
 
 /// Lampo's base php.ini values; project overrides win (`merge_ini`).
@@ -139,7 +139,7 @@ fn shim_target(
     php: PhpMinor,
     phprc_dir: PathBuf,
     env: Option<&ProjectEnvironment>,
-    database: Option<String>,
+    mysql: SiteMysqlClient,
 ) -> Option<ShimTarget> {
     let package = php_package(&snap.installed, php)?;
     Some(ShimTarget {
@@ -149,7 +149,7 @@ fn shim_target(
         phprc_dir: Some(phprc_dir),
         composer_phar: composer_phar_for(&snap.installed, php),
         composer_channel: php.composer_channel(),
-        services: catalog.shim_services(env, database, &snap.settings, &snap.installed, paths),
+        services: catalog.shim_services(env, mysql, &snap.settings, &snap.installed, paths),
         env_vars: env.map(|e| e.env_vars.clone()).unwrap_or_default(),
     })
 }
@@ -163,11 +163,11 @@ pub(crate) fn shim_index(snap: &ConfigSnapshot, catalog: &ServiceCatalog, paths:
         .into_iter()
         .filter_map(|site| {
             let env = site.environment();
-            let target = shim_target(snap, catalog, paths, env.php, paths.php_ini_dir(&site.id), Some(env), site.database().map(|d| d.to_string()))?;
+            let target = shim_target(snap, catalog, paths, env.php, paths.php_ini_dir(&site.id), Some(env), site.mysql_client())?;
             Some(ShimEntry { site: site.id.clone(), root: site.root().clone(), target })
         })
         .collect();
-    let default = snap.default_php().and_then(|php| shim_target(snap, catalog, paths, php, paths.default_php_ini_dir(), None, None));
+    let default = snap.default_php().and_then(|php| shim_target(snap, catalog, paths, php, paths.default_php_ini_dir(), None, SiteMysqlClient::default()));
     ShimIndex { version: SHIM_INDEX_VERSION, default, projects }
 }
 

@@ -34,6 +34,7 @@ async fn gui_update(w: &World, sync: Arc<CountingSync>, id: &str, edit: impl FnO
         environment: current.environment.clone(),
         database_name: current.database_name.clone(),
         tls: TlsModeDto::Disabled,
+        mysql_credentials: None,
     };
     edit(&mut request);
     UpdateProject::new(w.project_writer_with(sync)).execute(request, &gui()).await

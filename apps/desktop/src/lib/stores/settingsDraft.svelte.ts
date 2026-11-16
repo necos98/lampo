@@ -14,6 +14,7 @@ export class SettingsDraft {
 		loopbackPortRange: { start: 8100, end: 8199 },
 		closeToTray: true,
 		autoRestartServices: true,
+		mysqlProjectCredentials: true,
 		firstRunCompleted: false,
 		defaultAddressing: 'no-elevation'
 	});

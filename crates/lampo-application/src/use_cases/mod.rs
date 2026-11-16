@@ -24,6 +24,7 @@ pub mod lifecycle;
 pub mod log_files;
 pub mod log_rotation;
 pub mod logs;
+pub mod mysql_accounts;
 pub mod package_uninstall;
 pub mod packages;
 pub mod php_extensions;
@@ -69,6 +70,7 @@ pub use lifecycle::{FirstRunDeps, FirstRunSetup, Shutdown, ShutdownGate, Startup
 pub use log_files::{ExportLogLines, LogTarget, OpenLog};
 pub use log_rotation::PeriodicLogRotation;
 pub use logs::LogQueries;
+pub use mysql_accounts::{ConnectionPasswords, MysqlAccounts, MysqlPasswords, MysqlPasswordsDeps, NoConnectionPasswords, Provisioned};
 pub use package_uninstall::{UninstallPackage, UninstallPackageDeps};
 pub use packages::{InstallPackage, InstallPackageDeps, PackageCatalog, PackageCatalogDeps, PhpExtensionListing};
 pub use php_extensions::PhpExtensionsQuery;

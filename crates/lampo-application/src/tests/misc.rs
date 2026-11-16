@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use lampo_domain::events::DomainEvent;
 use lampo_domain::mysql::MysqlSeries;
+use lampo_domain::mysql::accounts::MysqlCredentials;
 use lampo_domain::package::PackageKind;
 use lampo_domain::ports::{ControlFrameSink, ControlRequestHandler, SettingsRepository, WorktreeRepository};
 use lampo_domain::preset::builtin;
@@ -159,6 +160,7 @@ async fn an_unreadable_hosts_file_is_a_doctor_warning() {
 async fn agent_context_inside_worktrees_with_and_without_environment() {
     let w = World::with_basics();
     w.project("shop", "C:\\sites\\shop", true);
+    w.update_project("shop", |p| p.mysql_credentials = MysqlCredentials::Project);
     w.hosts_in_sync();
     add_worktree(&w, "D:\\wt\\fix", "fix-1", 8105, DatabaseMode::Fresh);
     w.git.linked("D:\\wt\\fix", "C:\\sites\\shop", Some("fix-1"));
@@ -174,12 +176,15 @@ async fn agent_context_inside_worktrees_with_and_without_environment() {
         control: w.control.clone(),
         paths: w.paths.clone(),
         services: w.services.clone(),
+        passwords: w.passwords.clone(),
     });
 
     let with_env = agent.execute(&resolve("D:\\wt\\fix\\src")).unwrap();
     assert_eq!(with_env.resolution.kind, ResolvedKind::WorktreeEnvironment);
     assert_eq!(with_env.url.as_deref(), Some("http://127.0.0.1:8105"));
-    assert_eq!(with_env.database.as_ref().unwrap().database, "shop_wt_fix_1");
+    let db = with_env.database.as_ref().unwrap();
+    assert_eq!(db.database, "shop_wt_fix_1");
+    assert_eq!((db.user.as_str(), db.password.as_str()), ("lampo_shop", "generated-1"), "the parent's own account");
     assert!(with_env.worktree.as_ref().unwrap().environment_up);
     assert_eq!(with_env.php.binary, "C:\\lampo\\packages\\php-8.3.14\\php.exe");
     assert_eq!(with_env.php.composer_channel, "stable");

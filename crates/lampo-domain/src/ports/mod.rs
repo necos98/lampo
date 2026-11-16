@@ -24,6 +24,7 @@
 //! | [`packages`] | `lampo-infra-packages`  |
 //! | [`web`]      | `lampo-infra-web` (also Apache's `ServiceRunner`) |
 //! | [`services`] | `lampo-infra-services` (supervisor, runners, ports, logs, `DatabaseAdmin`, MySQL root passwords) |
+//! | [`mysql_accounts`] | `lampo-infra-services` (project account passwords, password generator, `MysqlAccountAdmin`) |
 //! | [`control`]  | `lampo-infra-services` (named pipe, headless launcher) |
 //! | [`agents`]   | `lampo-infra-services` (`ClaudeCodeCli`), `lampo-infra-store` (`AgentPluginFiles`) |
 //! | [`desktop`]  | `lampo-infra-services` (`WindowsExternalAppLauncher`) |
@@ -37,6 +38,7 @@ pub mod agents;
 pub mod control;
 pub mod desktop;
 pub mod events;
+pub mod mysql_accounts;
 pub mod packages;
 pub mod services;
 pub mod store;
@@ -48,6 +50,7 @@ pub use agents::{AgentPluginFiles, ClaudeCodeCli};
 pub use desktop::ExternalAppLauncher;
 pub use control::{AppLauncher, ControlChannelClient, ControlChannelServer, ControlFrameSink, ControlRequestHandler};
 pub use events::{EventPublisher, NullEventPublisher, NullProgressSink, ProgressSink};
+pub use mysql_accounts::{MysqlAccountAdmin, MysqlPasswordGenerator, MysqlProjectPasswordReader, MysqlProjectPasswordWriter, ProjectAccountGrant, RootPasswordChange};
 pub use packages::{
     ArchiveExtractor, InstalledPackageRegistry, PackageCatalogSource, PackageDownloader, PackageInstallHook, PackageLeftoverSweeper, PackageSlotLock, PhpExtensionScanner, SlotGuard,
     SlotReplacement, VcRuntimeDetector,

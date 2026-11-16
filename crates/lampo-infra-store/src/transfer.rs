@@ -52,6 +52,8 @@ impl ProjectTransfer for TomlProjectTransfer {
             project.set_database_name(db);
         }
         project.origin_preset = parsed.origin_preset;
+        // The project's .env travels with its code: it keeps the account the export names.
+        project.mysql_credentials = parsed.mysql_credentials;
         project.active = false;
         Ok(ImportedProject { project, dropped })
     }

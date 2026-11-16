@@ -236,6 +236,7 @@ async fn activate_set_php_relink_update_and_delete() {
         environment: dto.environment.clone(),
         database_name: Some("shop_main".into()),
         tls: TlsModeDto::LocalCa,
+        mysql_credentials: None,
     };
     assert_eq!(update.execute(request.clone(), &cli()).await.unwrap_err().code, ErrorCode::Unsupported);
     request.tls = TlsModeDto::Disabled;

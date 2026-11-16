@@ -9,7 +9,7 @@ use lampo_domain::php::PhpMinor;
 use serde::Serialize;
 
 use super::{Cmd, addressing, validation};
-use crate::cli::{ProjectCommand, ProjectCreateArgs, ProjectNewArgs, ProjectSetArgs, StarterKitArg};
+use crate::cli::{MysqlCredentialsArg, ProjectCommand, ProjectCreateArgs, ProjectNewArgs, ProjectSetArgs, StarterKitArg};
 use crate::render;
 
 pub async fn run(c: &Cmd<'_>, command: ProjectCommand) -> AppResult<i32> {
@@ -142,6 +142,10 @@ fn patch_request(project_id: String, args: ProjectSetArgs) -> AppResult<ProjectP
         services_add: args.service.iter().map(|s| service_use(s)).collect(),
         services_remove: args.no_service,
         database_name: args.database,
+        mysql_credentials: args.mysql_credentials.map(|c| match c {
+            MysqlCredentialsArg::Project => MysqlCredentialsDto::Project,
+            MysqlCredentialsArg::Root => MysqlCredentialsDto::Root,
+        }),
         public_dir: args.public_dir,
         apache_directives: args.apache_directives,
         name: args.name,

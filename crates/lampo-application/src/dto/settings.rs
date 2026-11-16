@@ -49,6 +49,9 @@ pub struct SettingsDto {
     pub first_run_completed: bool,
     /// Addresses new projects get when the creator chooses none.
     pub default_addressing: AddressingDto,
+    /// New projects get a dedicated MySQL account (`lampo_<id>`, granted only their databases)
+    /// instead of root. Existing projects keep theirs until switched one by one.
+    pub mysql_project_credentials: bool,
 }
 
 /// A registered kind of service, so front-ends offer what the backend knows (no hard-coded
@@ -88,6 +91,8 @@ pub struct SettingsPatchRequest {
     pub default_addressing: Option<AddressingDto>,
     /// Whether services that exit unexpectedly are started again.
     pub auto_restart_services: Option<bool>,
+    /// Whether new projects get a dedicated MySQL account.
+    pub mysql_project_credentials: Option<bool>,
 }
 
 impl SettingsPatchRequest {
@@ -97,7 +102,7 @@ impl SettingsPatchRequest {
 }
 
 /// One changed setting: `setting` is `apache.port`, `<service>.port` (`mysql-8.4.port`), `<service>.ui-port` (`mailpit.ui-port`),
-/// `default-php`, `loopback-port-range`, `default-addressing` or `auto-restart`; `from`/`to` are display values.
+/// `default-php`, `loopback-port-range`, `default-addressing`, `auto-restart` or `project-credentials`; `from`/`to` are display values.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingChangeDto {

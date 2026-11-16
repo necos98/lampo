@@ -72,6 +72,7 @@ struct Patch {
     loopback_ports: Option<PortRange>,
     default_addressing: Option<Addressing>,
     auto_restart_services: Option<bool>,
+    mysql_project_credentials: Option<bool>,
 }
 
 /// `(id, port)` pairs of a request map, validated: well-formed ids, no Apache, no duplicates,
@@ -107,6 +108,7 @@ impl Patch {
             loopback_ports: r.loopback_port_range.map(|range| PortRange::new(range.start, range.end)).transpose()?,
             default_addressing: r.default_addressing.map(addressing_from_dto),
             auto_restart_services: r.auto_restart_services,
+            mysql_project_credentials: r.mysql_project_credentials,
         })
     }
 
@@ -140,15 +142,25 @@ impl Patch {
         if let Some(on) = self.auto_restart_services {
             next.auto_restart_services = on;
         }
+        if let Some(on) = self.mysql_project_credentials {
+            next.mysql_project_credentials = on;
+        }
         next.validate()?;
         Ok(next)
     }
 }
 
-/// `true` when a change needs a sync: anything but the default addressing, which only applies
-/// to projects created later, and the automatic restart, read when a service crashes.
+/// `true` when a change needs a sync: anything but the default addressing and the credentials of
+/// new projects, which only apply to projects created later, and the automatic restart, read
+/// when a service crashes.
 fn changes_environment(before: &Settings, after: &Settings) -> bool {
-    &Settings { default_addressing: before.default_addressing, auto_restart_services: before.auto_restart_services, ..after.clone() } != before
+    let unsynced = Settings {
+        default_addressing: before.default_addressing,
+        auto_restart_services: before.auto_restart_services,
+        mysql_project_credentials: before.mysql_project_credentials,
+        ..after.clone()
+    };
+    &unsynced != before
 }
 
 fn describe_changes(before: &Settings, after: &Settings, catalog: &ServiceCatalog) -> Vec<SettingChangeDto> {
@@ -167,6 +179,9 @@ fn describe_changes(before: &Settings, after: &Settings, catalog: &ServiceCatalo
     }
     if before.auto_restart_services != after.auto_restart_services {
         out.push(change("auto-restart".into(), on_off(before.auto_restart_services).into(), on_off(after.auto_restart_services).into()));
+    }
+    if before.mysql_project_credentials != after.mysql_project_credentials {
+        out.push(change("project-credentials".into(), on_off(before.mysql_project_credentials).into(), on_off(after.mysql_project_credentials).into()));
     }
     out
 }

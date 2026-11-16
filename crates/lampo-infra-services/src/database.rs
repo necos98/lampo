@@ -13,6 +13,7 @@ use lampo_domain::{PortError, PortResult};
 use crate::compression;
 use connection::Clients;
 
+mod accounts;
 mod compat;
 mod connection;
 #[cfg(test)]
@@ -218,11 +219,13 @@ mod tests {
         compressions: Mutex<Vec<(StreamCompression, StreamCompression)>>,
         /// `stdin_rewrite` of every piped command.
         rewrites: Mutex<Vec<DumpRewrite>>,
-        reply: Mutex<Vec<CommandOutput>>,
+        pub(super) reply: Mutex<Vec<CommandOutput>>,
         /// Returned by the next piped command after recording it (a cancellation mid-stream).
         pipe_error: Mutex<Option<PortError>>,
         /// `(path, contents)` of the `--defaults-file=` of every stage, read while it "runs".
         pub(super) option_files: Mutex<Vec<(PathBuf, String)>>,
+        /// `(path, contents)` of the `stdin_file` of every piped command, read while it "runs".
+        pub(super) stdins: Mutex<Vec<(PathBuf, String)>>,
     }
 
     impl FakeRunner {
@@ -258,6 +261,12 @@ mod tests {
             self.compressions.lock().unwrap().push((command.stdin_compression, command.stdout_compression));
             self.rewrites.lock().unwrap().push(command.stdin_rewrite);
             self.record_option_files(&command.stages);
+            // Lampo's own scripts (not the dumps an import streams).
+            let script = command.stdin_file.as_ref().filter(|f| f.file_name().is_some_and(|n| n.to_string_lossy().starts_with("lampo-mysql-")));
+            if let Some(stdin) = script {
+                crate::client_option_file::tests::assert_user_only(stdin);
+                self.stdins.lock().unwrap().push((stdin.clone(), std::fs::read_to_string(stdin).unwrap()));
+            }
             self.calls.lock().unwrap().push(command.stages);
             if let Some(error) = self.pipe_error.lock().unwrap().take() {
                 return Err(error);

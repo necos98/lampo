@@ -10,6 +10,7 @@ use lampo_domain::address::SiteAddress;
 use lampo_domain::detection::{DetectedApp, combine_hints};
 use lampo_domain::events::DomainEvent;
 use lampo_domain::mysql::DatabaseName;
+use lampo_domain::mysql::accounts::MysqlCredentials;
 use lampo_domain::package::PackageKind;
 use lampo_domain::php::PhpMinor;
 use lampo_domain::ports::{EventPublisher, FileSystemInspector, InstalledPackageRegistry, ProjectDetector, ProjectRepository, SettingsRepository, WorktreeRepository};
@@ -21,6 +22,7 @@ use lampo_domain::worktree::WorktreeEnvironment;
 
 use super::allocation::{LoopbackPortAllocator, SiteSnapshot};
 use super::database::DatabaseService;
+use super::mysql_accounts::ConnectionPasswords;
 use super::presets::PresetQueries;
 use super::project_policy::require_mysql_for_database;
 use super::project_writer::{ProjectWriter, RemovedProject};
@@ -28,7 +30,7 @@ use super::support::{load_project, newest_of, package_missing, parse_project_id,
 use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::mapping::{address_from_dto, address_to_dto, addressing_from_dto, addressing_to_dto, environment_from_dto};
+use crate::mapping::{address_from_dto, address_to_dto, addressing_from_dto, addressing_to_dto, credentials_from_dto, environment_from_dto};
 
 /// Preset used when neither the request nor detection names one.
 pub const FALLBACK_PRESET: &str = "generic-php";
@@ -52,11 +54,19 @@ pub struct ProjectQueries {
     worktrees: Arc<dyn WorktreeRepository>,
     settings: Arc<dyn SettingsRepository>,
     fs: Arc<dyn FileSystemInspector>,
+    /// The passwords of the connection details shown.
+    passwords: Arc<dyn ConnectionPasswords>,
 }
 
 impl ProjectQueries {
-    pub fn new(projects: Arc<dyn ProjectRepository>, worktrees: Arc<dyn WorktreeRepository>, settings: Arc<dyn SettingsRepository>, fs: Arc<dyn FileSystemInspector>) -> Self {
-        Self { projects, worktrees, settings, fs }
+    pub fn new(
+        projects: Arc<dyn ProjectRepository>,
+        worktrees: Arc<dyn WorktreeRepository>,
+        settings: Arc<dyn SettingsRepository>,
+        fs: Arc<dyn FileSystemInspector>,
+        passwords: Arc<dyn ConnectionPasswords>,
+    ) -> Self {
+        Self { projects, worktrees, settings, fs, passwords }
     }
 
     /// The projects that load, plus the files that do not (so a front-end can say so instead of
@@ -66,7 +76,7 @@ impl ProjectQueries {
         let worktrees = self.worktrees.list_all()?;
         let listing = self.projects.scan()?;
         Ok(ProjectListDto {
-            projects: listing.projects.iter().map(|p| project_dto(p, &worktrees, &settings, Some(self.fs.as_ref()))).collect(),
+            projects: listing.projects.iter().map(|p| project_dto(p, &worktrees, &settings, Some(self.fs.as_ref()), self.passwords.as_ref())).collect(),
             unreadable: listing.unreadable.into_iter().map(|u| UnreadableProjectDto { file: u.file.display().to_string(), reason: u.reason }).collect(),
         })
     }
@@ -94,12 +104,12 @@ impl ProjectQueries {
     /// `NotFound` if unknown.
     pub fn get(&self, project_id: &str) -> AppResult<ProjectDto> {
         let project = load_project(self.projects.as_ref(), project_id)?;
-        Ok(project_dto(&project, &self.worktrees.list_for(&project.id)?, &self.settings.load()?, Some(self.fs.as_ref())))
+        Ok(project_dto(&project, &self.worktrees.list_for(&project.id)?, &self.settings.load()?, Some(self.fs.as_ref()), self.passwords.as_ref()))
     }
 
     /// The full view of `project` in the registry `sites` (a commit's, so nothing is read again).
     pub(crate) fn present(&self, project: &Project, sites: &SiteSnapshot) -> ProjectDto {
-        project_dto(project, &sites.worktrees, &sites.settings, Some(self.fs.as_ref()))
+        project_dto(project, &sites.worktrees, &sites.settings, Some(self.fs.as_ref()), self.passwords.as_ref())
     }
 }
 
@@ -251,6 +261,7 @@ impl CreateProject {
             };
             let mut project = Project::new(id, name.clone(), root.clone(), addresses, environment.clone())?;
             project.origin_preset = Some(preset.id.clone());
+            project.mysql_credentials = MysqlCredentials::for_new_project(snap.settings.mysql_project_credentials);
             project.set_active(request.activate);
             require_project_hosts_elevation(ctx, &project, "creating", "nothing was created")?;
             Ok(project)
@@ -284,6 +295,7 @@ impl UpdateProject {
         let addresses = request.addresses.iter().map(address_from_dto).collect::<Result<Vec<_>, _>>()?;
         let environment = environment_from_dto(&request.environment)?;
         let database = request.database_name.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(DatabaseName::new).transpose()?;
+        let credentials = request.mysql_credentials.map(credentials_from_dto);
         if database.is_some() {
             require_mysql_for_database(&environment)?;
         }
@@ -295,6 +307,9 @@ impl UpdateProject {
                 project.set_environment(environment)?;
                 if let Some(db) = database {
                     project.set_database_name(db);
+                }
+                if let Some(credentials) = credentials {
+                    project.mysql_credentials = credentials;
                 }
                 project.tls = TlsMode::Disabled;
                 Ok(true)

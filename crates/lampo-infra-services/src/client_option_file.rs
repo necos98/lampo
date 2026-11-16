@@ -2,7 +2,8 @@
 //! processes and logs see it): a temporary option file ([`MysqlPassword::client_option_file`])
 //! created with a descriptor that lets only the current user open it, so it is never readable
 //! with inherited permissions, and deleted when the [`ClientOptionFile`] is dropped, after the
-//! client has exited.
+//! client has exited. Statements carrying a password (`ALTER USER … IDENTIFIED BY`) reach the
+//! client the same way, as a [`SecretTempFile`] it reads on its standard input.
 
 use std::fs::File;
 use std::io::Write;
@@ -19,38 +20,71 @@ use windows_sys::Win32::Storage::FileSystem::{CREATE_NEW, CreateFileW, FILE_ATTR
 use crate::win::{UserOnlySecurity, owned, wide};
 
 const PREFIX: &str = "lampo-mysql-";
-const SUFFIX: &str = ".cnf";
+const OPTION_FILE_SUFFIX: &str = ".cnf";
 /// Random characters of the file name (unguessable, and no collision between concurrent clients).
 const RANDOM_CHARS: usize = 16;
+
+/// A temporary file only the current user can open, holding a secret, deleted when dropped.
+#[derive(Debug)]
+pub(crate) struct SecretTempFile {
+    path: Option<tempfile::TempPath>,
+}
+
+impl SecretTempFile {
+    /// Writes `contents` to a new file named `lampo-mysql-<random><suffix>` in `dir`.
+    pub(crate) fn write_in(dir: &Path, suffix: &str, contents: &[u8]) -> PortResult<Self> {
+        let context = || format!("writing a temporary MySQL file in {}", dir.display());
+        let security = UserOnlySecurity::new(false).map_err(|e| PortError::io(context(), e))?;
+        let mut file =
+            tempfile::Builder::new().prefix(PREFIX).suffix(suffix).rand_bytes(RANDOM_CHARS).make_in(dir, |path| create_new(path, &security)).map_err(|e| PortError::io(context(), e))?;
+        // A failed write drops `file`, which deletes it.
+        file.write_all(contents).map_err(|e| PortError::io(context(), e))?;
+        file.as_file().sync_all().map_err(|e| PortError::io(context(), e))?;
+        // Closed here: the client opens it by name.
+        Ok(Self { path: Some(file.into_temp_path()) })
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        self.path.as_deref().expect("present until dropped")
+    }
+}
+
+impl Drop for SecretTempFile {
+    fn drop(&mut self) {
+        if let Some(path) = self.path.take() {
+            let shown: PathBuf = path.to_path_buf();
+            if let Err(e) = path.close() {
+                tracing::warn!(file = %shown.display(), error = %e, "cannot delete a temporary file holding a MySQL password");
+            }
+        }
+    }
+}
 
 /// An option file with a password, deleted when dropped: keep it alive until the client exits.
 #[derive(Debug)]
 pub struct ClientOptionFile {
-    path: Option<tempfile::TempPath>,
+    file: SecretTempFile,
 }
 
 impl ClientOptionFile {
     /// The option file for clients connecting as the root of `instance`, when a root password is
     /// stored for it (`None`: root has no password, the clients need no option file).
     pub fn for_instance(passwords: &dyn MysqlRootPasswordReader, instance: &ServiceId) -> PortResult<Option<Self>> {
-        passwords.root_password(instance)?.map(|password| Self::write_in(&std::env::temp_dir(), &password)).transpose()
+        passwords.root_password(instance)?.map(|password| Self::for_password(&password)).transpose()
+    }
+
+    /// The option file of `password`, in the temporary folder.
+    pub fn for_password(password: &MysqlPassword) -> PortResult<Self> {
+        Self::write_in(&std::env::temp_dir(), password)
     }
 
     /// Writes the option file of `password` into `dir`.
     fn write_in(dir: &Path, password: &MysqlPassword) -> PortResult<Self> {
-        let context = || format!("writing a MySQL option file in {}", dir.display());
-        let security = UserOnlySecurity::new(false).map_err(|e| PortError::io(context(), e))?;
-        let mut file =
-            tempfile::Builder::new().prefix(PREFIX).suffix(SUFFIX).rand_bytes(RANDOM_CHARS).make_in(dir, |path| create_new(path, &security)).map_err(|e| PortError::io(context(), e))?;
-        // A failed write drops `file`, which deletes it.
-        file.write_all(password.client_option_file().as_bytes()).map_err(|e| PortError::io(context(), e))?;
-        file.as_file().sync_all().map_err(|e| PortError::io(context(), e))?;
-        // Closed here: the client opens it by name.
-        Ok(Self { path: Some(file.into_temp_path()) })
+        Ok(Self { file: SecretTempFile::write_in(dir, OPTION_FILE_SUFFIX, password.client_option_file().as_bytes())? })
     }
 
     pub fn path(&self) -> &Path {
-        self.path.as_deref().expect("present until dropped")
+        self.file.path()
     }
 
     /// For Lampo's own clients: `--defaults-file=<file>` reads this file and no other option file
@@ -64,17 +98,6 @@ impl ClientOptionFile {
     /// keep applying. Must be the first argument.
     pub fn defaults_extra_file_arg(&self) -> String {
         format!("--defaults-extra-file={}", self.path().display())
-    }
-}
-
-impl Drop for ClientOptionFile {
-    fn drop(&mut self) {
-        if let Some(path) = self.path.take() {
-            let shown: PathBuf = path.to_path_buf();
-            if let Err(e) = path.close() {
-                tracing::warn!(file = %shown.display(), error = %e, "cannot delete a MySQL option file holding a password");
-            }
-        }
     }
 }
 

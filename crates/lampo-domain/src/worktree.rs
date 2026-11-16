@@ -168,7 +168,7 @@ impl WorktreeEnvironment {
     pub fn database_connection(&self, parent: &Project, settings: &Settings) -> Result<Option<DatabaseConnection>, DomainError> {
         let (Some(series), Some(db)) = (parent.environment.mysql(), self.database_name(parent).cloned()) else { return Ok(None) };
         let port = settings.mysql_port(series).ok_or_else(|| DomainError::UnknownMysqlSeries(series.to_string()))?;
-        Ok(Some(DatabaseConnection::local(series, port, db)))
+        Ok(Some(DatabaseConnection::local(series, port, db, &parent.id, parent.mysql_credentials)))
     }
 
     /// Stale: its folder is gone (`folder_exists` answers for [`Self::root`]) or its parent

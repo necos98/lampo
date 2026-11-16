@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use lampo_domain::mysql::DatabaseName;
-use lampo_domain::mysql::credentials::ROOT_ACCOUNT;
+use lampo_domain::mysql::credentials::{MysqlPassword, ROOT_ACCOUNT};
 use lampo_domain::ports::{CommandSpec, MysqlEndpoint, MysqlRootPasswordReader};
 use lampo_domain::{PortError, PortResult};
 
@@ -28,6 +28,12 @@ impl<'a> Clients<'a> {
     pub(super) fn of(endpoint: &'a MysqlEndpoint, passwords: &dyn MysqlRootPasswordReader) -> PortResult<Self> {
         let option_file = if endpoint.user == ROOT_ACCOUNT { ClientOptionFile::for_instance(passwords, &endpoint.series.service_id())? } else { None };
         Ok(Self { endpoint, option_file })
+    }
+
+    /// Connecting as the endpoint's user with `password` (`None`: with no password), whatever is
+    /// stored.
+    pub(super) fn with_password(endpoint: &'a MysqlEndpoint, password: Option<&MysqlPassword>) -> PortResult<Self> {
+        Ok(Self { endpoint, option_file: password.map(ClientOptionFile::for_password).transpose()? })
     }
 
     fn program(&self, exe: &str) -> PortResult<PathBuf> {

@@ -34,6 +34,11 @@
 		<SelectField {...field} value={draft.value.defaultAddressing} options={addressingOptions} onchange={(v) => (draft.value.defaultAddressing = v as Addressing)} />
 	{/snippet}
 </FormRow>
+<FormRow label={t.projectCredentials} help={t.projectCredentialsHelp}>
+	{#snippet children(field)}
+		<Switch {...field} bind:checked={draft.value.mysqlProjectCredentials} />
+	{/snippet}
+</FormRow>
 <FormRow label={t.tld} help={t.tldHelp}>
 	{#snippet children(field)}
 		<Input {...field} class="h-8 w-32 font-mono text-xs" bind:value={draft.value.tld} />

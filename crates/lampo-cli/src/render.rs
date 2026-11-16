@@ -140,8 +140,25 @@ pub fn project(p: &ProjectDto) -> String {
         out.push_str(&format!("  apache:    {directives} extra directive line(s)\n"));
     }
     match &p.database {
-        Some(db) => out.push_str(&format!("  database:\n{}\n", database_lines(db, "    "))),
-        None => out.push_str("  database:  none\n"),
+        Some(db) => {
+            out.push_str(&format!(
+                "  database:
+{}
+",
+                database_lines(db, "    ")
+            ));
+            if p.mysql_credentials == MysqlCredentialsDto::Root {
+                out.push_str(&format!(
+                    "    as root: give it its own account with `lampo project set {} --mysql-credentials project`
+",
+                    p.id
+                ));
+            }
+        }
+        None => out.push_str(
+            "  database:  none
+",
+        ),
     }
     if let Some(mail) = &p.mail {
         out.push_str(&format!("  mail:      {}\n", mail_line(mail)));
@@ -613,6 +630,7 @@ pub fn settings(s: &SettingsDto) -> String {
     rows.push(vec!["loopback port range".into(), format!("{}-{}", s.loopback_port_range.start, s.loopback_port_range.end)]);
     rows.push(vec!["close to tray".into(), yes_no(s.close_to_tray).into()]);
     rows.push(vec!["auto-restart".into(), yes_no(s.auto_restart_services).into()]);
+    rows.push(vec!["project credentials".into(), yes_no(s.mysql_project_credentials).into()]);
     rows.push(vec!["default addressing".into(), addressing(s.default_addressing).into()]);
     table(&rows)
 }

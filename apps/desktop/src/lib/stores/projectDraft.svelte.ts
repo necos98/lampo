@@ -1,4 +1,4 @@
-import type { Project, ProjectEnvironment, SiteAddress, TlsMode, UpdateProjectRequest } from '../api/index.js';
+import type { MysqlCredentials, Project, ProjectEnvironment, SiteAddress, TlsMode, UpdateProjectRequest } from '../api/index.js';
 import { AddressList, type AddressRow } from '../projects/addressList.js';
 import { EnvVarList, type EnvVarRow } from '../projects/envVarList.js';
 import { DATABASE_KIND, usesService } from '../projects/services.js';
@@ -6,7 +6,7 @@ import { Baseline } from './baseline.js';
 
 const plain = <V>(v: V): V => JSON.parse(JSON.stringify(v)) as V;
 
-type EditableFields = Pick<Project, 'name' | 'addresses' | 'environment' | 'databaseName' | 'tls'>;
+type EditableFields = Pick<Project, 'name' | 'addresses' | 'environment' | 'databaseName' | 'mysqlCredentials' | 'tls'>;
 
 /** The environment but its variables, which the draft edits by row (`ProjectDraft.envVars`). */
 type EnvironmentFields = Omit<ProjectEnvironment, 'envVars'>;
@@ -14,7 +14,7 @@ type EnvironmentFields = Omit<ProjectEnvironment, 'envVars'>;
 /** The editable fields of a project, in the order the baseline compares them. */
 function editable(p: EditableFields) {
 	const { envVars, ...environment } = p.environment;
-	return [p.name, p.addresses, environment, envVars, p.databaseName, p.tls];
+	return [p.name, p.addresses, environment, envVars, p.databaseName, p.mysqlCredentials, p.tls];
 }
 
 /**
@@ -38,6 +38,7 @@ export class ProjectDraft {
 	#envVarRows = $state<EnvVarRow[]>([]);
 	readonly envVars = new EnvVarList(this.#envVarRows);
 	databaseName = $state<string | null>(null);
+	mysqlCredentials = $state<MysqlCredentials>('root');
 	tls = $state<TlsMode>('disabled');
 
 	#baseline = new Baseline();
@@ -55,6 +56,7 @@ export class ProjectDraft {
 		this.environment = environment;
 		this.envVars.load(envVars);
 		this.databaseName = project.databaseName;
+		this.mysqlCredentials = project.mysqlCredentials;
 		this.tls = project.tls;
 		this.#baseline.set(editable(this.#fields()));
 	}
@@ -86,6 +88,7 @@ export class ProjectDraft {
 			addresses: plain(this.addresses.values),
 			environment: plain(this.#environment()),
 			databaseName: databaseName || null,
+			mysqlCredentials: this.mysqlCredentials,
 			tls: this.tls
 		};
 	}
@@ -95,7 +98,7 @@ export class ProjectDraft {
 	}
 
 	#fields(): EditableFields {
-		return { name: this.name, addresses: this.addresses.values, environment: this.#environment(), databaseName: this.databaseName, tls: this.tls };
+		return { name: this.name, addresses: this.addresses.values, environment: this.#environment(), databaseName: this.databaseName, mysqlCredentials: this.mysqlCredentials, tls: this.tls };
 	}
 }
 

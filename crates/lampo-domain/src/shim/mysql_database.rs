@@ -110,6 +110,7 @@ pub(crate) mod tests {
             database: database.map(str::to_string),
             data_dir: data_dir.map(PathBuf::from),
             env_prefix: "DB".into(),
+            project_account: None,
         }
     }
 

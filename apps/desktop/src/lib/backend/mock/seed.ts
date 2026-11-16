@@ -34,8 +34,10 @@ export function seedPresets(): T.Preset[] {
 	];
 }
 
-export function connection(database: string, mysql: string): T.DatabaseConnection {
-	return { mysqlVersion: mysql, host: '127.0.0.1', port: mysql === '8.4' ? 3306 : 3307, user: 'root', password: '', database };
+/** `projectAccount`: the project whose dedicated account connects (`null`: root, no password). */
+export function connection(database: string, mysql: string, projectAccount: string | null = null): T.DatabaseConnection {
+	const account = projectAccount ? { user: `lampo_${projectAccount.replace(/-/g, '_')}`, password: 'Mock3dProjectPassw0rd' } : { user: 'root', password: '' };
+	return { mysqlVersion: mysql, host: '127.0.0.1', port: mysql === '8.4' ? 3306 : 3307, ...account, database };
 }
 
 function project(id: string, name: string, root: string, host: string, e: T.ProjectEnvironment, over: Partial<T.Project> = {}): T.Project {
@@ -54,7 +56,8 @@ function project(id: string, name: string, root: string, host: string, e: T.Proj
 		documentRoot: e.publicDir ? `${root}\\${e.publicDir}` : root,
 		environment: e,
 		databaseName: mysqlOf(e) ? db : null,
-		database: mysqlOf(e) ? connection(db, mysqlOf(e) as string) : null,
+		database: mysqlOf(e) ? connection(db, mysqlOf(e) as string, over.mysqlCredentials === 'project' ? id : null) : null,
+		mysqlCredentials: 'root',
 		tls: 'disabled',
 		active: true,
 		originPreset: null,
@@ -66,7 +69,7 @@ function project(id: string, name: string, root: string, host: string, e: T.Proj
 
 export function seedProjects(): T.Project[] {
 	return [
-		project('shop', 'Shop', 'C:\\Dev\\shop', 'shop.test', env({ addons: ['xdebug'], redis: true, mail: true, envVars: { APP_ENV: 'local', STRIPE_SECRET: 'sk_test_mock' } }), { originPreset: 'laravel' }),
+		project('shop', 'Shop', 'C:\\Dev\\shop', 'shop.test', env({ addons: ['xdebug'], redis: true, mail: true, envVars: { APP_ENV: 'local', STRIPE_SECRET: 'sk_test_mock' } }), { originPreset: 'laravel', mysqlCredentials: 'project' }),
 		project('blog', 'Blog aziendale', 'C:\\Dev\\blog', 'blog.test', env({ phpVersion: '8.3', publicDir: '', extensions: ['curl', 'mbstring', 'mysqli', 'gd', 'zip'] }), { originPreset: 'wordpress' }),
 		project('crm-legacy', 'CRM legacy', 'C:\\Dev\\crm-legacy', 'crm.test', env({ phpVersion: '5.6', publicDir: '', mysql: '5.7', extensions: ['mysqli', 'mbstring'] }), { originPreset: 'legacy' }),
 		project('api-symfony', 'API Symfony', 'D:\\Work\\api-symfony', 'api.test', env({ phpVersion: '8.4', extensions: ['intl', 'pdo_mysql', 'xml'] }), { active: false, originPreset: 'symfony' }),

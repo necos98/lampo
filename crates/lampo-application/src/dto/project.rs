@@ -35,6 +35,18 @@ pub enum AddressingDto {
     HostsOnly,
 }
 
+/// The MySQL account a project's code connects as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "MysqlCredentials"))]
+#[serde(rename_all = "kebab-case")]
+pub enum MysqlCredentialsDto {
+    /// The instance's root (projects created before dedicated accounts, whose `.env` uses it).
+    #[default]
+    Root,
+    /// A dedicated account (`lampo_<id>`) granted only the project's databases.
+    Project,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(rename = "TlsMode"))]
 #[serde(rename_all = "kebab-case")]
@@ -89,6 +101,9 @@ pub struct ProjectDto {
     pub database_name: Option<String>,
     /// Connection details to show (never written to `.env`).
     pub database: Option<DatabaseConnectionDto>,
+    /// Which account `database` names; meaningful only with MySQL. Absent (older apps) = root.
+    #[serde(default)]
+    pub mysql_credentials: MysqlCredentialsDto,
     /// SMTP endpoint and web UI of Mailpit, when the project uses it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mail: Option<MailConnectionDto>,
@@ -229,6 +244,10 @@ pub struct UpdateProjectRequest {
     pub environment: ProjectEnvironmentDto,
     pub database_name: Option<String>,
     pub tls: TlsModeDto,
+    /// The MySQL account its code connects as. Absent (older clients) = unchanged.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional = nullable))]
+    pub mysql_credentials: Option<MysqlCredentialsDto>,
 }
 
 /// Partial change of a project's environment (`lampo project set`), applied atomically to the
@@ -261,6 +280,8 @@ pub struct ProjectPatchRequest {
     pub services_remove: Vec<String>,
     /// Database shown in the connection details; requires the project to use MySQL.
     pub database_name: Option<String>,
+    /// The MySQL account its code connects as (`--mysql-credentials`; meaningful only with MySQL).
+    pub mysql_credentials: Option<MysqlCredentialsDto>,
     /// Document root relative to the project folder (`""` = the folder itself).
     pub public_dir: Option<String>,
     /// Extra directives inside the project's `<VirtualHost>` (replaces them; `""` clears).
@@ -299,6 +320,7 @@ impl ProjectPatchRequest {
             services_add,
             services_remove,
             database_name,
+            mysql_credentials,
             public_dir,
             apache_directives,
             env_set,
@@ -317,6 +339,7 @@ impl ProjectPatchRequest {
             && services_add.is_empty()
             && services_remove.is_empty()
             && database_name.is_none()
+            && mysql_credentials.is_none()
             && public_dir.is_none()
             && apache_directives.is_none()
             && env_set.is_empty()

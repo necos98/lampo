@@ -61,6 +61,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 		loopbackPortRange: { start: 8100, end: 8199 },
 		closeToTray: true,
 		autoRestartServices: true,
+		mysqlProjectCredentials: true,
 		firstRunCompleted: !fresh,
 		defaultAddressing: 'no-elevation'
 	};
@@ -118,7 +119,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 		url: urlsFor(p.addresses)[0] ?? '',
 		urls: urlsFor(p.addresses),
 		documentRoot: p.environment.publicDir ? `${p.root}\\${p.environment.publicDir}` : p.root,
-		database: mysqlOf(p.environment) ? connection(p.databaseName ?? p.id.replace(/-/g, '_'), mysqlOf(p.environment) as string) : null
+		database: mysqlOf(p.environment) ? connection(p.databaseName ?? p.id.replace(/-/g, '_'), mysqlOf(p.environment) as string, p.mysqlCredentials === 'project' ? p.id : null) : null
 	});
 	const hasHostname = (p: T.Project) => p.addresses.some((a) => a.kind === 'hostname');
 	/** Like the backend: domain default addresses and the lowest free loopback port of the range. */
@@ -292,7 +293,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 			const byMode: Record<T.Addressing, T.SiteAddress[]> = { standard: suggested.standard, 'hosts-only': suggested.hostsOnly, 'no-elevation': suggested.noElevation };
 			// Like the backend: no explicit mode means the `default_addressing` setting.
 			const addresses = r.addresses ?? byMode[r.addressing ?? settings.defaultAddressing];
-			const next = rebuild({ id, name, root: r.root, folderExists: true, addresses, url: '', urls: [], documentRoot: '', environment, databaseName: mysqlOf(environment) ? id.replace(/-/g, '_') : null, database: null, tls: 'disabled', active: r.activate ?? true, originPreset: preset.id, worktrees: [], notices: [] });
+			const next = rebuild({ id, name, root: r.root, folderExists: true, addresses, url: '', urls: [], documentRoot: '', environment, databaseName: mysqlOf(environment) ? id.replace(/-/g, '_') : null, database: null, mysqlCredentials: settings.mysqlProjectCredentials ? 'project' : 'root', tls: 'disabled', active: r.activate ?? true, originPreset: preset.id, worktrees: [], notices: [] });
 			projects = [...projects, next];
 			if (hasHostname(next)) hostsInSync = false;
 			syncProject(id);
@@ -362,7 +363,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 			if (r.environment.apacheDirectives.includes('!!')) fail('config-rejected', 'httpd -t failed', { output: 'AH00526: Syntax error on line 3 of vhost.conf:\nInvalid command \'!!\', perhaps misspelled or defined by a module not included in the server configuration' });
 			const refusedEnvVars = checkEnvVars(r.environment.envVars);
 			if (refusedEnvVars) fail('validation', refusedEnvVars.message, refusedEnvVars.details);
-			const next = rebuild({ ...cur, name: r.name, addresses: r.addresses, environment: r.environment, databaseName: r.databaseName, tls: r.tls });
+			const next = rebuild({ ...cur, name: r.name, addresses: r.addresses, environment: r.environment, databaseName: r.databaseName, mysqlCredentials: r.mysqlCredentials ?? cur.mysqlCredentials, tls: r.tls });
 			if (JSON.stringify(cur.addresses) !== JSON.stringify(next.addresses) && hasHostname(next)) hostsInSync = false;
 			const out = replace(next);
 			syncProject(next.id);

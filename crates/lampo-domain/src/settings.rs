@@ -8,7 +8,8 @@
 //! An instance has one port, plus an optional `ui_port` for kinds with a second listener (the
 //! Mailpit web UI): absent in older files, it falls back to the kind's default.
 //!
-//! `default_addressing` (added later) reads as `no-elevation` when a file lacks it.
+//! `default_addressing` (added later) reads as `no-elevation` when a file lacks it;
+//! `auto_restart_services` and `mysql_project_credentials` (added later) read as on.
 
 use serde::{Deserialize, Serialize};
 
@@ -79,6 +80,9 @@ pub struct Settings {
     /// Addresses a new project gets when none are chosen (CLI `project create` without
     /// `--addressing`).
     pub default_addressing: Addressing,
+    /// New projects get a dedicated MySQL account instead of root (see
+    /// [`crate::mysql::accounts`]). Absent in older files: on.
+    pub mysql_project_credentials: bool,
 }
 
 fn mysql_id(series: MysqlSeries) -> ServiceId {
@@ -102,6 +106,7 @@ impl Default for Settings {
             auto_restart_services: true,
             first_run_completed: false,
             default_addressing: Addressing::default(),
+            mysql_project_credentials: true,
         }
     }
 }
@@ -120,6 +125,7 @@ struct SettingsFile {
     auto_restart_services: bool,
     first_run_completed: bool,
     default_addressing: Addressing,
+    mysql_project_credentials: bool,
     mysql_instances: Option<Vec<LegacyMysqlInstance>>,
     redis_port: Option<Port>,
 }
@@ -144,6 +150,7 @@ impl Default for SettingsFile {
             auto_restart_services: d.auto_restart_services,
             first_run_completed: d.first_run_completed,
             default_addressing: d.default_addressing,
+            mysql_project_credentials: d.mysql_project_credentials,
             mysql_instances: None,
             redis_port: None,
         }
@@ -180,6 +187,7 @@ impl TryFrom<SettingsFile> for Settings {
             auto_restart_services: f.auto_restart_services,
             first_run_completed: f.first_run_completed,
             default_addressing: f.default_addressing,
+            mysql_project_credentials: f.mysql_project_credentials,
         };
         settings.validate()?;
         Ok(settings)
@@ -345,6 +353,16 @@ mod tests {
         assert!(!off.auto_restart_services);
         let json = serde_json::to_value(&off).unwrap();
         assert_eq!(serde_json::from_value::<Settings>(json).unwrap(), off);
+    }
+
+    /// Only new projects follow it: existing ones keep the credentials stored in their file.
+    #[test]
+    fn new_projects_get_dedicated_mysql_accounts_unless_the_file_turns_it_off() {
+        let before: Settings = serde_json::from_str(r#"{"apache_port": 80}"#).unwrap();
+        assert!(before.mysql_project_credentials, "on for files written before the setting");
+        let off: Settings = serde_json::from_str(r#"{"mysql_project_credentials": false}"#).unwrap();
+        assert!(!off.mysql_project_credentials);
+        assert_eq!(serde_json::from_value::<Settings>(serde_json::to_value(&off).unwrap()).unwrap(), off);
     }
 
     #[test]

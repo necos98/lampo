@@ -6,9 +6,12 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 use crate::error::DomainError;
+use crate::project::ProjectId;
 use crate::tcp_port::Port;
 use crate::version::{PackageVersion, VersionSeries};
+use accounts::{MysqlCredentials, MysqlUserName};
 
+pub mod accounts;
 pub mod credentials;
 
 /// A MySQL `<major>.<minor>` series (`8.4`, `5.7`). Each series has its own data directory and port.
@@ -163,6 +166,9 @@ impl From<DatabaseName> for String {
 }
 
 /// Connection details shown to the user for a project. Lampo never writes them to `.env`.
+///
+/// The password is not known here (it is stored encrypted): the application fills it in for
+/// display from the account named by `project_account`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DatabaseConnection {
     pub series: MysqlSeries,
@@ -171,12 +177,19 @@ pub struct DatabaseConnection {
     pub user: String,
     pub password: String,
     pub database: DatabaseName,
+    /// The project whose dedicated account `user` is; `None`: the instance's root.
+    pub project_account: Option<ProjectId>,
 }
 
 impl DatabaseConnection {
-    /// Instances are initialised with `--initialize-insecure`: user `root`, empty password.
-    pub fn local(series: MysqlSeries, port: Port, database: DatabaseName) -> Self {
-        Self { series, host: "127.0.0.1".into(), port, user: credentials::ROOT_ACCOUNT.into(), password: String::new(), database }
+    /// The connection of `project`'s code (or one of its worktree environments) to `database` on
+    /// the local `series` instance, with the account its credentials name.
+    pub fn local(series: MysqlSeries, port: Port, database: DatabaseName, project: &ProjectId, account: MysqlCredentials) -> Self {
+        let (user, project_account) = match account {
+            MysqlCredentials::Root => (credentials::ROOT_ACCOUNT.to_string(), None),
+            MysqlCredentials::Project => (MysqlUserName::for_project(project).to_string(), Some(project.clone())),
+        };
+        Self { series, host: "127.0.0.1".into(), port, user, password: String::new(), database, project_account }
     }
 }
 

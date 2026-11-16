@@ -21,6 +21,9 @@ Windows. Include la CLI `lampo`, pensata anche per i coding agent.
 - **Indirizzi senza permessi di amministratore**: `<progetto>.localhost` e una porta dedicata su
   `127.0.0.1`. In alternativa, un nome nel file hosts (con conferma UAC).
 - **Database creato in automatico** quando aggiungi un progetto che usa MySQL.
+- **Un utente MySQL per progetto**: ogni nuovo progetto riceve un utente `lampo_<id>` che vede solo
+  il suo database e quelli dei suoi worktree; root riceve una password casuale, cifrata con DPAPI
+  per il tuo utente Windows. Dettagli e passaggio dei progetti esistenti più sotto.
 - **Nuovi progetti**: clone da un repository Git o nuova applicazione Laravel con il Laravel
   Installer gestito da Lampo (usa il PHP e il Composer di Lampo, non tocca quelli globali).
 - **Un ambiente per ogni git worktree**, per far lavorare più coding agent in parallelo: indirizzo
@@ -85,12 +88,14 @@ lampo project new --laravel shop --in D:\sites --php 8.4
 lampo project set --ext intl --addon xdebug --ini memory_limit=512M   # modifica l'ambiente
 lampo project set --address api.shop.localhost --no-address 127.0.0.1:8101   # indirizzi
 lampo project rename "Shop Legacy"    # nome visualizzato (l'id resta)
+lampo project set --mysql-credentials project   # utente MySQL dedicato (poi aggiorna il .env)
 lampo project remove shop --yes       # la toglie da Lampo: cartella e database restano
 lampo project import shop.lampo.toml  # importa un progetto esportato (senza direttive Apache né chiavi php.ini rischiose)
 lampo package extensions              # estensioni incluse nel PHP del progetto (per --ext)
 lampo package uninstall php 8.2 --yes # rimuove un pacchetto non più usato
 lampo settings                        # impostazioni globali: porte, PHP predefinito
 lampo settings set --apache-port 8080 --mysql-port 8.4=3310   # cambia le porte (riavvia i servizi)
+lampo settings set --project-credentials off   # i nuovi progetti usano root invece di un utente proprio
 lampo worktree up --db clone:shop     # ambiente per il git worktree corrente
 lampo exec -- composer install        # comando con il PHP e il Composer del progetto
 lampo which php                       # quale PHP (o composer, mysql...) userebbe lo shim qui, e perché
@@ -105,6 +110,32 @@ elencati in `lampo --help` e in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#lamp
 `lampo` non chiede mai conferme e non apre il prompt UAC senza `--allow-elevation`.
 Per avere il completamento in ogni sessione aggiungi la riga di `lampo completions powershell` al
 tuo `$PROFILE`; `lampo completions --help` mostra come farlo anche in bash, zsh e fish.
+
+## Credenziali MySQL
+
+Ogni progetto creato con Lampo riceve un utente MySQL proprio, `lampo_<id>` (per esempio
+`lampo_shop`), con tutti i privilegi sul suo database e su quelli dei suoi worktree e nessun
+privilegio altrove: un altro progetto, o una dipendenza Composer/npm compromessa, non legge gli
+altri database. Utente e password sono nei dettagli di connessione del progetto (sezione
+«Database, cache e posta» con **Copia blocco .env**, `lampo project info`, `lampo agent context`);
+Lampo non scrive mai il `.env`. Gli shim `mysql` e `mysqldump` si collegano già con quell'utente.
+
+Root riceve una password casuale, salvata cifrata con DPAPI (la decifra solo il tuo utente
+Windows, su questo computer), che Lampo usa per i propri client: non va mai copiata altrove.
+
+**Progetti esistenti.** I progetti creati prima di questa funzione restano su root senza password,
+come indica il loro `.env`, e continuano a funzionare. Root riceve la password solo quando nessun
+progetto di quella versione di MySQL usa più root. Per passare un progetto all'utente dedicato:
+
+1. attiva **Utente MySQL dedicato** nella sezione «Database, cache e posta» del progetto (oppure
+   `lampo project set shop --mysql-credentials project`) e salva;
+2. copia nel `.env` del progetto il nuovo `DB_USERNAME` e `DB_PASSWORD`.
+
+Quando l'ultimo progetto di un'istanza è passato all'utente dedicato, root riceve la sua password
+all'avvio successivo dell'istanza (o subito, se è già avviata). L'impostazione **Utente MySQL
+dedicato per i nuovi progetti** (`lampo settings set --project-credentials off`) fa usare root ai
+progetti creati in seguito; un progetto lasciato su root dopo che root ha ricevuto la password usa
+quella password, mostrata nei suoi dettagli di connessione.
 
 ## Integrazione Claude Code
 

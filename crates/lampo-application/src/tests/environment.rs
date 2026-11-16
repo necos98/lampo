@@ -483,6 +483,7 @@ async fn mailpit_runs_for_its_sites_and_feeds_php_mail() {
         control: w.control.clone(),
         paths: w.paths.clone(),
         services: w.services.clone(),
+        passwords: w.passwords.clone(),
     });
     let ctx = agent.execute(&shop_dir()).unwrap();
     assert_eq!(ctx.mail.as_ref().map(|m| (m.smtp_port, m.web_url.as_str())), Some((1025, "http://127.0.0.1:8025")));

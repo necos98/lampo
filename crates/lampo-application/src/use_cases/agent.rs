@@ -10,10 +10,11 @@ use lampo_domain::site::SiteId;
 
 use super::resolution::{SiteResolver, resolution_to_dto};
 use super::service_catalog::ServiceCatalog;
-use super::support::{composer_channel_name, validation, worktree_dto};
+use super::mysql_accounts::{ConnectionPasswords, NoConnectionPasswords};
+use super::support::{composer_channel_name, shown_connection, validation, worktree_dto};
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::mapping::{connection_to_dto, mail_to_dto};
+use crate::mapping::mail_to_dto;
 
 /// `lampo agent context`. Inside a git worktree with an environment: that environment's URL
 /// and database; without one: the parent's data plus a hint to run `lampo worktree up`.
@@ -27,6 +28,7 @@ pub struct AgentContextQuery {
     control: Arc<dyn ControlChannelClient>,
     paths: LampoPaths,
     services: Arc<ServiceCatalog>,
+    passwords: Arc<dyn ConnectionPasswords>,
 }
 
 pub struct AgentContextDeps {
@@ -39,12 +41,14 @@ pub struct AgentContextDeps {
     pub control: Arc<dyn ControlChannelClient>,
     pub paths: LampoPaths,
     pub services: Arc<ServiceCatalog>,
+    /// The password of the database connection shown.
+    pub passwords: Arc<dyn ConnectionPasswords>,
 }
 
 impl AgentContextQuery {
     pub fn new(deps: AgentContextDeps) -> Self {
-        let AgentContextDeps { resolver, projects, worktrees, settings, git, fs, control, paths, services } = deps;
-        Self { resolver, projects, worktrees, settings, git, fs, control, paths, services }
+        let AgentContextDeps { resolver, projects, worktrees, settings, git, fs, control, paths, services, passwords } = deps;
+        Self { resolver, projects, worktrees, settings, git, fs, control, paths, services, passwords }
     }
 
     /// `ProjectNotResolved` when nothing matched and there is no default PHP.
@@ -102,9 +106,9 @@ impl AgentContextQuery {
                 Some(w) => {
                     ctx.root = Some(w.root.to_string());
                     ctx.url = Some(w.url());
-                    ctx.urls = worktree_dto(w, &project, &settings, None).urls;
+                    ctx.urls = worktree_dto(w, &project, &settings, None, &NoConnectionPasswords).urls;
                     ctx.document_root = Some(w.document_root(&project).display().to_string());
-                    ctx.database = w.database_connection(&project, &settings).ok().flatten().as_ref().map(connection_to_dto);
+                    ctx.database = shown_connection(w.database_connection(&project, &settings).ok().flatten(), self.passwords.as_ref());
                     ctx.worktree = Some(AgentWorktreeDto { worktree_root: w.root.to_string(), branch: w.branch.clone(), environment_up: true, site: Some(site.to_string()) });
                     if !self.fs.is_dir(w.root.as_path()) {
                         hints.push(format!("the folder of `{site}` no longer exists: `lampo worktree prune`"));
@@ -115,7 +119,7 @@ impl AgentContextQuery {
                     ctx.url = Some(project.url(&settings));
                     ctx.urls = project.urls(&settings);
                     ctx.document_root = Some(project.document_root().display().to_string());
-                    ctx.database = project.database_connection(&settings).ok().flatten().as_ref().map(connection_to_dto);
+                    ctx.database = shown_connection(project.database_connection(&settings).ok().flatten(), self.passwords.as_ref());
                     if !project.active {
                         hints.push(format!("project `{}` is not active, so it is not served: `lampo project activate {}`", project.id, project.id));
                     }
@@ -132,6 +136,12 @@ impl AgentContextQuery {
                 hints.push(format!(
                     "no worktree environment is up for this worktree: run `lampo worktree up` to get its own URL (and optionally database); until then the URL and database shown are those of `{}`",
                     project.id
+                ));
+            }
+            if project.environment.mysql().is_some() && project.mysql_project_account().is_none() {
+                hints.push(format!(
+                    "project `{}` connects to MySQL as root (kept for projects created before dedicated accounts): `lampo project set {} --mysql-credentials project` gives it an account of its own, then update DB_USERNAME/DB_PASSWORD in its .env",
+                    project.id, project.id
                 ));
             }
             if project.environment.uses(&ServiceKind::MAILPIT) {

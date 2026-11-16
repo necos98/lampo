@@ -31,7 +31,7 @@ pub fn project_json() -> Value {
         "environment": {"phpVersion": "8.3", "extensions": ["intl"], "addons": [], "phpIni": {}, "publicDir": "public",
                         "services": [{"kind": "mysql", "version": "8.4"}], "apacheDirectives": "", "envVars": {}},
         "databaseName": "shop",
-        "database": {"mysqlVersion": "8.4", "host": "127.0.0.1", "port": 3306, "user": "root", "password": "", "database": "shop"},
+        "database": {"mysqlVersion": "8.4", "host": "127.0.0.1", "port": 3306, "user": "root", "password": "", "database": "shop"}, "mysqlCredentials": "root",
         "tls": "disabled", "active": true, "originPreset": "laravel", "worktrees": [], "notices": []
     })
 }
@@ -411,7 +411,7 @@ pub fn settings_json() -> Value {
             {"service": "mysql-5.7", "label": "MySQL 5.7", "port": 3307, "alwaysOn": false},
             {"service": "redis", "label": "Redis", "port": 6379, "alwaysOn": false}
         ],
-        "loopbackPortRange": {"start": 8100, "end": 8199}, "closeToTray": true, "autoRestartServices": true, "firstRunCompleted": true,
+        "loopbackPortRange": {"start": 8100, "end": 8199}, "closeToTray": true, "autoRestartServices": true, "mysqlProjectCredentials": true, "firstRunCompleted": true,
         "defaultAddressing": "no-elevation"
     })
 }

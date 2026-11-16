@@ -68,6 +68,7 @@ fn patch_request(args: SettingsSetArgs) -> AppResult<SettingsPatchRequest> {
         loopback_port_range,
         default_addressing: args.default_addressing.map(addressing::to_dto),
         auto_restart_services: args.auto_restart,
+        mysql_project_credentials: args.project_credentials,
     })
 }
 

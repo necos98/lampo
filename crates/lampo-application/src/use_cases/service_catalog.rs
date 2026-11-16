@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use lampo_domain::package::InstalledPackage;
 use lampo_domain::paths::LampoPaths;
-use lampo_domain::project::{Project, ProjectEnvironment};
+use lampo_domain::mysql::accounts::MysqlUserName;
+use lampo_domain::project::{Project, ProjectEnvironment, ProjectId};
 use lampo_domain::service::{ServiceDescriptor, ServiceId, ServiceKind, ServiceLaunch, plan_services};
 use lampo_domain::settings::Settings;
 use lampo_domain::shim::ShimService;
@@ -19,6 +20,14 @@ use lampo_domain::DomainError;
 
 use super::support::{newest_of, package_missing};
 use crate::error::{AppError, AppResult, ErrorCode};
+
+/// What a site's MySQL clients default to ([`ServiceCatalog::shim_services`]).
+#[derive(Debug, Clone, Default)]
+pub struct SiteMysqlClient {
+    pub database: Option<String>,
+    /// The project whose dedicated account the clients use; `None`: root.
+    pub project_account: Option<ProjectId>,
+}
 
 pub struct ServiceCatalog {
     descriptors: Vec<Arc<dyn ServiceDescriptor>>,
@@ -149,12 +158,12 @@ impl ServiceCatalog {
     }
 
     /// Client defaults per kind for a target: the site's instance of each kind it uses (with
-    /// `database` for MySQL), the default instance of the other kinds, each with its data dir
-    /// when it keeps one. Only installed instances with a client are listed.
+    /// `mysql`'s database and account for MySQL), the default instance of the other kinds, each
+    /// with its data dir when it keeps one. Only installed instances with a client are listed.
     pub fn shim_services(
         &self,
         env: Option<&ProjectEnvironment>,
-        database: Option<String>,
+        mysql: SiteMysqlClient,
         settings: &Settings,
         installed: &[InstalledPackage],
         paths: &LampoPaths,
@@ -168,10 +177,16 @@ impl ServiceCatalog {
             let Some(id) = site_instance.or_else(|| self.default_instance(&kind, settings)) else { continue };
             let Some(port) = self.port(&id, settings) else { continue };
             let Some(client_dir) = newest_of(installed, &d.package_kind(), id.version(), None).and_then(|p| p.entry(client.client_dir)).map(Path::to_path_buf) else { continue };
-            let database = if uses && kind == ServiceKind::MYSQL { database.clone() } else { None };
+            let site_mysql = (uses && kind == ServiceKind::MYSQL).then_some(&mysql);
+            let database = site_mysql.and_then(|m| m.database.clone());
+            let project_account = site_mysql.and_then(|m| m.project_account.clone());
             let data_dir = d.has_data_dir().then(|| paths.service_data_dir(&id));
-            let user = client.user.map(str::to_string);
-            out.insert(kind, ShimService { service: id, client_dir, host: "127.0.0.1".into(), port, user, database, data_dir, env_prefix: client.env_prefix.to_string() });
+            let user = match &project_account {
+                Some(project) => Some(MysqlUserName::for_project(project).to_string()),
+                None => client.user.map(str::to_string),
+            };
+            let env_prefix = client.env_prefix.to_string();
+            out.insert(kind, ShimService { service: id, client_dir, host: "127.0.0.1".into(), port, user, database, data_dir, project_account, env_prefix });
         }
         out
     }

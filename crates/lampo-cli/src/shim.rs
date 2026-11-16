@@ -3,8 +3,8 @@
 //!
 //! Stateless and fast: no async runtime, no IPC, no logging setup. It reads the shim index,
 //! resolves the site (`LAMPO_PROJECT` while it holds -> cwd -> git worktree -> default), asks the
-//! matching [`ShimTool`] for the real invocation (a MySQL client gets the stored root password
-//! through an option file, [`with_stored_credentials`]) and runs it with inherited stdin/stdout/stderr,
+//! matching [`ShimTool`] for the real invocation (a MySQL client gets the stored password of its
+//! account through an option file, [`with_stored_credentials`]) and runs it with inherited stdin/stdout/stderr,
 //! tied to the shim's lifetime ([`crate::job`]), forwarding the exit code. It works when the app
 //! is not running.
 //!
@@ -12,9 +12,9 @@
 
 use std::sync::Arc;
 
-use lampo_domain::ports::{MysqlRootPasswordReader, ShimIndexReader};
+use lampo_domain::ports::{MysqlProjectPasswordReader, MysqlRootPasswordReader, ShimIndexReader};
 use lampo_domain::resolution::{GitInspector, PathCanonicalizer, ResolveRequest, ResolverChain};
-use lampo_domain::shim::{FolderProbe, ShimInvocation, ShimTool, tools};
+use lampo_domain::shim::{FolderProbe, ShimInvocation, ShimTool, StoredCredentials, tools};
 use lampo_infra_services::ClientOptionFile;
 
 use crate::{console, job};
@@ -85,13 +85,26 @@ pub struct PreparedInvocation {
     _option_file: Option<ClientOptionFile>,
 }
 
-/// Gives a MySQL client the stored root password its invocation asks for
-/// ([`ShimInvocation::stored_credentials`]), when one is stored: an option file only the user can
-/// open, read first (`--defaults-extra-file=`, so the user's own option files keep applying),
-/// never the command line. The error is the one-line reason for exit code 127.
-pub fn with_stored_credentials(mut invocation: ShimInvocation, passwords: &dyn MysqlRootPasswordReader) -> Result<PreparedInvocation, String> {
+/// The stored passwords a shim may hand to a MySQL client.
+pub struct StoredPasswords<'a> {
+    pub root: &'a dyn MysqlRootPasswordReader,
+    pub projects: &'a dyn MysqlProjectPasswordReader,
+}
+
+/// Gives a MySQL client the stored password its invocation asks for
+/// ([`ShimInvocation::stored_credentials`]: the instance's root or the project's dedicated
+/// account), when one is stored: an option file only the user can open, read first
+/// (`--defaults-extra-file=`, so the user's own option files keep applying), never the command
+/// line. The error is the one-line reason for exit code 127.
+pub fn with_stored_credentials(mut invocation: ShimInvocation, passwords: &StoredPasswords<'_>) -> Result<PreparedInvocation, String> {
     let option_file = match &invocation.stored_credentials {
-        Some(instance) => ClientOptionFile::for_instance(passwords, instance).map_err(|e| format!("cannot use the root password Lampo stored for {instance}: {e}"))?,
+        Some(StoredCredentials::Root(instance)) => {
+            ClientOptionFile::for_instance(passwords.root, instance).map_err(|e| format!("cannot use the root password Lampo stored for {instance}: {e}"))?
+        }
+        Some(StoredCredentials::Project(project)) => {
+            let unusable = |e: lampo_domain::PortError| format!("cannot use the MySQL password Lampo stored for project {project}: {e}");
+            passwords.projects.project_password(project).map_err(unusable)?.map(|p| ClientOptionFile::for_password(&p)).transpose().map_err(unusable)?
+        }
         None => None,
     };
     if let Some(file) = &option_file {
@@ -138,7 +151,7 @@ mod tests {
     use lampo_domain::mysql::credentials::MysqlPassword;
     use lampo_domain::php::{ComposerChannel, PhpMinor};
     use lampo_domain::ports::NoMysqlRootPasswords;
-    use lampo_domain::project::ProjectRoot;
+    use lampo_domain::project::{ProjectId, ProjectRoot};
     use lampo_domain::resolution::GitCheckout;
     use lampo_domain::service::{ServiceId, ServiceKind};
     use lampo_domain::shim::{FolderState, ShimEntry, ShimIndex, ShimService, ShimTarget};
@@ -299,6 +312,11 @@ mod tests {
             panic!("no tool asked for the password of {instance}")
         }
     }
+    impl MysqlProjectPasswordReader for NeverAsked {
+        fn project_password(&self, project: &ProjectId) -> PortResult<Option<MysqlPassword>> {
+            panic!("no tool asked for the password of project {project}")
+        }
+    }
 
     struct Unreadable;
     impl MysqlRootPasswordReader for Unreadable {
@@ -307,16 +325,34 @@ mod tests {
         }
     }
 
+    struct StoredProjectPassword;
+    impl MysqlProjectPasswordReader for StoredProjectPassword {
+        fn project_password(&self, project: &ProjectId) -> PortResult<Option<MysqlPassword>> {
+            assert_eq!(project.as_str(), "shop");
+            Ok(Some(MysqlPassword::new("shop-pass").unwrap()))
+        }
+    }
+
+    /// Only the root password store; a project password is never asked for.
+    fn root_only(root: &dyn MysqlRootPasswordReader) -> StoredPasswords<'_> {
+        StoredPasswords { root, projects: &NeverAsked }
+    }
+
     fn mysql_invocation(args: &[&str]) -> ShimInvocation {
+        mysql_invocation_as(args, "root", None)
+    }
+
+    fn mysql_invocation_as(args: &[&str], user: &str, project_account: Option<&str>) -> ShimInvocation {
         let mysql = ShimService {
             service: "mysql-8.4".parse().unwrap(),
-            client_dir: PathBuf::from(r"C:\mysql\bin"),
+            client_dir: PathBuf::from(r"C:mysqlin"),
             host: "127.0.0.1".into(),
             port: Port::of(3306),
-            user: Some("root".into()),
+            user: Some(user.into()),
             database: None,
             data_dir: None,
             env_prefix: "DB".into(),
+            project_account: project_account.map(|p| ProjectId::new(p).unwrap()),
         };
         let target = ShimTarget { services: [(ServiceKind::MYSQL, mysql)].into(), ..target(false) };
         let entry = ShimEntry { site: "shop".parse().unwrap(), root: ProjectRoot::new(r"C:\work\shop").unwrap(), target };
@@ -327,7 +363,7 @@ mod tests {
     #[test]
     fn a_stored_root_password_is_read_from_an_option_file_given_first() {
         let planned = mysql_invocation(&["-e", "SELECT 1"]);
-        let prepared = with_stored_credentials(planned.clone(), &StoredRootPassword).unwrap();
+        let prepared = with_stored_credentials(planned.clone(), &root_only(&StoredRootPassword)).unwrap();
         let path = prepared._option_file.as_ref().unwrap().path().to_path_buf();
         assert_eq!(prepared.invocation.args[0], format!("--defaults-extra-file={}", path.display()));
         assert_eq!(prepared.invocation.args[1..], planned.args[..], "the rest as planned");
@@ -340,19 +376,30 @@ mod tests {
     #[test]
     fn without_a_stored_password_or_a_request_for_it_the_invocation_is_unchanged() {
         let planned = mysql_invocation(&["-e", "SELECT 1"]);
-        let prepared = with_stored_credentials(planned.clone(), &NoMysqlRootPasswords).unwrap();
+        let prepared = with_stored_credentials(planned.clone(), &root_only(&NoMysqlRootPasswords)).unwrap();
         assert_eq!((prepared.invocation, prepared._option_file.is_none()), (planned, true));
 
         let own_account = mysql_invocation(&["-u", "app", "-e", "SELECT 1"]);
-        assert_eq!(with_stored_credentials(own_account.clone(), &NeverAsked).unwrap().invocation, own_account);
+        assert_eq!(with_stored_credentials(own_account.clone(), &StoredPasswords { root: &NeverAsked, projects: &NeverAsked }).unwrap().invocation, own_account);
         let php = invocation(&request("php", r"C:\work\shop", &["-v"]), &tools::all(), &index_with_project()).unwrap();
-        assert_eq!(with_stored_credentials(php.clone(), &NeverAsked).unwrap().invocation, php);
+        assert_eq!(with_stored_credentials(php.clone(), &StoredPasswords { root: &NeverAsked, projects: &NeverAsked }).unwrap().invocation, php);
     }
 
     #[test]
     fn an_unreadable_stored_password_is_a_one_line_failure() {
-        let err = with_stored_credentials(mysql_invocation(&[]), &Unreadable).unwrap_err();
+        let err = with_stored_credentials(mysql_invocation(&[]), &root_only(&Unreadable)).unwrap_err();
         assert!(!err.contains('\n'), "{err}");
         assert!(err.contains("root password Lampo stored for mysql-8.4") && err.contains("cannot be decrypted"), "{err}");
+    }
+
+    #[test]
+    fn a_project_with_its_own_account_gets_that_accounts_password_and_never_roots() {
+        let planned = mysql_invocation_as(&["-e", "SELECT 1"], "lampo_shop", Some("shop"));
+        assert!(planned.args.contains(&"--user=lampo_shop".to_string()));
+        let prepared = with_stored_credentials(planned, &StoredPasswords { root: &NeverAsked, projects: &StoredProjectPassword }).unwrap();
+        let path = prepared._option_file.as_ref().unwrap().path().to_path_buf();
+        assert_eq!(prepared.invocation.args[0], format!("--defaults-extra-file={}", path.display()));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "[client]\npassword=\"shop-pass\"\n");
+        assert!(!prepared.invocation.args.iter().any(|a| a.contains("shop-pass")));
     }
 }

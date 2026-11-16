@@ -86,9 +86,14 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let pipes: Arc<dyn PipedCommandRunner> = supervisor.clone();
     let streaming: Arc<dyn StreamingCommandRunner> = supervisor;
     let port_probe: Arc<dyn PortProbe> = Arc::new(services::TcpPortProbe);
-    // The stored root passwords (DPAPI) Lampo's own MySQL clients authenticate with.
-    let mysql_passwords: Arc<dyn MysqlRootPasswordReader> = Arc::new(services::DpapiMysqlRootPasswords::new(paths.secrets_dir()));
-    let db_admin: Arc<dyn DatabaseAdmin> = Arc::new(services::MysqlCliAdmin::new(commands.clone(), pipes, mysql_passwords.clone()));
+    // The stored MySQL passwords (DPAPI): root's, which Lampo's own clients authenticate with,
+    // and each project account's.
+    let password_store = Arc::new(services::DpapiMysqlPasswords::new(paths.secrets_dir()));
+    let mysql_passwords: Arc<dyn MysqlRootPasswordReader> = password_store.clone();
+    let mysql_admin = Arc::new(services::MysqlCliAdmin::new(commands.clone(), pipes, mysql_passwords.clone()));
+    let db_admin: Arc<dyn DatabaseAdmin> = mysql_admin.clone();
+    let passwords = Arc::new(MysqlPasswords::with_store(password_store, Arc::new(services::SystemRandomPasswords)));
+    let connection_passwords: Arc<dyn ConnectionPasswords> = passwords.clone();
     // The registered service kinds and one runner per kind.
     let service_catalog = Arc::new(ServiceCatalog::new(lampo_domain::service::builtin::all()));
     let runners: Vec<Arc<dyn ServiceRunner>> = vec![
@@ -128,13 +133,14 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         port_probe: port_probe.clone(),
         paths: paths.clone(),
         events: events.clone(),
+        mysql_accounts: Arc::new(MysqlAccounts::new(mysql_admin, passwords)),
     }));
     let env: Arc<dyn EnvironmentSync> = environment.clone();
 
     let builtin_presets = lampo_domain::preset::builtin::all();
     let preset_queries = Arc::new(PresetQueries::new(builtin_presets.clone(), custom_presets.clone(), settings.clone(), installed.clone()));
     let detect_project = Arc::new(DetectProject::new(detectors, projects.clone(), fs.clone()));
-    let project_queries = Arc::new(ProjectQueries::new(projects.clone(), worktrees.clone(), settings.clone(), fs.clone()));
+    let project_queries = Arc::new(ProjectQueries::new(projects.clone(), worktrees.clone(), settings.clone(), fs.clone(), connection_passwords.clone()));
     // One allocator for the whole app: projects and worktree environments share its lock.
     let allocator = Arc::new(LoopbackPortAllocator::new(projects.clone(), worktrees.clone(), settings.clone(), port_probe.clone()));
     // Every project save and removal (GUI, CLI patch, create, import, PHP switch, delete) goes
@@ -188,7 +194,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         env: env.clone(),
         services: service_catalog.clone(),
     }));
-    let worktree_queries = Arc::new(WorktreeQueries::new(worktrees.clone(), projects.clone(), settings.clone(), fs.clone()));
+    let worktree_queries = Arc::new(WorktreeQueries::new(worktrees.clone(), projects.clone(), settings.clone(), fs.clone(), connection_passwords.clone()));
     let worktree_databases = Arc::new(WorktreeDatabases::new(projects.clone(), settings.clone(), installed.clone(), db_admin.clone(), service_control.clone(), service_catalog.clone()));
     let status = Arc::new(StatusQuery::new(project_queries.clone(), service_queries.clone(), Arc::new(|| true)));
     let app_info = Arc::new(AppInfoQuery::new(env!("CARGO_PKG_VERSION"), paths.clone()));

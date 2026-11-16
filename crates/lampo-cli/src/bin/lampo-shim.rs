@@ -43,7 +43,7 @@ fn run() -> i32 {
         canonicalizer: Arc::new(lampo_infra_store::FsPathCanonicalizer),
         folders: Arc::new(lampo_infra_store::LocalFileSystem),
     };
-    let passwords = lampo_infra_services::DpapiMysqlRootPasswords::new(LampoPaths::secrets_dir_in(&data_root));
+    let passwords = lampo_infra_services::DpapiMysqlPasswords::new(LampoPaths::secrets_dir_in(&data_root));
     let planned = match shim::plan(&request, &tools, &index, facts) {
         Ok(planned) => planned,
         Err(reason) => return shim::fail(reason),
@@ -52,7 +52,7 @@ fn run() -> i32 {
         planned.notices.iter().for_each(shim::note);
     }
     // Dropped (its option file deleted) only after the tool has exited.
-    match shim::with_stored_credentials(planned.invocation, &passwords) {
+    match shim::with_stored_credentials(planned.invocation, &shim::StoredPasswords { root: &passwords, projects: &passwords }) {
         Ok(prepared) => shim::launch(&prepared.invocation),
         Err(reason) => shim::fail(reason),
     }

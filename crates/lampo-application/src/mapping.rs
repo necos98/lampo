@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 use lampo_domain::address::{Addressing, SiteAddress};
 use lampo_domain::hostname::{Hostname, Tld};
 use lampo_domain::mysql::DatabaseConnection;
+use lampo_domain::mysql::accounts::MysqlCredentials;
 use lampo_domain::package::{PackageId, PackageKind};
 use lampo_domain::php::{ExtensionName, PhpMinor, php_ini_overrides};
 use lampo_domain::project::{ApacheDirectives, ProjectEnvVars, ProjectEnvironment, PublicDir, TlsMode};
@@ -86,6 +87,20 @@ pub fn addressing_from_dto(dto: AddressingDto) -> Addressing {
     }
 }
 
+pub fn credentials_to_dto(c: MysqlCredentials) -> MysqlCredentialsDto {
+    match c {
+        MysqlCredentials::Root => MysqlCredentialsDto::Root,
+        MysqlCredentials::Project => MysqlCredentialsDto::Project,
+    }
+}
+
+pub fn credentials_from_dto(dto: MysqlCredentialsDto) -> MysqlCredentials {
+    match dto {
+        MysqlCredentialsDto::Root => MysqlCredentials::Root,
+        MysqlCredentialsDto::Project => MysqlCredentials::Project,
+    }
+}
+
 pub fn tls_to_dto(t: TlsMode) -> TlsModeDto {
     match t {
         TlsMode::Disabled => TlsModeDto::Disabled,
@@ -145,6 +160,7 @@ pub fn settings_to_dto(s: &Settings, catalog: &ServiceCatalog) -> SettingsDto {
         auto_restart_services: s.auto_restart_services,
         first_run_completed: s.first_run_completed,
         default_addressing: addressing_to_dto(s.default_addressing),
+        mysql_project_credentials: s.mysql_project_credentials,
     }
 }
 
@@ -161,6 +177,7 @@ pub fn settings_from_dto(dto: &SettingsDto, current: &Settings) -> Result<Settin
         auto_restart_services: dto.auto_restart_services,
         first_run_completed: current.first_run_completed,
         default_addressing: addressing_from_dto(dto.default_addressing),
+        mysql_project_credentials: dto.mysql_project_credentials,
     };
     s.validate()?;
     Ok(s)

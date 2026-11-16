@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use lampo_domain::address::SiteAddress;
 use lampo_domain::mysql::DatabaseName;
+use lampo_domain::mysql::accounts::MysqlCredentials;
 use lampo_domain::package::PackageKind;
 use lampo_domain::php::{ExtensionName, IniKey, PhpMinor, extensions_for_php, php_ini_overrides};
 use lampo_domain::ports::InstalledPackageRegistry;
@@ -33,6 +34,7 @@ use super::support::validation;
 use crate::context::CallContext;
 use crate::dto::*;
 use crate::error::{AppError, AppResult};
+use crate::mapping::credentials_from_dto;
 
 /// Applies a [`ProjectPatchRequest`].
 pub struct PatchProjectEnvironment {
@@ -70,7 +72,7 @@ impl PatchProjectEnvironment {
             let mut addresses = project.addresses().to_vec();
             patch.apply_addresses(&mut addresses, free_port)?;
             let hosts_before: BTreeSet<String> = project.hosts_file_names().map(ToString::to_string).collect();
-            let before = (project.name.clone(), project.addresses().to_vec(), project.environment.clone(), project.database().cloned());
+            let before = (project.name.clone(), project.addresses().to_vec(), project.environment.clone(), project.database().cloned(), project.mysql_credentials);
             project.set_addresses(addresses)?;
             let hosts_after: BTreeSet<String> = project.hosts_file_names().map(ToString::to_string).collect();
             let touched: Vec<String> = hosts_before.symmetric_difference(&hosts_after).cloned().collect();
@@ -82,7 +84,10 @@ impl PatchProjectEnvironment {
             if let Some(name) = &patch.name {
                 project.name = name.clone();
             }
-            Ok((project.name.clone(), project.addresses().to_vec(), project.environment.clone(), project.database().cloned()) != before)
+            if let Some(credentials) = patch.mysql_credentials {
+                project.mysql_credentials = credentials;
+            }
+            Ok((project.name.clone(), project.addresses().to_vec(), project.environment.clone(), project.database().cloned(), project.mysql_credentials) != before)
         };
         let saved = if patch.wants_free_port() {
             self.writer.modify_with_free_port(&request.project_id, |project, snap, port| change(project, snap, Some(port))).await?
@@ -105,6 +110,7 @@ struct Patch {
     services_add: Vec<(ServiceKind, Option<VersionSeries>)>,
     services_remove: BTreeSet<ServiceKind>,
     database: Option<DatabaseName>,
+    mysql_credentials: Option<MysqlCredentials>,
     public_dir: Option<PublicDir>,
     apache_directives: Option<ApacheDirectives>,
     env_set: ProjectEnvVars,
@@ -175,6 +181,7 @@ impl Patch {
                 .collect::<AppResult<_>>()?,
             services_remove: services(&r.services_remove)?,
             database: r.database_name.as_deref().map(|d| DatabaseName::new(d.trim())).transpose()?,
+            mysql_credentials: r.mysql_credentials.map(credentials_from_dto),
             public_dir: r.public_dir.as_deref().map(PublicDir::new).transpose()?,
             apache_directives: r.apache_directives.clone().map(ApacheDirectives::new).transpose()?,
             env_set: ProjectEnvVars::from_pairs(r.env_set.iter().map(|(name, value)| (name.as_str(), value.clone())))?,

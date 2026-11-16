@@ -273,6 +273,10 @@ export const it = {
 			serviceHelp: (label: string) => `Avvia ${label} quando il progetto è servito.`,
 			servicesLoading: 'Caricamento dei servizi…',
 			databaseName: 'Nome del database',
+			dedicatedAccount: 'Utente MySQL dedicato',
+			dedicatedAccountHelp: 'Il progetto usa un proprio utente, che vede solo il suo database e quelli dei suoi worktree. Dopo il salvataggio copia utente e password nel suo .env.',
+			rootAccountHelp:
+				'Il progetto usa root, come i progetti creati prima degli utenti dedicati. Quando nessun progetto di questa versione di MySQL usa più root, root riceve una password casuale: attiva l’utente dedicato e aggiorna il .env.',
 			database: 'Database',
 			connection: 'Connessione',
 			noDatabase: 'Questo progetto non usa un database.',
@@ -579,6 +583,9 @@ export const it = {
 		defaultPhpHelp: 'Usata fuori dai progetti (shim php).',
 		tld: 'Dominio dei nuovi progetti',
 		tldHelp: 'Estensione dei nomi host, per esempio shop.test.',
+		projectCredentials: 'Utente MySQL dedicato per i nuovi progetti',
+		projectCredentialsHelp:
+			'Ogni nuovo progetto riceve un proprio utente MySQL (lampo_<id>) che vede solo il suo database e quelli dei suoi worktree. Disattivalo solo se i nuovi progetti devono usare root. I progetti esistenti non cambiano: si passano all’utente dedicato uno per volta, dalla sezione «Database, cache e posta» del progetto.',
 		defaultAddressing: 'Indirizzi dei nuovi progetti',
 		ports: 'Porte',
 		apachePort: 'Porta di Apache',

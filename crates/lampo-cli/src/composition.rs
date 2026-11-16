@@ -14,7 +14,7 @@ use lampo_domain::ports::{
     WorktreeRepository,
 };
 use lampo_domain::resolution::ResolverChain;
-use lampo_infra_services::{FileLogReader, HeadlessAppLauncher, NamedPipeControlClient, TcpPortProbe, TokioTimer, WindowsExternalAppLauncher};
+use lampo_infra_services::{DpapiMysqlPasswords, FileLogReader, HeadlessAppLauncher, NamedPipeControlClient, SystemRandomPasswords, TcpPortProbe, TokioTimer, WindowsExternalAppLauncher};
 use lampo_infra_store as store;
 use lampo_infra_web::ElevatedHostsFile;
 use lampo_infra_web::hosts::elevation::RunAsLauncher;
@@ -55,7 +55,9 @@ pub fn build() -> AppResult<CliContext> {
     let launcher = Arc::new(HeadlessAppLauncher::new(app_dir.join(store::app_location::APP_EXE_NAME)));
 
     let resolver = Arc::new(SiteResolver::new(index, ResolverChain::standard(git.clone(), Arc::new(store::FsPathCanonicalizer))));
-    let projects = Arc::new(ProjectQueries::new(projects_repo.clone(), worktrees_repo.clone(), settings_repo.clone(), fs.clone()));
+    // Connection details show the passwords of the accounts they name (the app's store).
+    let passwords: Arc<dyn ConnectionPasswords> = Arc::new(MysqlPasswords::with_store(Arc::new(DpapiMysqlPasswords::new(paths.secrets_dir())), Arc::new(SystemRandomPasswords)));
+    let projects = Arc::new(ProjectQueries::new(projects_repo.clone(), worktrees_repo.clone(), settings_repo.clone(), fs.clone(), passwords.clone()));
     // `package extensions`: the same `ext` folder scan as the app's project editor.
     let php_extensions = Arc::new(PhpExtensionListing::new(
         resolver.clone(),
@@ -85,7 +87,7 @@ pub fn build() -> AppResult<CliContext> {
         projects: projects.clone(),
         // Every detector, as in the app: the same folder analysis as `project create`.
         detection: Arc::new(DetectProject::new(store::detectors::all(), projects_repo.clone(), fs.clone())),
-        worktrees: Arc::new(WorktreeQueries::new(worktrees_repo.clone(), projects_repo.clone(), settings_repo.clone(), fs.clone())),
+        worktrees: Arc::new(WorktreeQueries::new(worktrees_repo.clone(), projects_repo.clone(), settings_repo.clone(), fs.clone(), passwords.clone())),
         agent: Arc::new(AgentContextQuery::new(AgentContextDeps {
             resolver: resolver.clone(),
             projects: projects_repo.clone(),
@@ -96,6 +98,7 @@ pub fn build() -> AppResult<CliContext> {
             control: channel.clone(),
             paths: paths.clone(),
             services: services.clone(),
+            passwords,
         })),
         hook_input: Arc::new(crate::local::StdinHookInput),
         // `which`: the shims' own tools and folder probe (the site's database in the data dir).

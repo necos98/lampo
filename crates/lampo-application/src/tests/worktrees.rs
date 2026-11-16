@@ -184,7 +184,7 @@ async fn stale_environments_are_detected_and_pruned() {
     up(&w, "D:\\wt\\cart", DatabaseModeDto::Shared).await.unwrap();
     w.fs.remove("D:\\wt\\login");
 
-    let queries = WorktreeQueries::new(w.worktrees.clone(), w.projects.clone(), w.settings.clone(), w.fs.clone());
+    let queries = WorktreeQueries::new(w.worktrees.clone(), w.projects.clone(), w.settings.clone(), w.fs.clone(), w.passwords.clone());
     let listed = queries.list(Some("shop")).unwrap();
     assert_eq!(listed.iter().filter(|e| e.stale).map(|e| e.site.as_str()).collect::<Vec<_>>(), ["shop@feature-login"]);
     assert_eq!(queries.list(Some("nope")).unwrap_err().code, ErrorCode::NotFound);

@@ -73,6 +73,11 @@
 			<FormRow label={t.databaseName} for="dbname">
 				<Input id="dbname" class="h-8 max-w-xs font-mono text-xs" value={draft.databaseName ?? ''} oninput={(e) => (draft.databaseName = e.currentTarget.value)} />
 			</FormRow>
+			<FormRow label={t.dedicatedAccount} help={draft.mysqlCredentials === 'project' ? t.dedicatedAccountHelp : t.rootAccountHelp}>
+				{#snippet children(field)}
+					<Switch {...field} checked={draft.mysqlCredentials === 'project'} onCheckedChange={(on) => (draft.mysqlCredentials = on ? 'project' : 'root')} />
+				{/snippet}
+			</FormRow>
 		{/if}
 	{:else}
 		<FormRow label={kind.label} help={t.serviceHelp(kind.label)}>

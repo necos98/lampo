@@ -29,7 +29,7 @@ and `redis-cli`.
 | `crates/lampo-infra-store` | TOML repositories (projects, worktrees, settings, presets), app paths, app location file, shim index file, shim installer (shims + CLI copy), project detectors, git metadata reader, user PATH, clock, generated agent-plugin files | Lampo's own files |
 | `crates/lampo-infra-packages` | Embedded + windows.php.net catalogs, downloader, SHA-256, zip extraction, installed registry, VC++ runtime detection, post-install hooks | Where binaries come from |
 | `crates/lampo-infra-web` | Apache config templates + `httpd -t` + runner (an httpd driver on the `ServiceHost` of `lampo-infra-services`), php.ini rendering, hosts-file block via the elevated `lampo-hosts-helper` | Apache/PHP/hosts specifics |
-| `crates/lampo-infra-services` | Job Object supervisor, `ServiceHost` (start/restart/stop sequence shared by every service runner, Apache included), MySQL/Redis/Mailpit runners, port probe, log files, `DatabaseAdmin` (plain, `.sql.gz` and single-`.sql` `.zip` dumps, (de)compressed while streaming), MySQL root passwords (DPAPI) and the option files handing them to the clients, control named pipe, headless app launcher, `claude` CLI runner, external desktop apps (PowerShell, Explorer, VS Code) | Local processes and IPC |
+| `crates/lampo-infra-services` | Job Object supervisor, `ServiceHost` (start/restart/stop sequence shared by every service runner, Apache included), MySQL/Redis/Mailpit runners, port probe, log files, `DatabaseAdmin` (plain, `.sql.gz` and single-`.sql` `.zip` dumps, (de)compressed while streaming), MySQL root and project-account passwords (DPAPI), their generator, the account statements (`MysqlAccountAdmin`) and the option files handing passwords to the clients, control named pipe, headless app launcher, `claude` CLI runner, external desktop apps (PowerShell, Explorer, VS Code) | Local processes and IPC |
 | `crates/lampo-cli` | `lampo` CLI and `lampo-shim` (copied as `php.exe` etc.): two composition roots (`src/composition.rs`, `src/bin/lampo-shim.rs`, which registers the shim tools) | CLI surface |
 | `claude-plugin` | Claude Code plugin sources: `skills/<skill-id>/SKILL.md` + reference files and `icon.png` (embedded as is), trigger evals and a dev manifest (repository only) | What agents are taught |
 | `apps/desktop` | SvelteKit GUI (`src/lib/api` typed API, `src/lib/messages` Italian strings) and `src-tauri` (Tauri commands, tray, composition root) | GUI |
@@ -142,7 +142,9 @@ reads the file in-process.
 Creating a project that uses MySQL also creates its database (name derived from the project id) on
 its instance, starting it on demand; an existing database is kept, and a failure never fails
 the creation: the result reports it in `databaseSetup` (`lampo project create --no-database`
-or `createDatabase: false` skips it). Deleting a project never drops its database.
+or `createDatabase: false` skips it). Deleting a project never drops its database; its dedicated
+MySQL account is dropped by the next provisioning of its instance (see
+[MySQL credentials](#mysql-credentials)).
 
 ### Hosts file and the elevated helper
 
@@ -353,25 +355,75 @@ its parent's; `None` for the default target and sites without MySQL):
   name) it adds the database as before: a visible client error beats a silent change. No check
   runs when the user chose a database.
 
-### MySQL credentials of Lampo's own clients
+### MySQL credentials
 
-Instances start with `root` and no password (`--initialize-insecure`). When a root password is
-stored for an instance (`MysqlRootPasswordWriter`; `DpapiMysqlRootPasswords` keeps it in
-`secrets\<service-id>.root.dpapi`, encrypted with DPAPI for the current Windows user), every
-client Lampo runs as root authenticates with it: `MysqlCliAdmin` (statements, import, export,
-clone), the `mysqladmin shutdown` fallback and the `mysql`/`mysqldump` shims. The password never
-reaches a command line or a log: `ClientOptionFile` writes a `[client]` option file to `%TEMP%`,
-created with a descriptor granting access to the current user only, passed as the client's first
-argument and deleted after the client exits. Lampo's own clients use `--defaults-file=` (that file
-and no other, like the `--no-defaults` they use without a password); the shims use
-`--defaults-extra-file=`, so the user's own option files keep applying, and only when the user
-chose no account, password, server or option file (`ShimInvocation::stored_credentials`): the
-root password never reaches another account or server. Without a stored password nothing changes.
+Instances are initialised with `root` and no password (`--initialize-insecure`). Two kinds of
+password are stored by `DpapiMysqlPasswords` (`lampo-infra-services`), one file each in
+`secrets\`, encrypted with DPAPI for the current Windows user (another user, or a copy on another
+machine, cannot decrypt them) under an entropy per kind, so a file of one kind never reads as the
+other: root's (`<service-id>.root.dpapi`, ports `MysqlRootPasswordReader`/`Writer`) and each
+project account's (`<project-id>.project.dpapi`, `MysqlProjectPasswordReader`/`Writer`; the first
+save wins atomically, so two first uses agree on one password). New passwords come from
+`SystemRandomPasswords` (`MysqlPasswordGenerator`: 32 letters and digits from `BCryptGenRandom`).
+
+**Accounts.** A project's `mysql_credentials` (`lampo_domain::mysql::accounts::MysqlCredentials`)
+is `project`, a dedicated account `lampo_<id>` (`MysqlUserName::for_project`: `-` as `_`, at most
+32 characters, a long id ends in `_<fnv32 of the id>`), or `root`. Project files written before
+the field read as `root`; new projects get `project` unless the setting
+`mysql_project_credentials` (`lampo settings set --project-credentials on|off`, the GUI's settings
+page, on by default; it needs no sync) is off; an import keeps what the export says (the `.env`
+travels with the code). `lampo project set --mysql-credentials project|root` and the GUI's project
+editor (`UpdateProjectRequest::mysql_credentials`, absent = unchanged) switch one project.
+
+**Provisioning.** `InstanceAccounts::plan` (pure) gives, per instance, the dedicated account of
+every project on it with exactly its database and the own databases of its worktree environments,
+and `secure_root`: `true` when no project on the instance (active or not: an inactive project's
+`.env` still names its account) uses `root`. `ApplyEnvironment` brings each running MySQL instance
+to its plan (`MysqlAccounts::provision`) after every sync and after a start outside a sync
+(`ServiceLifecycle::ensure`), remembering the plan applied per instance until it stops or starts
+again, so an unchanged plan costs nothing; a failure is a sync warning and the next sync tries
+again. When `secure_root` holds, root's password is taken from the store or generated and **stored
+before it is applied**; `MysqlAccountAdmin::secure_root` (`MysqlCliAdmin`) probes it, and only if
+the server refuses it (`ERROR 1045`) while accepting root without a password runs `ALTER USER` for
+every `root` host. So the migration of an instance created without a root password happens at its
+first start (or sync) once no project on it uses root, and a crash between saving and applying is
+repaired by the next provisioning. A root password is never removed: a project switched back to
+`root` (or created on root later) is shown that password. Then `sync_project_accounts` (as root)
+drops the `lampo_%` accounts no project owns any more and, for each planned one and each of the
+hosts `localhost` and `127.0.0.1` (TCP clients may match either), `CREATE USER IF NOT EXISTS` +
+`ALTER USER … IDENTIFIED BY`, `REVOKE ALL PRIVILEGES, GRANT OPTION`, then `GRANT ALL PRIVILEGES ON
+<db>.*` per database (`_`/`%` escaped: a grant names exactly that database, which the account may
+then create). Statements carrying a password are written to a user-only temporary file
+(`SecretTempFile`) that `mysql` reads on its standard input, never `--execute=`.
+
+**Shown credentials.** `DatabaseConnection` names its account (`project_account`); the
+application fills the password for display (`ConnectionPasswords`, implemented by
+`MysqlPasswords`, which also generates a project's password the first time it is asked): the
+project account's, or root's stored one (empty while root has none). `ProjectDto`,
+`WorktreeEnvironmentDto` (the parent's account), `lampo project info` and `lampo agent context`
+show them; `agent context` hints at the switch for a project still on root. Lampo never writes a
+`.env`.
+
+**Lampo's own clients.** Every client Lampo runs as root authenticates with the stored root
+password when there is one: `MysqlCliAdmin` (statements, import, export, clone), the `mysqladmin
+shutdown` fallback and the `mysql`/`mysqldump` shims. The shims of a project with a dedicated
+account (and of its worktree environments) connect as that account instead (`ShimService::user`,
+`project_account`) with its stored password; other sites and the default target use root.
+Passwords never reach a command line or a log: `ClientOptionFile` writes a `[client]` option file
+to `%TEMP%`, created with a descriptor granting access to the current user only, passed as the
+client's first argument and deleted after the client exits. Lampo's own clients use
+`--defaults-file=` (that file and no other, like the `--no-defaults` they use without a
+password); the shims use `--defaults-extra-file=`, so the user's own option files keep applying,
+and only when the user chose no account, password, server or option file
+(`ShimInvocation::stored_credentials`: `StoredCredentials::Root(instance)` or
+`Project(project)`): a stored password never reaches another account or server.
 
 `lampo exec` and `lampo env` need nothing extra: the shim dir is first on their PATH and
 `LAMPO_PROJECT`/`LAMPO_PROJECT_ROOT` are set, so `mysql` there is the shim with the same
-defaults. Lampo does not export `MYSQL_HOST`/`MYSQL_TCP_PORT` (only `PHPRC` and `LAMPO_*`), and
-no variable exists for the database anyway.
+defaults. `LAMPO_DB_USER` names the site's account; no variable carries a password: the
+project variables also reach the vhost (`SetEnv`, a generated file in clear) and every child
+process, so the password stays in the DPAPI store and the connection details. Lampo does not
+export `MYSQL_HOST`/`MYSQL_TCP_PORT` (only `PHPRC` and `LAMPO_*`).
 
 ### Site resolution (shims and CLI)
 

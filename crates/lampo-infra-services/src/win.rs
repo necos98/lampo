@@ -49,6 +49,7 @@ pub(crate) fn owned(h: HANDLE) -> io::Result<OwnedHandle> {
 }
 
 pub(crate) mod dpapi;
+pub(crate) mod random;
 
 struct LocalMem(*mut c_void);
 

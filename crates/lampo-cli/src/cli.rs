@@ -330,8 +330,8 @@ pub enum ProjectCommand {
 
 #[derive(Debug, Args)]
 #[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args([
-    "php", "ext", "no_ext", "addon", "no_addon", "ini", "no_ini", "env", "no_env", "service", "no_service", "database", "public_dir", "apache_directives",
-    "name", "address", "no_address",
+    "php", "ext", "no_ext", "addon", "no_addon", "ini", "no_ini", "env", "no_env", "service", "no_service", "database", "mysql_credentials", "public_dir",
+    "apache_directives", "name", "address", "no_address",
 ])))]
 pub struct ProjectSetArgs {
     /// Project id (default: resolved from the current folder or --project).
@@ -387,6 +387,14 @@ pub struct ProjectSetArgs {
     /// must use MySQL). Does not create, rename or copy any database.
     #[arg(long, value_name = "NAME")]
     pub database: Option<String>,
+    /// The MySQL account the project's code connects as: `project` (its own `lampo_<id>`
+    /// account, every privilege on its database and its worktree environments' and nothing
+    /// else) or `root` (kept for projects created before dedicated accounts, whose `.env` uses
+    /// root). After switching to `project`, put the user and password `lampo project info`
+    /// prints in the project's `.env` (DB_USERNAME, DB_PASSWORD). Once no project of an instance
+    /// uses root, root gets a random password.
+    #[arg(long, value_enum, value_name = "ACCOUNT")]
+    pub mysql_credentials: Option<MysqlCredentialsArg>,
     /// Document root relative to the project folder (`public`, `web`); `""` = the folder itself.
     #[arg(long, value_name = "DIR")]
     pub public_dir: Option<String>,
@@ -494,6 +502,15 @@ pub struct ProjectNewArgs {
     /// Do not create the project's MySQL database.
     #[arg(long)]
     pub no_database: bool,
+}
+
+/// `--mysql-credentials`: the MySQL account a project's code connects as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum MysqlCredentialsArg {
+    /// Its own account (`lampo_<id>`), granted only its databases.
+    Project,
+    /// The instance's root.
+    Root,
 }
 
 /// `--addressing` / `--default-addressing`: the addresses a new project gets.
@@ -801,12 +818,13 @@ pub enum SettingsCommand {
     ///   lampo settings set --loopback-range 8100-8299
     ///   lampo settings set --default-addressing hosts-only
     ///   lampo settings set --auto-restart off
+    ///   lampo settings set --project-credentials on
     #[command(verbatim_doc_comment)]
     Set(SettingsSetArgs),
 }
 
 #[derive(Debug, Args)]
-#[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args(["apache_port", "mysql_port", "redis_port", "port", "ui_port", "default_php", "loopback_range", "default_addressing", "auto_restart"])))]
+#[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args(["apache_port", "mysql_port", "redis_port", "port", "ui_port", "default_php", "loopback_range", "default_addressing", "auto_restart", "project_credentials"])))]
 pub struct SettingsSetArgs {
     /// Apache's shared port (host-name URLs use it; loopback-port URLs keep their own port).
     #[arg(long, value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
@@ -841,6 +859,11 @@ pub struct SettingsSetArgs {
     /// attempts, 2, 4 and 8 seconds apart.
     #[arg(long, value_name = "ON|OFF", value_parser = clap::builder::BoolishValueParser::new())]
     pub auto_restart: Option<bool>,
+    /// Whether projects created from now on get their own MySQL account (`on`, the default) or
+    /// connect as root (`off`). Existing projects keep theirs: switch one with
+    /// `lampo project set --mysql-credentials`.
+    #[arg(long, value_name = "ON|OFF", value_parser = clap::builder::BoolishValueParser::new())]
+    pub project_credentials: Option<bool>,
 }
 
 #[cfg(test)]

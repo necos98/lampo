@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use lampo_domain::hosts::HostsBlock;
+use lampo_domain::mysql::accounts::InstanceAccounts;
 use lampo_domain::package::PackageId;
 use lampo_domain::php::{ExtensionName, PhpMinor};
 use lampo_domain::paths::LampoPaths;
@@ -19,6 +20,7 @@ use lampo_domain::web::{PhpIniSpec, WebServerConfig};
 use lampo_domain::PortError;
 
 use super::allocation::SiteSnapshot;
+use super::mysql_accounts::MysqlAccounts;
 use super::generation::{ConfigSnapshot, php_ini_specs, runner_for, shim_index, web_config};
 use super::php_extensions::PhpExtensionsQuery;
 use super::service_catalog::ServiceCatalog;
@@ -32,6 +34,7 @@ use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::SyncReportDto;
 use crate::error::{AppError, AppResult, ErrorCode};
 
+mod accounts;
 mod revival;
 
 /// "Make the machine match the config." Called after every mutation by the use cases that
@@ -93,6 +96,8 @@ pub struct ApplyEnvironmentDeps {
     pub port_probe: Arc<dyn PortProbe>,
     pub paths: LampoPaths,
     pub events: Arc<dyn EventPublisher>,
+    /// Root's password and the projects' accounts on the running MySQL instances.
+    pub mysql_accounts: Arc<MysqlAccounts>,
 }
 
 #[derive(Default)]
@@ -100,6 +105,23 @@ struct SyncState {
     web: Option<WebState>,
     /// Launch last used for each service this instance started or restarted.
     launches: HashMap<ServiceId, ServiceLaunch>,
+    /// The account plan each running MySQL instance was last brought to (forgotten when it
+    /// stops or starts, so a start always provisions).
+    accounts: HashMap<ServiceId, InstanceAccounts>,
+}
+
+impl SyncState {
+    /// `id` was started now: whatever its accounts were is provisioned again.
+    fn started(&mut self, id: ServiceId, launch: ServiceLaunch) {
+        self.accounts.remove(&id);
+        self.launches.insert(id, launch);
+    }
+
+    /// `id` is no longer run by this instance.
+    fn forget(&mut self, id: &ServiceId) {
+        self.accounts.remove(id);
+        self.launches.remove(id);
+    }
 }
 
 /// `Running` or `Starting`.
@@ -284,7 +306,8 @@ impl ApplyEnvironment {
         }
         let launch = self.current_launch(id)?;
         self.start_with(runner.as_ref(), &launch, &launch.ports()).await?;
-        state.launches.insert(id.clone(), launch);
+        state.started(id.clone(), launch);
+        self.provision_started_mysql(state, id).await;
         Ok(true)
     }
 
@@ -307,7 +330,7 @@ impl ApplyEnvironment {
                     Err(e) => out.fail(e.into()),
                 }
             }
-            state.launches.remove(id);
+            state.forget(id);
         }
 
         // Then start/restart what is needed, Apache last (after its databases).
@@ -360,6 +383,7 @@ impl ApplyEnvironment {
                     continue;
                 }
                 out.report.started.push(id.to_string());
+                state.accounts.remove(&id);
             }
             state.launches.insert(id, launch);
         }
@@ -398,6 +422,7 @@ impl ApplyEnvironment {
 
         self.sync_hosts(&snap, ctx, &mut out).await;
         self.sync_services(&snap, &mut state, web_changed, &mut out).await;
+        self.sync_mysql_accounts(&snap, &mut state, &mut out.report.warnings).await;
         out.finish()
     }
 }
@@ -449,7 +474,7 @@ impl ServiceLifecycle for ApplyEnvironment {
         if stopped {
             runner.stop(service).await?;
         }
-        state.launches.remove(service);
+        state.forget(service);
         Ok(stopped)
     }
 }

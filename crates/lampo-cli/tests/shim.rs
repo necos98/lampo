@@ -205,6 +205,7 @@ fn install_mysql(sb: &Sandbox, database_exists: bool) -> PathBuf {
         database: Some("shop_feature".into()),
         data_dir: Some(data_dir),
         env_prefix: "DB".into(),
+        project_account: None,
     };
     let mut target = target(&sb.php_dir);
     target.services = [(ServiceKind::MYSQL, mysql)].into();

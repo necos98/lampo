@@ -14,6 +14,7 @@ pub use crate::apache_directives::ApacheDirectives;
 pub use crate::env_var::ProjectEnvVars;
 use crate::address::{SiteAddress, validate_addresses};
 use crate::error::DomainError;
+use crate::mysql::accounts::MysqlCredentials;
 use crate::mysql::{DatabaseConnection, DatabaseName, MysqlSeries};
 use crate::package::PackageKind;
 use crate::php::{ExtensionName, PhpIniOverrides, PhpMinor};
@@ -467,17 +468,21 @@ pub struct Project {
     pub active: bool,
     /// Preset the environment was copied from (informational only, no live link).
     pub origin_preset: Option<PresetId>,
+    /// The MySQL account its code connects as (meaningful only with MySQL).
+    pub mysql_credentials: MysqlCredentials,
 }
 
 impl Project {
     /// Creates an inactive project. The database name defaults to the slug when MySQL is used.
+    /// Its MySQL credentials are root's: a new project picks them from the settings
+    /// ([`MysqlCredentials::for_new_project`]).
     pub fn new(id: ProjectId, name: DisplayName, root: ProjectRoot, addresses: Vec<SiteAddress>, environment: ProjectEnvironment) -> Result<Self, DomainError> {
         validate_addresses(&addresses)?;
         let database = match environment.mysql() {
             Some(_) => Some(DatabaseName::from_slug(id.as_str())?),
             None => None,
         };
-        Ok(Self { id, name, root, addresses, environment, database, tls: TlsMode::Disabled, active: false, origin_preset: None })
+        Ok(Self { id, name, root, addresses, environment, database, tls: TlsMode::Disabled, active: false, origin_preset: None, mysql_credentials: MysqlCredentials::default() })
     }
 
     pub fn set_addresses(&mut self, addresses: Vec<SiteAddress>) -> Result<(), DomainError> {
@@ -544,11 +549,17 @@ impl Project {
         }
     }
 
+    /// Its own id when its code connects with its dedicated MySQL account
+    /// ([`MysqlCredentials::Project`]), `None` when it uses root.
+    pub fn mysql_project_account(&self) -> Option<&ProjectId> {
+        (self.mysql_credentials == MysqlCredentials::Project).then_some(&self.id)
+    }
+
     /// Connection details for the GUI, if the project uses MySQL.
     pub fn database_connection(&self, settings: &Settings) -> Result<Option<DatabaseConnection>, DomainError> {
         let (Some(series), Some(db)) = (self.environment.mysql(), self.database.clone()) else { return Ok(None) };
         let port = settings.mysql_port(series).ok_or_else(|| DomainError::UnknownMysqlSeries(series.to_string()))?;
-        Ok(Some(DatabaseConnection::local(series, port, db)))
+        Ok(Some(DatabaseConnection::local(series, port, db, &self.id, self.mysql_credentials)))
     }
 
     /// URL of the primary address (`http://shop.test`, `http://127.0.0.1:8101`, …).

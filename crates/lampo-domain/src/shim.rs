@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::DomainError;
 use crate::php::{ComposerChannel, PhpMinor};
-use crate::project::{ProjectEnvVars, ProjectRoot};
+use crate::project::{ProjectEnvVars, ProjectId, ProjectRoot};
 use crate::resolution::env_vars;
 use crate::service::{ServiceId, ServiceKind};
 use crate::site::SiteId;
@@ -44,6 +44,11 @@ pub struct ShimService {
     /// `database`'s folder there before selecting it. `None` in indexes written before it existed.
     #[serde(default)]
     pub data_dir: Option<PathBuf>,
+    /// The project whose dedicated MySQL account `user` is (a worktree environment uses its
+    /// parent's): its stored password authenticates the clients. `None`: `user` is the
+    /// instance's root, or the kind has no accounts; indexes written before it read as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_account: Option<ProjectId>,
     /// `DB` → `LAMPO_DB_HOST`, `LAMPO_DB_PORT`, … (from the kind's descriptor).
     pub env_prefix: String,
 }
@@ -118,12 +123,21 @@ pub struct ShimInvocation {
     pub env: Vec<(String, String)>,
     /// One line for stderr before the tool starts (the defaults were adjusted).
     pub notice: Option<String>,
-    /// The MySQL instance whose stored root password the launcher hands to the client, when one
-    /// is stored: an option file given before every argument (`--defaults-extra-file=`), never
-    /// the command line. Set only for a client connecting to that instance as
-    /// [`ROOT_ACCOUNT`](crate::mysql::credentials::ROOT_ACCOUNT) with no account, password,
-    /// server or option file chosen by the user.
-    pub stored_credentials: Option<ServiceId>,
+    /// The stored password the launcher hands to the client, when one is stored: an option file
+    /// given before every argument (`--defaults-extra-file=`), never the command line. Set only
+    /// for a client connecting with the target's own account (the instance's
+    /// [`ROOT_ACCOUNT`](crate::mysql::credentials::ROOT_ACCOUNT) or the project's dedicated
+    /// account) with no account, password, server or option file chosen by the user.
+    pub stored_credentials: Option<StoredCredentials>,
+}
+
+/// Whose stored password authenticates a MySQL client started by a shim.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoredCredentials {
+    /// The root of this instance.
+    Root(ServiceId),
+    /// The dedicated account of this project.
+    Project(ProjectId),
 }
 
 /// What is at a path, as one file-system call can tell.
@@ -209,7 +223,7 @@ pub mod tools {
     /// `[option-file options the user put first] --host --port --user --default-character-set
     /// [extra] <user args>`. Option-file options (`--no-defaults`, `--defaults-file=`, …) must stay
     /// first for the client; everything else the user passes comes after the defaults, so explicit
-    /// options win. The instance's stored root password is offered
+    /// options win. The stored password of the target's own account is offered
     /// ([`ShimInvocation::stored_credentials`]) only when the defaults decide the connection.
     fn mysql_client(m: &ShimService, binary: &str, args: &[String], parsed: &mysql_args::ParsedArgs, extra: Option<String>) -> ShimInvocation {
         let leading_count = mysql_args::leading_only_count(args);
@@ -220,9 +234,18 @@ pub mod tools {
         a.push(format!("--default-character-set={MYSQL_CLIENT_CHARSET}"));
         a.extend(extra);
         a.extend_from_slice(rest);
-        let as_root = m.user.as_deref() == Some(ROOT_ACCOUNT);
-        let stored_credentials = (as_root && leading_count == 0 && !parsed.chooses_connection()).then(|| m.service.clone());
+        let stored_credentials = if leading_count == 0 && !parsed.chooses_connection() { own_account(m) } else { None };
         ShimInvocation { program: m.client_dir.join(format!("{binary}.exe")), args: a, env: Vec::new(), notice: None, stored_credentials }
+    }
+
+    /// Whose stored password authenticates the target's own account: its project's dedicated
+    /// account, or the instance's root.
+    fn own_account(m: &ShimService) -> Option<StoredCredentials> {
+        match (&m.project_account, m.user.as_deref()) {
+            (Some(project), Some(_)) => Some(StoredCredentials::Project(project.clone())),
+            (None, Some(ROOT_ACCOUNT)) => Some(StoredCredentials::Root(m.service.clone())),
+            _ => None,
+        }
     }
 
     /// `mysql`: also selects the site's database unless the user chose one (a positional
@@ -358,6 +381,7 @@ pub(crate) mod tests {
             database: Some("shop".into()),
             data_dir: Some(PathBuf::from(r"C:\mysql\data")),
             env_prefix: "DB".into(),
+            project_account: None,
         };
         ShimTarget {
             php,
@@ -434,14 +458,14 @@ pub(crate) mod tests {
         assert!(tools::RedisCli.invocation(&t, &[], &present()).is_err());
     }
 
-    fn stored_credentials(tool: &dyn ShimTool, t: &ShimTarget, user: &[&str]) -> Option<ServiceId> {
+    fn stored_credentials(tool: &dyn ShimTool, t: &ShimTarget, user: &[&str]) -> Option<StoredCredentials> {
         tool.invocation(t, &args(user), &present()).unwrap().stored_credentials
     }
 
     #[test]
     fn mysql_clients_offer_the_stored_root_password_only_for_lampos_own_connection() {
         let t = target("8.3");
-        let instance = Some("mysql-8.4".parse().unwrap());
+        let instance = Some(StoredCredentials::Root("mysql-8.4".parse().unwrap()));
         for tool in [&tools::Mysql as &dyn ShimTool, &tools::Mysqldump] {
             for user in [&[][..], &["-e", "SELECT 1"], &["--protocol=TCP", "shop"], &["--database=blog"]] {
                 assert_eq!(stored_credentials(tool, &t, user), instance, "{} {user:?}", tool.name());
@@ -457,6 +481,20 @@ pub(crate) mod tests {
         for tool in [&tools::Php as &dyn ShimTool, &tools::Composer] {
             assert_eq!(stored_credentials(tool, &t, &[]), None);
         }
+    }
+
+    #[test]
+    fn mysql_clients_of_a_project_with_its_own_account_offer_that_accounts_password() {
+        let mut t = target("8.3");
+        let service = t.services.get_mut(&ServiceKind::MYSQL).unwrap();
+        service.user = Some("lampo_shop".into());
+        service.project_account = Some(ProjectId::new("shop").unwrap());
+        let own = Some(StoredCredentials::Project(ProjectId::new("shop").unwrap()));
+        for tool in [&tools::Mysql as &dyn ShimTool, &tools::Mysqldump] {
+            assert_eq!(stored_credentials(tool, &t, &["-e", "SELECT 1"]), own, "{}", tool.name());
+            assert_eq!(stored_credentials(tool, &t, &["-u", "root"]), None, "another account chosen: {}", tool.name());
+        }
+        assert!(mysql(&t, &[]).contains(&"--user=lampo_shop".to_string()));
     }
 
     #[test]

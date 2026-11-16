@@ -13,8 +13,9 @@
 //! | [`TcpPortProbe`]             | `PortProbe`                                  |
 //! | [`FileLogReader`]            | `LogFileReader`                              |
 //! | [`SizeLogRotator`]           | `LogRotator`                                 |
-//! | [`MysqlCliAdmin`]            | `DatabaseAdmin` (compressed dumps via [`compression`]) |
-//! | [`DpapiMysqlRootPasswords`]  | `MysqlRootPasswordReader`, `MysqlRootPasswordWriter` (DPAPI, current user) |
+//! | [`MysqlCliAdmin`]            | `DatabaseAdmin` (compressed dumps via [`compression`]), `MysqlAccountAdmin` (root password, project accounts) |
+//! | [`DpapiMysqlPasswords`]      | `MysqlRootPasswordReader`/`Writer`, `MysqlProjectPasswordReader`/`Writer` (DPAPI, current user) |
+//! | [`SystemRandomPasswords`]    | `MysqlPasswordGenerator` (`BCryptGenRandom`) |
 //! | [`NamedPipeControlServer`]   | `ControlChannelServer`                       |
 //! | [`NamedPipeControlClient`]   | `ControlChannelClient`                       |
 //! | [`HeadlessAppLauncher`]      | `AppLauncher`                                |
@@ -50,7 +51,8 @@ pub mod log_export;
 pub mod logs;
 pub mod mailpit;
 pub mod mysql;
-pub mod mysql_root_passwords;
+pub mod mysql_passwords;
+pub mod password_generator;
 pub mod ports;
 mod process;
 pub mod redis;
@@ -73,7 +75,8 @@ pub use log_export::FileLogExportWriter;
 pub use logs::FileLogReader;
 pub use mailpit::MailpitRunner;
 pub use mysql::MysqlRunner;
-pub use mysql_root_passwords::DpapiMysqlRootPasswords;
+pub use mysql_passwords::DpapiMysqlPasswords;
+pub use password_generator::SystemRandomPasswords;
 pub use client_option_file::ClientOptionFile;
 pub use ports::TcpPortProbe;
 pub use redis::RedisRunner;

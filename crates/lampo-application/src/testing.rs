@@ -14,6 +14,7 @@ use lampo_domain::events::DomainEvent;
 use lampo_domain::hostname::Tld;
 use lampo_domain::hosts::HostsBlock;
 use lampo_domain::logs::{LogChunk, LogLine, LogQuery};
+use lampo_domain::mysql::credentials::MysqlPassword;
 use lampo_domain::mysql::{DatabaseName, MysqlSeries};
 use lampo_domain::package::{CatalogChannel, CatalogEntry, DownloadUrl, DownloadedFile, InstalledPackage, PackageId, PackageKind, PackagePayload, Sha256Digest};
 use lampo_domain::paths::LampoPaths;
@@ -967,6 +968,89 @@ impl PhpExtensionScanner for FakeExtensionScanner {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// MySQL accounts
+// ---------------------------------------------------------------------------------------------
+
+/// Stored root and project passwords, in memory.
+#[derive(Default)]
+pub struct MemMysqlPasswords {
+    pub root: Mutex<BTreeMap<ServiceId, MysqlPassword>>,
+    pub projects: Mutex<BTreeMap<ProjectId, MysqlPassword>>,
+}
+impl MysqlRootPasswordReader for MemMysqlPasswords {
+    fn root_password(&self, instance: &ServiceId) -> PortResult<Option<MysqlPassword>> {
+        Ok(lock(&self.root).get(instance).cloned())
+    }
+}
+impl MysqlRootPasswordWriter for MemMysqlPasswords {
+    fn save_root_password(&self, instance: &ServiceId, password: &MysqlPassword) -> PortResult<()> {
+        lock(&self.root).insert(instance.clone(), password.clone());
+        Ok(())
+    }
+}
+impl MysqlProjectPasswordReader for MemMysqlPasswords {
+    fn project_password(&self, project: &ProjectId) -> PortResult<Option<MysqlPassword>> {
+        Ok(lock(&self.projects).get(project).cloned())
+    }
+}
+impl MysqlProjectPasswordWriter for MemMysqlPasswords {
+    fn save_project_password_if_absent(&self, project: &ProjectId, password: &MysqlPassword) -> PortResult<MysqlPassword> {
+        Ok(lock(&self.projects).entry(project.clone()).or_insert_with(|| password.clone()).clone())
+    }
+}
+
+/// `generated-1`, `generated-2`, …
+#[derive(Default)]
+pub struct CountingPasswords(pub AtomicUsize);
+impl MysqlPasswordGenerator for CountingPasswords {
+    fn generate(&self) -> PortResult<MysqlPassword> {
+        let n = self.0.fetch_add(1, Ordering::SeqCst) + 1;
+        Ok(MysqlPassword::new(format!("generated-{n}")).unwrap())
+    }
+}
+
+/// Records `secure-root:<port>:<password>` and `accounts:<port>:<user>=<db>+<db>;…` calls; root
+/// starts without a password and keeps the one it is given.
+#[derive(Default)]
+pub struct FakeMysqlAccounts {
+    pub calls: Mutex<Vec<String>>,
+    /// Root's password on the server, per port.
+    pub root: Mutex<BTreeMap<u16, MysqlPassword>>,
+    /// The next call fails (MySQL error) without changing anything.
+    pub fail_next: AtomicBool,
+}
+impl FakeMysqlAccounts {
+    pub fn calls(&self) -> Vec<String> {
+        lock(&self.calls).clone()
+    }
+    fn fail(&self) -> PortResult<()> {
+        if self.fail_next.swap(false, Ordering::SeqCst) { Err(PortError::process("mysql", "ERROR 2013: Lost connection")) } else { Ok(()) }
+    }
+}
+#[async_trait]
+impl MysqlAccountAdmin for FakeMysqlAccounts {
+    async fn secure_root(&self, endpoint: &MysqlEndpoint, password: &MysqlPassword) -> PortResult<RootPasswordChange> {
+        self.fail()?;
+        lock(&self.calls).push(format!("secure-root:{}:{}", endpoint.port, password.expose()));
+        let mut root = lock(&self.root);
+        match root.get(&endpoint.port.get()) {
+            Some(current) if current == password => Ok(RootPasswordChange::AlreadySet),
+            Some(_) => Err(PortError::process("mysql", "root accepts neither the stored password nor an empty one")),
+            None => {
+                root.insert(endpoint.port.get(), password.clone());
+                Ok(RootPasswordChange::Applied)
+            }
+        }
+    }
+    async fn sync_project_accounts(&self, endpoint: &MysqlEndpoint, accounts: &[ProjectAccountGrant]) -> PortResult<()> {
+        self.fail()?;
+        let listed: Vec<String> = accounts.iter().map(|a| format!("{}={}", a.user, a.databases.iter().map(DatabaseName::as_str).collect::<Vec<_>>().join("+"))).collect();
+        lock(&self.calls).push(format!("accounts:{}:{}", endpoint.port, listed.join(";")));
+        Ok(())
+    }
+}
+
 /// Every fake, plus the real `ApplyEnvironment` / `ServiceControl` wired to them.
 pub struct World {
     pub paths: LampoPaths,
@@ -997,6 +1081,12 @@ pub struct World {
     pub services: Arc<ServiceCatalog>,
     /// What every installed PHP build offers ([`FAKE_BUNDLED_EXTENSIONS`], [`FAKE_BUILTIN_EXTENSIONS`]).
     pub scanner: Arc<FakeExtensionScanner>,
+    /// The MySQL accounts on the (fake) servers.
+    pub mysql_accounts: Arc<FakeMysqlAccounts>,
+    /// The stored MySQL passwords.
+    pub secrets: Arc<MemMysqlPasswords>,
+    /// The passwords over `secrets` (generated as `generated-<n>`).
+    pub passwords: Arc<MysqlPasswords>,
 }
 
 impl World {
@@ -1026,6 +1116,9 @@ impl World {
         let ports = Arc::new(FakePorts::default());
         let events = Arc::new(RecordingEvents::default());
         let scanner = Arc::new(FakeExtensionScanner::new(FAKE_BUNDLED_EXTENSIONS));
+        let mysql_accounts = Arc::new(FakeMysqlAccounts::default());
+        let secrets = Arc::new(MemMysqlPasswords::default());
+        let passwords = Arc::new(MysqlPasswords::with_store(secrets.clone(), Arc::new(CountingPasswords::default())));
         let mut runners: Vec<Arc<dyn ServiceRunner>> = vec![apache.clone(), mysql.clone(), redis.clone(), mailpit.clone()];
         runners.extend(extra_runners);
         let env = Arc::new(ApplyEnvironment::new(ApplyEnvironmentDeps {
@@ -1044,6 +1137,7 @@ impl World {
             port_probe: ports.clone(),
             paths: paths.clone(),
             events: events.clone(),
+            mysql_accounts: Arc::new(MysqlAccounts::new(mysql_accounts.clone(), passwords.clone())),
         }));
         let service_control = Arc::new(ServiceControl::new(ServiceControlDeps { runners, catalog: services.clone(), settings: settings.clone(), lifecycle: env.clone(), env: env.clone() }));
         let allocator = Arc::new(LoopbackPortAllocator::new(projects.clone(), worktrees.clone(), settings.clone(), ports.clone()));
@@ -1073,6 +1167,9 @@ impl World {
             allocator,
             services,
             scanner,
+            mysql_accounts,
+            secrets,
+            passwords,
         }
     }
 
@@ -1131,7 +1228,7 @@ impl World {
     }
 
     pub fn worktree_queries(&self) -> Arc<WorktreeQueries> {
-        Arc::new(WorktreeQueries::new(self.worktrees.clone(), self.projects.clone(), self.settings.clone(), self.fs.clone()))
+        Arc::new(WorktreeQueries::new(self.worktrees.clone(), self.projects.clone(), self.settings.clone(), self.fs.clone(), self.passwords.clone()))
     }
 
     pub fn worktree_up(&self) -> WorktreeUp {
@@ -1173,7 +1270,7 @@ impl World {
     }
 
     pub fn project_queries(&self) -> Arc<ProjectQueries> {
-        Arc::new(ProjectQueries::new(self.projects.clone(), self.worktrees.clone(), self.settings.clone(), self.fs.clone()))
+        Arc::new(ProjectQueries::new(self.projects.clone(), self.worktrees.clone(), self.settings.clone(), self.fs.clone(), self.passwords.clone()))
     }
 
     /// The rules of every project save; every installed PHP ships [`FAKE_BUNDLED_EXTENSIONS`].

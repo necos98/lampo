@@ -42,6 +42,11 @@ export type Addressing = "standard" | "no-elevation" | "hosts-only";
 export type TlsMode = "disabled" | "local-ca";
 
 /**
+ * The MySQL account a project's code connects as.
+ */
+export type MysqlCredentials = "root" | "project";
+
+/**
  * The environment a preset carries and a project copies.
  */
 export type ProjectEnvironment = { 
@@ -147,6 +152,10 @@ urls: Array<string>, documentRoot: string, environment: ProjectEnvironment, data
  * Connection details to show (never written to `.env`).
  */
 database: DatabaseConnection | null, 
+/**
+ * Which account `database` names; meaningful only with MySQL. Absent (older apps) = root.
+ */
+mysqlCredentials: MysqlCredentials, 
 /**
  * SMTP endpoint and web UI of Mailpit, when the project uses it.
  */
@@ -256,6 +265,10 @@ urls: Array<string>, documentRoot: string, environment: ProjectEnvironment, data
  */
 database: DatabaseConnection | null, 
 /**
+ * Which account `database` names; meaningful only with MySQL. Absent (older apps) = root.
+ */
+mysqlCredentials: MysqlCredentials, 
+/**
  * SMTP endpoint and web UI of Mailpit, when the project uses it.
  */
 mail?: MailConnection | null, tls: TlsMode, active: boolean, originPreset: string | null, 
@@ -279,7 +292,11 @@ export type DeleteProjectResult = {
  */
 orphanedDatabases: Array<string>, };
 
-export type UpdateProjectRequest = { projectId: string, name: string, addresses: Array<SiteAddress>, environment: ProjectEnvironment, databaseName: string | null, tls: TlsMode, };
+export type UpdateProjectRequest = { projectId: string, name: string, addresses: Array<SiteAddress>, environment: ProjectEnvironment, databaseName: string | null, tls: TlsMode, 
+/**
+ * The MySQL account its code connects as. Absent (older clients) = unchanged.
+ */
+mysqlCredentials?: MysqlCredentials | null, };
 
 export type SetProjectActiveRequest = { projectId: string, active: boolean, };
 
@@ -334,6 +351,10 @@ urls: Array<string>, documentRoot: string, environment: ProjectEnvironment, data
  * Connection details to show (never written to `.env`).
  */
 database: DatabaseConnection | null, 
+/**
+ * Which account `database` names; meaningful only with MySQL. Absent (older apps) = root.
+ */
+mysqlCredentials: MysqlCredentials, 
 /**
  * SMTP endpoint and web UI of Mailpit, when the project uses it.
  */
@@ -810,7 +831,12 @@ firstRunCompleted: boolean,
 /**
  * Addresses new projects get when the creator chooses none.
  */
-defaultAddressing: Addressing, };
+defaultAddressing: Addressing, 
+/**
+ * New projects get a dedicated MySQL account (`lampo_<id>`, granted only their databases)
+ * instead of root. Existing projects keep theirs until switched one by one.
+ */
+mysqlProjectCredentials: boolean, };
 
 // --- Diagnostics and shims ---
 

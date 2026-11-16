@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use lampo_domain::address::SiteAddress;
-use lampo_domain::mysql::{DatabaseName, MysqlSeries};
+use lampo_domain::mysql::{DatabaseConnection, DatabaseName, MysqlSeries};
 use lampo_domain::package::{EntryRole, InstalledPackage, PackageKind};
 use lampo_domain::php::{ComposerChannel, PhpMinor};
 use lampo_domain::ports::{FileSystemInspector, InstalledPackageRegistry, MysqlEndpoint, ProjectRepository, WorktreeRepository};
@@ -19,11 +19,12 @@ use lampo_domain::DomainError;
 
 use super::allocation::SiteSnapshot;
 use super::environment::EnvironmentSync;
-use super::service_catalog::ServiceCatalog;
+use super::mysql_accounts::ConnectionPasswords;
+use super::service_catalog::{ServiceCatalog, SiteMysqlClient};
 use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::mapping::{address_to_dto, connection_to_dto, environment_to_dto, mail_to_dto, tls_to_dto};
+use crate::mapping::{address_to_dto, connection_to_dto, credentials_to_dto, environment_to_dto, mail_to_dto, tls_to_dto};
 
 // ---------------------------------------------------------------------------------------------
 // Identifiers and lookups
@@ -167,6 +168,12 @@ impl SiteRef<'_> {
         }
     }
 
+    /// What its MySQL clients default to: its database and, with a dedicated account, whose (a
+    /// worktree environment uses its parent's).
+    pub fn mysql_client(&self) -> SiteMysqlClient {
+        SiteMysqlClient { database: self.database().map(|d| d.to_string()), project_account: self.project.mysql_project_account().cloned() }
+    }
+
     /// Served by Apache: active projects and every worktree environment.
     pub fn served(&self) -> bool {
         self.worktree.is_some() || self.project.active
@@ -189,7 +196,21 @@ pub(crate) fn all_sites<'a>(projects: &'a [Project], worktrees: &'a [WorktreeEnv
 // Presentation
 // ---------------------------------------------------------------------------------------------
 
-pub(crate) fn worktree_dto(w: &WorktreeEnvironment, parent: &Project, settings: &Settings, fs: Option<&dyn FileSystemInspector>) -> WorktreeEnvironmentDto {
+/// The connection details to show, with the password of the account they name.
+pub(crate) fn shown_connection(connection: Option<DatabaseConnection>, passwords: &dyn ConnectionPasswords) -> Option<DatabaseConnectionDto> {
+    connection.map(|mut c| {
+        passwords.reveal(&mut c);
+        connection_to_dto(&c)
+    })
+}
+
+pub(crate) fn worktree_dto(
+    w: &WorktreeEnvironment,
+    parent: &Project,
+    settings: &Settings,
+    fs: Option<&dyn FileSystemInspector>,
+    passwords: &dyn ConnectionPasswords,
+) -> WorktreeEnvironmentDto {
     let alias = w.localhost_alias();
     let mode = match &w.database {
         WorktreeDatabase::Shared => DatabaseModeDto::Shared,
@@ -208,14 +229,20 @@ pub(crate) fn worktree_dto(w: &WorktreeEnvironment, parent: &Project, settings: 
         localhost_alias: alias.to_string(),
         document_root: w.document_root(parent).display().to_string(),
         database_mode: mode,
-        database: w.database_connection(parent, settings).ok().flatten().as_ref().map(connection_to_dto),
+        database: shown_connection(w.database_connection(parent, settings).ok().flatten(), passwords),
         stale: fs.is_some_and(|fs| w.is_stale(std::slice::from_ref(parent), |root| fs.is_dir(root.as_path()))),
         created_at_unix_ms: w.created_at_unix_ms,
     }
 }
 
 /// `worktrees` may contain any environment; only the project's own are listed.
-pub(crate) fn project_dto(project: &Project, worktrees: &[WorktreeEnvironment], settings: &Settings, fs: Option<&dyn FileSystemInspector>) -> ProjectDto {
+pub(crate) fn project_dto(
+    project: &Project,
+    worktrees: &[WorktreeEnvironment],
+    settings: &Settings,
+    fs: Option<&dyn FileSystemInspector>,
+    passwords: &dyn ConnectionPasswords,
+) -> ProjectDto {
     ProjectDto {
         id: project.id.to_string(),
         name: project.name.to_string(),
@@ -227,12 +254,13 @@ pub(crate) fn project_dto(project: &Project, worktrees: &[WorktreeEnvironment], 
         document_root: project.document_root().display().to_string(),
         environment: environment_to_dto(&project.environment),
         database_name: project.database().map(|d| d.to_string()),
-        database: project.database_connection(settings).ok().flatten().as_ref().map(connection_to_dto),
+        database: shown_connection(project.database_connection(settings).ok().flatten(), passwords),
+        mysql_credentials: credentials_to_dto(project.mysql_credentials),
         mail: project.environment.uses(&ServiceKind::MAILPIT).then(|| mail_to_dto(&settings.mail_connection())),
         tls: tls_to_dto(project.tls),
         active: project.active,
         origin_preset: project.origin_preset.as_ref().map(|p| p.to_string()),
-        worktrees: worktrees.iter().filter(|w| w.parent == project.id).map(|w| worktree_dto(w, project, settings, fs)).collect(),
+        worktrees: worktrees.iter().filter(|w| w.parent == project.id).map(|w| worktree_dto(w, project, settings, fs, passwords)).collect(),
         notices: Vec::new(),
     }
 }
@@ -243,9 +271,13 @@ pub(crate) fn project_dto(project: &Project, worktrees: &[WorktreeEnvironment], 
 
 /// Where to reach the MySQL `series` instance with its clients, as the user its descriptor names.
 pub(crate) fn mysql_endpoint(installed: &dyn InstalledPackageRegistry, settings: &Settings, catalog: &ServiceCatalog, series: MysqlSeries) -> AppResult<MysqlEndpoint> {
+    mysql_endpoint_in(&installed.list()?, settings, catalog, series)
+}
+
+/// [`mysql_endpoint`] among `packages`, the installed packages already read.
+pub(crate) fn mysql_endpoint_in(packages: &[InstalledPackage], settings: &Settings, catalog: &ServiceCatalog, series: MysqlSeries) -> AppResult<MysqlEndpoint> {
     let port = settings.mysql_port(series).ok_or_else(|| DomainError::UnknownMysqlSeries(series.to_string()))?;
-    let packages = installed.list()?;
-    let package = newest_of(&packages, &PackageKind::MYSQL, Some(series.as_series()), None).ok_or_else(|| package_missing(format!("MySQL {series}")))?;
+    let package = newest_of(packages, &PackageKind::MYSQL, Some(series.as_series()), None).ok_or_else(|| package_missing(format!("MySQL {series}")))?;
     let client_dir = package.entry(EntryRole::ClientDir).ok_or_else(|| package_part_missing(format!("MySQL {series}"), "clients"))?.to_path_buf();
     let user = catalog.client_user(&ServiceKind::MYSQL).ok_or_else(|| AppError::internal("the MySQL service kind names no client user"))?;
     Ok(MysqlEndpoint { series, client_dir, port, user: user.to_string() })

@@ -20,7 +20,7 @@ use lampo_domain::progress::CancelFlag;
 
 use super::tests::launch;
 use super::*;
-use crate::{DpapiMysqlRootPasswords, JobObjectSupervisor, MysqlCliAdmin};
+use crate::{DpapiMysqlPasswords, JobObjectSupervisor, MysqlCliAdmin};
 
 /// Spaces, `#`, `;`, quotes and a backslash: everything the option file must carry verbatim.
 const PASSWORD: &str = r"Lampo #1; it's \ fine";
@@ -68,7 +68,7 @@ async fn mysqladmin_shutdown_without_a_stored_password_reads_no_option_file() {
 #[tokio::test]
 async fn mysqladmin_shutdown_reads_the_stored_password_from_a_user_only_option_file() {
     let secrets = tempfile::tempdir().unwrap();
-    let store = crate::DpapiMysqlRootPasswords::new(secrets.path());
+    let store = crate::DpapiMysqlPasswords::new(secrets.path());
     store.save_root_password(&MysqlSeries::DEFAULT.service_id(), &MysqlPassword::new("s3cret").unwrap()).unwrap();
     let (spec, option_file) = mysqladmin_shutdown(Arc::new(store)).await;
     let path = spec.args[0].strip_prefix("--defaults-file=").expect("the option file comes first").to_string();
@@ -117,7 +117,7 @@ async fn root_password_admin_and_shutdown_authenticate_with_the_stored_password(
         data_dir: Some(root.path().join("data")),
         log_dir: root.path().join("logs"),
     };
-    let store = Arc::new(DpapiMysqlRootPasswords::new(root.path().join("secrets")));
+    let store = Arc::new(DpapiMysqlPasswords::new(root.path().join("secrets")));
     let sup = Arc::new(JobObjectSupervisor::new());
     let runner = MysqlRunner::new(sup.clone(), sup.clone(), store.clone(), Arc::new(NullEventPublisher));
     runner.prepare(&launch).await.unwrap();
@@ -158,5 +158,83 @@ async fn root_password_admin_and_shutdown_authenticate_with_the_stored_password(
     wait_until_closed(launch.port).await;
     let log = std::fs::read_to_string(error_log(&launch)).unwrap();
     assert!(log.contains("Received SHUTDOWN from user root"), "not stopped by mysqladmin:\n{log}");
+    runner.stop(&launch.service).await.unwrap();
+}
+
+/// `statement` run by `mysql.exe` as `user` with `password` (none: `None`), through an option file.
+async fn run_as(commands: &dyn CommandRunner, endpoint: &MysqlEndpoint, user: &str, password: Option<&str>, statement: &str) -> CommandOutput {
+    let option_file = password.map(|p| ClientOptionFile::for_password(&MysqlPassword::new(p).unwrap()).unwrap());
+    let mut args = client_args(endpoint.port, user, option_file.as_ref());
+    args.push(format!("--execute={statement}"));
+    commands.run(CommandSpec { program: endpoint.client_dir.join("mysql.exe"), args, ..Default::default() }, MYSQLADMIN_TIMEOUT).await.unwrap()
+}
+
+/// The migration of an instance initialised with a passwordless root, on a real MySQL (ignored by
+/// default, as above): its data survives, root then needs the stored password, and a project
+/// account reaches its own databases only.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a MySQL zip: set LAMPO_TEST_MYSQL_DIR"]
+async fn root_gets_a_password_and_project_accounts_only_their_databases() {
+    use lampo_domain::mysql::accounts::MysqlUserName;
+    use lampo_domain::ports::{MysqlAccountAdmin, MysqlPasswordGenerator, ProjectAccountGrant, RootPasswordChange};
+    use lampo_domain::project::ProjectId;
+
+    let Some(install) = std::env::var_os("LAMPO_TEST_MYSQL_DIR").map(PathBuf::from) else { return };
+    let series = std::env::var("LAMPO_TEST_MYSQL_SERIES").ok().map(|s| MysqlSeries::parse(&s).unwrap()).unwrap_or(MysqlSeries::DEFAULT);
+    let root = tempfile::tempdir().unwrap();
+    let launch = ServiceLaunch {
+        service: series.service_id(),
+        install_dir: install.clone(),
+        port: free_port(),
+        ui_port: None,
+        config_dir: root.path().join("generated"),
+        data_dir: Some(root.path().join("data")),
+        log_dir: root.path().join("logs"),
+    };
+    let store = Arc::new(DpapiMysqlPasswords::new(root.path().join("secrets")));
+    let sup = Arc::new(JobObjectSupervisor::new());
+    let runner = MysqlRunner::new(sup.clone(), sup.clone(), store.clone(), Arc::new(NullEventPublisher));
+    runner.prepare(&launch).await.unwrap();
+    runner.start(&launch).await.unwrap();
+    let endpoint = MysqlEndpoint { series, client_dir: install.join("bin"), port: launch.port, user: ROOT_ACCOUNT.into() };
+    let admin = MysqlCliAdmin::new(sup.clone(), sup.clone(), store.clone());
+
+    // An existing instance: databases made while root had no password.
+    for db in ["shop", "shop_wt_fix", "shopXwt_fix", "other"] {
+        admin.create(&endpoint, &DatabaseName::new(db).unwrap()).await.unwrap();
+    }
+    let seed = root.path().join("seed.sql");
+    std::fs::write(&seed, "CREATE TABLE items (id INT PRIMARY KEY);\nINSERT INTO items VALUES (1);\n").unwrap();
+    admin.import(&endpoint, &DatabaseName::new("shop").unwrap(), &seed, DumpImportOptions::default(), &NullProgressSink, &CancelFlag::new()).await.unwrap();
+
+    // Stored first, then applied: as the application does.
+    let password = crate::SystemRandomPasswords.generate().unwrap();
+    store.save_root_password(&launch.service, &password).unwrap();
+    assert_eq!(admin.secure_root(&endpoint, &password).await.unwrap(), RootPasswordChange::Applied);
+    assert_eq!(admin.secure_root(&endpoint, &password).await.unwrap(), RootPasswordChange::AlreadySet, "idempotent");
+    assert!(run_as(sup.as_ref(), &endpoint, ROOT_ACCOUNT, None, "SELECT 1").await.stderr.contains("Access denied"), "no more passwordless root");
+    let kept = run_as(sup.as_ref(), &endpoint, ROOT_ACCOUNT, Some(password.expose()), "SELECT COUNT(*) FROM shop.items").await;
+    assert!(kept.success() && kept.stdout.contains('1'), "the data survives: {} {}", kept.stdout, kept.stderr);
+
+    let shop = ProjectId::new("shop").unwrap();
+    let user = MysqlUserName::for_project(&shop);
+    let grant = |databases: &[&str]| ProjectAccountGrant {
+        user: user.clone(),
+        password: MysqlPassword::new("Sh0pPassw0rd").unwrap(),
+        databases: databases.iter().map(|d| DatabaseName::new(d).unwrap()).collect(),
+    };
+    let stale = ProjectAccountGrant { user: MysqlUserName::for_project(&ProjectId::new("gone").unwrap()), ..grant(&["other"]) };
+    admin.sync_project_accounts(&endpoint, &[grant(&["shop"]), stale]).await.unwrap();
+    admin.sync_project_accounts(&endpoint, &[grant(&["shop", "shop_wt_fix"])]).await.unwrap();
+
+    let as_shop = |statement: &'static str| run_as(sup.as_ref(), &endpoint, user.as_str(), Some("Sh0pPassw0rd"), statement);
+    assert!(as_shop("SELECT COUNT(*) FROM shop.items").await.success());
+    assert!(as_shop("CREATE TABLE shop_wt_fix.t (id INT)").await.success(), "its worktree's database");
+    for denied in ["CREATE TABLE other.t (id INT)", "CREATE TABLE shopXwt_fix.t (id INT)", "CREATE DATABASE elsewhere", "SELECT User FROM mysql.user"] {
+        let out = run_as(sup.as_ref(), &endpoint, user.as_str(), Some("Sh0pPassw0rd"), denied).await;
+        assert!(!out.success(), "`{denied}` must be refused: {}", out.stdout);
+    }
+    let gone = run_as(sup.as_ref(), &endpoint, "lampo_gone", Some("Sh0pPassw0rd"), "SELECT 1").await;
+    assert!(gone.stderr.contains("Access denied"), "the stale account was dropped: {}", gone.stderr);
     runner.stop(&launch.service).await.unwrap();
 }

@@ -17,6 +17,7 @@ use lampo_domain::worktree::{DatabaseMode, Occupancy, WorktreeDatabase, Worktree
 use lampo_domain::PortError;
 
 use super::allocation::LoopbackPortAllocator;
+use super::mysql_accounts::ConnectionPasswords;
 use super::environment::EnvironmentSync;
 use super::service_catalog::ServiceCatalog;
 use super::service_leases::ServiceLease;
@@ -33,11 +34,19 @@ pub struct WorktreeQueries {
     projects: Arc<dyn ProjectRepository>,
     settings: Arc<dyn SettingsRepository>,
     fs: Arc<dyn FileSystemInspector>,
+    /// The passwords of the connection details shown.
+    passwords: Arc<dyn ConnectionPasswords>,
 }
 
 impl WorktreeQueries {
-    pub fn new(worktrees: Arc<dyn WorktreeRepository>, projects: Arc<dyn ProjectRepository>, settings: Arc<dyn SettingsRepository>, fs: Arc<dyn FileSystemInspector>) -> Self {
-        Self { worktrees, projects, settings, fs }
+    pub fn new(
+        worktrees: Arc<dyn WorktreeRepository>,
+        projects: Arc<dyn ProjectRepository>,
+        settings: Arc<dyn SettingsRepository>,
+        fs: Arc<dyn FileSystemInspector>,
+        passwords: Arc<dyn ConnectionPasswords>,
+    ) -> Self {
+        Self { worktrees, projects, settings, fs, passwords }
     }
 
     /// All environments, or those of `project_id` (`NotFound` if unknown). Environments whose
@@ -49,8 +58,10 @@ impl WorktreeQueries {
             Some(raw) => self.worktrees.list_for(&load_project(self.projects.as_ref(), raw)?.id)?,
             None => self.worktrees.list_all()?,
         };
-        let mut out: Vec<WorktreeEnvironmentDto> =
-            envs.iter().filter_map(|w| projects.iter().find(|p| p.id == w.parent).map(|parent| worktree_dto(w, parent, &settings, Some(self.fs.as_ref())))).collect();
+        let mut out: Vec<WorktreeEnvironmentDto> = envs
+            .iter()
+            .filter_map(|w| projects.iter().find(|p| p.id == w.parent).map(|parent| worktree_dto(w, parent, &settings, Some(self.fs.as_ref()), self.passwords.as_ref())))
+            .collect();
         out.sort_by(|a, b| a.site.cmp(&b.site));
         Ok(out)
     }
@@ -62,7 +73,7 @@ impl WorktreeQueries {
 
     /// [`Self::present`] with the `settings` at hand (a commit's, so nothing is read again).
     pub(crate) fn present_in(&self, env: &WorktreeEnvironment, parent: &Project, settings: &Settings) -> WorktreeEnvironmentDto {
-        worktree_dto(env, parent, settings, Some(self.fs.as_ref()))
+        worktree_dto(env, parent, settings, Some(self.fs.as_ref()), self.passwords.as_ref())
     }
 }
 
