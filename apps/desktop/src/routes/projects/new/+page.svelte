@@ -128,25 +128,27 @@
 		<Card.Root size="sm">
 			<Card.Header><Card.Title>{m.create.stepFolder}</Card.Title></Card.Header>
 			<Card.Content class="flex flex-col gap-2">
-				<FormRow label={m.create.folderLabel} for="folder" help={m.create.folderHelp}>
-					<div class="flex gap-2">
-						<div class="flex-1">
-							<PathInput
-								id="folder"
-								mode="folder"
-								title={m.create.folderLabel}
-								placeholder={m.create.folderPlaceholder}
-								bind:value={flow.folder}
-								oninput={() => flow.folderEdited()}
-								onblur={() => flow.folder.trim() && !flow.detection && void flow.detect()}
-								onpicked={() => void flow.detect()}
-								autofocus
-							/>
+				<FormRow label={m.create.folderLabel} help={m.create.folderHelp}>
+					{#snippet children(field)}
+						<div class="flex gap-2">
+							<div class="flex-1">
+								<PathInput
+									{...field}
+									mode="folder"
+									title={m.create.folderLabel}
+									placeholder={m.create.folderPlaceholder}
+									bind:value={flow.folder}
+									oninput={() => flow.folderEdited()}
+									onblur={() => flow.folder.trim() && !flow.detection && void flow.detect()}
+									onpicked={() => void flow.detect()}
+									autofocus
+								/>
+							</div>
+							<Button type="button" size="sm" variant="secondary" onclick={() => flow.detect()} disabled={!flow.folder.trim() || flow.detecting}>
+								<FolderSearch />{flow.detecting ? m.create.detecting : m.create.detect}
+							</Button>
 						</div>
-						<Button type="button" size="sm" variant="secondary" onclick={() => flow.detect()} disabled={!flow.folder.trim() || flow.detecting}>
-							<FolderSearch />{flow.detecting ? m.create.detecting : m.create.detect}
-						</Button>
-					</div>
+					{/snippet}
 				</FormRow>
 				{#if flow.detectError}<ErrorNotice error={flow.detectError} title={m.common.loadFailed} />{/if}
 			</Card.Content>
@@ -160,42 +162,60 @@
 			<Card.Content class="flex flex-col gap-1">
 				<fieldset disabled={locked} class="contents">
 					{#if flow.source === 'git'}
-						<FormRow label={t.repoUrl} for="repo-url" help={t.repoUrlHelp}>
-							<Input id="repo-url" class="h-8" placeholder={t.repoUrlPlaceholder} bind:value={flow.repoUrl} oninput={() => flow.repoUrlEdited()} autocomplete="off" spellcheck={false} />
+						<FormRow label={t.repoUrl} help={t.repoUrlHelp}>
+							{#snippet children(field)}
+								<Input {...field} class="h-8" placeholder={t.repoUrlPlaceholder} bind:value={flow.repoUrl} oninput={() => flow.repoUrlEdited()} autocomplete="off" spellcheck={false} />
+							{/snippet}
 						</FormRow>
 						<FormRow label={t.branch} for="branch">
 							<Input id="branch" class="h-8 max-w-xs" placeholder={t.branchPlaceholder} bind:value={flow.branch} autocomplete="off" spellcheck={false} />
 						</FormRow>
 					{:else}
-						<FormRow label={t.laravelName} for="laravel-name" help={t.laravelNameHelp}>
-							<Input id="laravel-name" class="h-8 max-w-xs" placeholder="mio-progetto" bind:value={flow.folderName} oninput={() => flow.folderNameEdited()} autocomplete="off" spellcheck={false} />
+						<FormRow label={t.laravelName} help={t.laravelNameHelp}>
+							{#snippet children(field)}
+								<Input {...field} class="h-8 max-w-xs" placeholder="mio-progetto" bind:value={flow.folderName} oninput={() => flow.folderNameEdited()} autocomplete="off" spellcheck={false} />
+							{/snippet}
 						</FormRow>
 					{/if}
 
-					<FormRow label={t.parentDir} for="parent-dir" help={t.parentDirHelp}>
-						<PathInput id="parent-dir" mode="folder" title={t.parentDir} placeholder={t.parentDirPlaceholder} bind:value={flow.parentDir} />
+					<FormRow label={t.parentDir} help={t.parentDirHelp}>
+						{#snippet children(field)}
+							<PathInput {...field} mode="folder" title={t.parentDir} placeholder={t.parentDirPlaceholder} bind:value={flow.parentDir} />
+						{/snippet}
 					</FormRow>
 
 					{#if flow.source === 'git'}
-						<FormRow label={t.folderName} for="folder-name" help={t.folderNameHelp}>
-							<Input id="folder-name" class="h-8 max-w-xs" bind:value={flow.folderName} oninput={() => flow.folderNameEdited()} autocomplete="off" spellcheck={false} />
+						<FormRow label={t.folderName} help={t.folderNameHelp}>
+							{#snippet children(field)}
+								<Input {...field} class="h-8 max-w-xs" bind:value={flow.folderName} oninput={() => flow.folderNameEdited()} autocomplete="off" spellcheck={false} />
+							{/snippet}
 						</FormRow>
 					{:else}
 						<FormRow label={t.laravelPhp} help={t.laravelPhpHelp}>
-							<PhpVersionSelect bind:value={flow.laravelPhp} />
-							{#if !flow.laravelPhpSupported}<p class="mt-1 text-xs text-destructive">{t.laravelPhpTooOld}</p>{/if}
+							{#snippet children(field)}
+								<PhpVersionSelect {...field} bind:value={flow.laravelPhp} />
+								{#if !flow.laravelPhpSupported}<p class="mt-1 text-xs text-destructive">{t.laravelPhpTooOld}</p>{/if}
+							{/snippet}
 						</FormRow>
 						<FormRow label={t.starterKit}>
-							<SelectField value={flow.starterKit} options={starterKitOptions} class="w-48" onchange={(v) => (flow.starterKit = v as StarterKit)} />
+							{#snippet children(field)}
+								<SelectField {...field} value={flow.starterKit} options={starterKitOptions} class="w-48" onchange={(v) => (flow.starterKit = v as StarterKit)} />
+							{/snippet}
 						</FormRow>
 						<FormRow label={t.testing}>
-							<SelectField value={flow.testing} options={testingOptions} class="w-48" onchange={(v) => (flow.testing = v as TestingFramework)} />
+							{#snippet children(field)}
+								<SelectField {...field} value={flow.testing} options={testingOptions} class="w-48" onchange={(v) => (flow.testing = v as TestingFramework)} />
+							{/snippet}
 						</FormRow>
-						<FormRow label={t.initGit} for="init-git" help={t.initGitHelp}>
-							<Switch id="init-git" bind:checked={flow.initGit} />
+						<FormRow label={t.initGit} help={t.initGitHelp}>
+							{#snippet children(field)}
+								<Switch {...field} bind:checked={flow.initGit} />
+							{/snippet}
 						</FormRow>
-						<FormRow label={t.npm} for="npm" help={t.npmHelp}>
-							<Switch id="npm" bind:checked={flow.npm} />
+						<FormRow label={t.npm} help={t.npmHelp}>
+							{#snippet children(field)}
+								<Switch {...field} bind:checked={flow.npm} />
+							{/snippet}
 						</FormRow>
 						{#if packages.installed.data && !composerInstalled}
 							<div class="flex items-center gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">
@@ -313,13 +333,19 @@
 					<Input id="name" class="h-8 max-w-xs" bind:value={flow.name} />
 				</FormRow>
 				<FormRow label={m.create.preset}>
-					<SelectField bind:value={flow.presetId} options={presetOptions} />
+					{#snippet children(field)}
+						<SelectField {...field} bind:value={flow.presetId} options={presetOptions} />
+					{/snippet}
 				</FormRow>
 				<FormRow label={m.create.php}>
-					<PhpVersionSelect bind:value={flow.phpVersion} allowDefault />
+					{#snippet children(field)}
+						<PhpVersionSelect {...field} bind:value={flow.phpVersion} allowDefault />
+					{/snippet}
 				</FormRow>
 				<FormRow label={m.create.addressing}>
-					<SelectField value={flow.addressing} options={addressingOptions} class="w-full max-w-md" onchange={(v) => (flow.addressing = v as Addressing)} />
+					{#snippet children(field)}
+						<SelectField {...field} value={flow.addressing} options={addressingOptions} class="w-full max-w-md" onchange={(v) => (flow.addressing = v as Addressing)} />
+					{/snippet}
 				</FormRow>
 			</Card.Content>
 			<Card.Footer class="justify-end">

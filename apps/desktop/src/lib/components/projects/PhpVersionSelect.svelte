@@ -14,10 +14,11 @@
 		value: string | null;
 		allowDefault?: boolean;
 		id?: string;
+		'aria-describedby'?: string;
 		onchange?: (value: string | null) => void;
 	}
 
-	let { value = $bindable(), allowDefault = false, id, onchange }: Props = $props();
+	let { value = $bindable(), allowDefault = false, id, 'aria-describedby': ariaDescribedBy, onchange }: Props = $props();
 
 	const options = $derived([
 		...(allowDefault ? [{ value: '', label: m.create.phpDefault }] : []),
@@ -40,7 +41,7 @@
 
 <div class="flex flex-col gap-2">
 	<div class="flex items-center gap-2">
-		<SelectField {id} value={value ?? ''} options={withCurrent} class="w-64" onchange={(v) => {
+		<SelectField {id} aria-describedby={ariaDescribedBy} value={value ?? ''} options={withCurrent} class="w-64" onchange={(v) => {
 				value = v === '' ? null : v;
 				onchange?.(value);
 			}} />

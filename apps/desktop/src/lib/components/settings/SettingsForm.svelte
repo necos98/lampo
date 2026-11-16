@@ -54,11 +54,15 @@
 {/if}
 
 <h2 class="mb-1 text-sm font-medium">{t.defaults}</h2>
-<FormRow label={t.defaultPhp} for="default-php" help={t.defaultPhpHelp}>
-	<SelectField id="default-php" value={draft.value.defaultPhpVersion ?? ''} options={phpWithCurrent} onchange={(v) => (draft.value.defaultPhpVersion = v)} placeholder={m.common.none} />
+<FormRow label={t.defaultPhp} help={t.defaultPhpHelp}>
+	{#snippet children(field)}
+		<SelectField {...field} value={draft.value.defaultPhpVersion ?? ''} options={phpWithCurrent} onchange={(v) => (draft.value.defaultPhpVersion = v)} placeholder={m.common.none} />
+	{/snippet}
 </FormRow>
-<FormRow label={t.tld} for="tld" help={t.tldHelp}>
-	<Input id="tld" class="h-8 w-32 font-mono text-xs" bind:value={draft.value.tld} />
+<FormRow label={t.tld} help={t.tldHelp}>
+	{#snippet children(field)}
+		<Input {...field} class="h-8 w-32 font-mono text-xs" bind:value={draft.value.tld} />
+	{/snippet}
 </FormRow>
 
 <h2 class="mt-5 mb-1 text-sm font-medium">{t.ports}</h2>
@@ -92,16 +96,20 @@
 	</ul>
 </FormRow>
 <FormRow label={t.worktreeRange} help={draft.rangeValid ? t.worktreeRangeHelp : t.rangeInvalid}>
-	<div class="flex items-center gap-2">
-		<Input type="number" class="h-8 w-24 font-mono text-xs" value={draft.value.loopbackPortRange.start} oninput={(e) => (draft.value.loopbackPortRange.start = num(e))} aria-label={t.rangeStart} aria-invalid={!draft.rangeValid} />
-		<span class="text-muted-foreground">–</span>
-		<Input type="number" class="h-8 w-24 font-mono text-xs" value={draft.value.loopbackPortRange.end} oninput={(e) => (draft.value.loopbackPortRange.end = num(e))} aria-label={t.rangeEnd} aria-invalid={!draft.rangeValid} />
-	</div>
+	{#snippet children(field)}
+		<div class="flex items-center gap-2">
+			<Input {...field} type="number" class="h-8 w-24 font-mono text-xs" value={draft.value.loopbackPortRange.start} oninput={(e) => (draft.value.loopbackPortRange.start = num(e))} aria-label={t.rangeStart} aria-invalid={!draft.rangeValid} />
+			<span class="text-muted-foreground">–</span>
+			<Input type="number" class="h-8 w-24 font-mono text-xs" value={draft.value.loopbackPortRange.end} oninput={(e) => (draft.value.loopbackPortRange.end = num(e))} aria-label={t.rangeEnd} aria-invalid={!draft.rangeValid} aria-describedby={field['aria-describedby']} />
+		</div>
+	{/snippet}
 </FormRow>
 
 <h2 class="mt-5 mb-1 text-sm font-medium">{t.behaviour}</h2>
 <FormRow label={t.closeToTray} help={t.closeToTrayHelp}>
-	<Switch bind:checked={draft.value.closeToTray} aria-label={t.closeToTray} />
+	{#snippet children(field)}
+		<Switch {...field} bind:checked={draft.value.closeToTray} />
+	{/snippet}
 </FormRow>
 
 <SaveBar dirty={draft.dirty} valid={draft.valid} saving={settings.saving} onsave={save} onreset={discard} />

@@ -18,15 +18,16 @@
 		class?: string;
 		/** Accessible name when no visible <label for> points at the trigger. */
 		'aria-label'?: string;
+		'aria-describedby'?: string;
 		onchange?: (value: string) => void;
 	}
 
-	let { value = $bindable(), options, placeholder = '', id, disabled = false, class: className = 'w-56', 'aria-label': ariaLabel, onchange }: Props = $props();
+	let { value = $bindable(), options, placeholder = '', id, disabled = false, class: className = 'w-56', 'aria-label': ariaLabel, 'aria-describedby': ariaDescribedBy, onchange }: Props = $props();
 	const current = $derived(options.find((o) => o.value === value)?.label ?? placeholder);
 </script>
 
 <Select.Root type="single" bind:value {disabled} onValueChange={(v) => onchange?.(v)}>
-	<Select.Trigger {id} size="sm" class={className} aria-label={ariaLabel}>{current}</Select.Trigger>
+	<Select.Trigger {id} size="sm" class={className} aria-label={ariaLabel} aria-describedby={ariaDescribedBy}>{current}</Select.Trigger>
 	<Select.Content>
 		{#each options as option (option.value)}
 			<Select.Item value={option.value} label={option.label} disabled={option.disabled}>{option.label}</Select.Item>

@@ -76,7 +76,9 @@
 		{/if}
 	{:else}
 		<FormRow label={kind.label} help={t.serviceHelp(kind.label)}>
-			<Switch checked={usesService(draft.environment, kind.kind)} onCheckedChange={(on) => setService(draft.environment, kind.kind, on)} aria-label={kind.label} />
+			{#snippet children(field)}
+				<Switch {...field} checked={usesService(draft.environment, kind.kind)} onCheckedChange={(on) => setService(draft.environment, kind.kind, on)} />
+			{/snippet}
 		</FormRow>
 	{/if}
 {/each}

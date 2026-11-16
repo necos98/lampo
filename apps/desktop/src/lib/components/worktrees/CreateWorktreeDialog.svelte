@@ -53,11 +53,15 @@
 				<PathInput id="wt-path" mode="folder" bind:value={path} title={t.createPath} placeholder="C:\Dev\.worktrees\feature-x" required />
 			</FormRow>
 			<FormRow label={t.createDb}>
-				<SelectField value={mode} options={modeOptions} class="w-full" onchange={(v) => (mode = v as DatabaseMode['mode'])} />
+				{#snippet children(field)}
+					<SelectField {...field} value={mode} options={modeOptions} class="w-full" onchange={(v) => (mode = v as DatabaseMode['mode'])} />
+				{/snippet}
 			</FormRow>
 			{#if mode === 'clone'}
 				<FormRow label={t.cloneSource}>
-					<SelectField value={effectiveSource} options={sourceOptions} class="w-full" onchange={(v) => (source = v)} />
+					{#snippet children(field)}
+						<SelectField {...field} value={effectiveSource} options={sourceOptions} class="w-full" onchange={(v) => (source = v)} />
+					{/snippet}
 				</FormRow>
 			{/if}
 			<Dialog.Footer>

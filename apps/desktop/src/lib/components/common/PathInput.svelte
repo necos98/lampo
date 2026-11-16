@@ -12,6 +12,7 @@
 		/** `folder`: an existing folder; `file`: an existing file; `save`: a file to write. */
 		mode: 'folder' | 'file' | 'save';
 		id?: string;
+		'aria-describedby'?: string;
 		placeholder?: string;
 		required?: boolean;
 		/** Title of the native picker. */
@@ -24,7 +25,7 @@
 		onpicked?: (path: string) => void;
 	}
 
-	let { value = $bindable(), mode, id, placeholder = '', required = false, title, filters, autofocus = false, oninput, onblur, onpicked }: Props = $props();
+	let { value = $bindable(), mode, id, 'aria-describedby': ariaDescribedBy, placeholder = '', required = false, title, filters, autofocus = false, oninput, onblur, onpicked }: Props = $props();
 
 	async function browse() {
 		const defaultPath = value.trim() || undefined;
@@ -39,6 +40,6 @@
 
 <div class="flex gap-2">
 	<!-- svelte-ignore a11y_autofocus -->
-	<Input {id} class="h-8 font-mono text-xs" bind:value {placeholder} {required} {autofocus} {oninput} {onblur} />
+	<Input {id} aria-describedby={ariaDescribedBy} class="h-8 font-mono text-xs" bind:value {placeholder} {required} {autofocus} {oninput} {onblur} />
 	<Button type="button" size="sm" variant="outline" onclick={browse} aria-label={title ?? m.common.browse}><FolderOpen />{m.common.browse}</Button>
 </div>

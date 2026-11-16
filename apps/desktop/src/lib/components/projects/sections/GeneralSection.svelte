@@ -46,12 +46,16 @@
 		<Button size="xs" variant="ghost" onclick={onrelink}>{m.projects.relink}</Button>
 	</div>
 </FormRow>
-<FormRow label={g.publicDir} for="p-public" help={g.publicDirHelp}>
-	<Input id="p-public" class="h-8 max-w-xs font-mono text-xs" bind:value={draft.environment.publicDir} placeholder="public" />
+<FormRow label={g.publicDir} help={g.publicDirHelp}>
+	{#snippet children(field)}
+		<Input {...field} class="h-8 max-w-xs font-mono text-xs" bind:value={draft.environment.publicDir} placeholder="public" />
+	{/snippet}
 </FormRow>
 <FormRow label={g.documentRoot}><code class="font-mono text-xs text-muted-foreground">{project.documentRoot}</code></FormRow>
 <FormRow label={g.tls}>
-	<SelectField value={draft.tls} options={tlsOptions} onchange={(v) => (draft.tls = v as TlsMode)} />
+	{#snippet children(field)}
+		<SelectField {...field} value={draft.tls} options={tlsOptions} onchange={(v) => (draft.tls = v as TlsMode)} />
+	{/snippet}
 </FormRow>
 {#if origin}
 	<FormRow label={g.preset}><span class="text-sm">{presets.label(origin).name}</span></FormRow>
