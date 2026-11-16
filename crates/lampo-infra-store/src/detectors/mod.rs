@@ -1,26 +1,28 @@
-//! Project-type detectors, one per framework (open-closed: add a module + list it in [`all`]).
+//! Project-type detectors, one per framework (open-closed: add a module + list it in [`all`],
+//! or in `php::MANIFEST_DETECTORS` when it reads `composer.json`).
 
 use std::sync::Arc;
 
 use lampo_domain::ports::ProjectDetector;
 
-pub mod composer;
+mod composer;
 pub mod docker;
-pub mod laravel;
+mod laravel;
 mod manifest;
-pub mod symfony;
-pub mod wordpress;
+mod php;
+mod symfony;
+mod wordpress;
 
-pub use composer::ComposerDetector;
 pub use docker::DockerDetector;
-pub use laravel::LaravelDetector;
-pub use symfony::SymfonyDetector;
-pub use wordpress::WordPressDetector;
+pub use php::PhpDetector;
+
+/// Files larger than this are not configuration: skipped (`composer.json` is then unreadable).
+const MAX_FILE_BYTES: u64 = 256 * 1024;
 
 /// Every built-in detector, in tie-break order (environment-only ones, Docker, merge into the
 /// winner: `lampo_domain::detection::combine_hints`).
 pub fn all() -> Vec<Arc<dyn ProjectDetector>> {
-    vec![Arc::new(LaravelDetector), Arc::new(WordPressDetector), Arc::new(SymfonyDetector), Arc::new(ComposerDetector), Arc::new(DockerDetector)]
+    vec![Arc::new(PhpDetector), Arc::new(DockerDetector)]
 }
 
 #[cfg(test)]

@@ -13,7 +13,7 @@
 //! | [`JsonShimIndex`]          | `ShimIndexReader`, `ShimIndexWriter`    |
 //! | [`ExeShimInstaller`]       | `ShimInstaller`                         |
 //! | [`AppLocationFile`]        | `AppLocationRecorder`                   |
-//! | [`detectors`]              | `ProjectDetector` (one per framework)   |
+//! | [`detectors`]              | `ProjectDetector` (PHP manifest, Docker) |
 //! | [`FsGitInspector`]         | `GitInspector`                          |
 //! | [`FsPathCanonicalizer`]    | `PathCanonicalizer`                     |
 //! | [`LocalFileSystem`]        | `FileSystemInspector`, `ScaffoldFiles`, `AgentPluginFiles` |

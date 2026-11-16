@@ -31,12 +31,10 @@ use lampo_domain::PortResult;
 use lampo_domain::detection::{DetectedApp, DetectionHint, ENVIRONMENT_ONLY};
 use lampo_domain::ports::ProjectDetector;
 
+use super::MAX_FILE_BYTES;
 use super::manifest::preset;
 use compose::ComposeFile;
 use findings::Findings;
-
-/// Files larger than this are not configuration: skipped.
-const MAX_FILE_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DockerDetector;
