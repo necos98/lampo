@@ -4,6 +4,7 @@
 use lampo_domain::events::{DomainEvent, TaskOutcome};
 use lampo_domain::progress::{Progress, ProgressStage};
 use lampo_domain::service::{LogStream, ServiceState, ServiceStatus};
+use lampo_domain::tcp_port::Port;
 use serde::{Deserialize, Serialize};
 
 use crate::dto::ServiceStateDto;
@@ -183,7 +184,7 @@ impl AppEvent {
 }
 
 pub(crate) fn service_status_payload(s: &ServiceStatus) -> ServiceStatusPayload {
-    ServiceStatusPayload { service: s.service.to_string(), kind: s.service.kind().to_string(), state: s.state.into(), pid: s.pid, port: s.port, message: s.message.clone() }
+    ServiceStatusPayload { service: s.service.to_string(), kind: s.service.kind().to_string(), state: s.state.into(), pid: s.pid, port: s.port.map(Port::get), message: s.message.clone() }
 }
 
 impl From<ServiceState> for ServiceStateDto {

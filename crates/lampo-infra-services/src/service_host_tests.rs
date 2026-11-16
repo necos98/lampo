@@ -11,6 +11,7 @@ use lampo_domain::events::DomainEvent;
 use lampo_domain::mysql::MysqlSeries;
 use lampo_domain::ports::{ChildId, CommandSpec, EventPublisher, ProcessObserver, ProcessSupervisor, SpawnedChild};
 use lampo_domain::service::{ServiceLaunch, ServiceState, ServiceStatus};
+use lampo_domain::tcp_port::Port;
 use lampo_domain::{PortError, PortResult};
 use tokio::time::Instant;
 
@@ -51,7 +52,7 @@ impl ProcessSupervisor for FakeSupervisor {
         self.alive.load(Ordering::SeqCst)
     }
 
-    fn owns_listener(&self, child: ChildId, _port: u16) -> bool {
+    fn owns_listener(&self, child: ChildId, _port: Port) -> bool {
         self.is_alive(child) && self.listen_after.is_some_and(|after| self.t0.elapsed() >= after)
     }
 }
@@ -137,7 +138,7 @@ struct Fixture {
 fn fixture(grows_for: Option<Duration>, listen_after: Option<Duration>) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     // Nobody listens on it: the host's own "port already in use" check passes.
-    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let port = Port::new(std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()).unwrap();
     let launch = ServiceLaunch {
         service: MysqlSeries::DEFAULT.service_id(),
         install_dir: dir.path().join("install"),

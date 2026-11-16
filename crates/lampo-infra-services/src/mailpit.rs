@@ -13,13 +13,14 @@ use std::time::Duration;
 use async_trait::async_trait;
 use lampo_domain::ports::{CommandSpec, EventPublisher, ProcessSupervisor, ServiceRunner};
 use lampo_domain::service::{ServiceId, ServiceKind, ServiceLaunch, ServiceStatus};
+use lampo_domain::tcp_port::Port;
 use lampo_domain::PortResult;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::service_host::{ServiceDriver, ServiceHost, create_dir, find_executable};
 
 /// The web UI port when the launch has none (Mailpit always listens on one).
-const DEFAULT_UI_PORT: u16 = 8025;
+const DEFAULT_UI_PORT: Port = Port::of(8025);
 
 /// Where the messages are stored.
 fn database_file(launch: &ServiceLaunch) -> PathBuf {
@@ -44,9 +45,9 @@ pub fn mailpit_args(launch: &ServiceLaunch) -> Vec<String> {
 }
 
 /// The SMTP greeting (`220 …`), or `None` when nothing answered in time.
-async fn smtp_greeting(port: u16) -> Option<String> {
+async fn smtp_greeting(port: Port) -> Option<String> {
     let attempt = async {
-        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.ok()?;
+        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port.get())).await.ok()?;
         let mut buf = [0u8; 256];
         let n = s.read(&mut buf).await.ok()?;
         let _ = s.write_all(b"QUIT\r\n").await;
@@ -55,8 +56,8 @@ async fn smtp_greeting(port: u16) -> Option<String> {
     tokio::time::timeout(Duration::from_secs(3), attempt).await.ok().flatten()
 }
 
-async fn accepts(port: u16) -> bool {
-    tokio::time::timeout(Duration::from_secs(3), tokio::net::TcpStream::connect(("127.0.0.1", port))).await.is_ok_and(|r| r.is_ok())
+async fn accepts(port: Port) -> bool {
+    tokio::time::timeout(Duration::from_secs(3), tokio::net::TcpStream::connect(("127.0.0.1", port.get()))).await.is_ok_and(|r| r.is_ok())
 }
 
 struct MailpitDriver;
@@ -135,8 +136,8 @@ mod tests {
         ServiceLaunch {
             service: ServiceId::new(ServiceKind::MAILPIT, None),
             install_dir,
-            port: 2025,
-            ui_port: Some(9025),
+            port: Port::of(2025),
+            ui_port: Some(Port::of(9025)),
             config_dir: r"C:\gen\mailpit".into(),
             data_dir: Some(r"C:\Data Dir\mailpit\data".into()),
             log_dir: r"C:\logs\mailpit".into(),

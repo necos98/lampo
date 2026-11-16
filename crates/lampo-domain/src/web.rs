@@ -11,6 +11,7 @@ use crate::hostname::Hostname;
 use crate::php::{ExtensionName, PhpIniOverrides, PhpMinor};
 use crate::project::{ApacheDirectives, TlsMode};
 use crate::site::SiteId;
+use crate::tcp_port::Port;
 
 /// One generated `<VirtualHost>` (one file per project).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -20,7 +21,7 @@ pub struct VirtualHost {
     /// First = `ServerName`, rest = `ServerAlias`. May be empty if only a loopback port is used.
     pub server_names: Vec<Hostname>,
     /// Dedicated `127.0.0.1:<port>` listener (`SiteAddress::LoopbackPort`), if any.
-    pub loopback_port: Option<u16>,
+    pub loopback_port: Option<Port>,
     pub project_root: PathBuf,
     pub document_root: PathBuf,
     /// `php-cgi.exe` of the project's PHP minor (newest installed patch).
@@ -40,7 +41,7 @@ pub struct WebServerConfig {
     pub server_root: PathBuf,
     /// `mod_fcgid.so` to load.
     pub mod_fcgid: PathBuf,
-    pub listen_port: u16,
+    pub listen_port: Port,
     /// Directory that receives `httpd.conf` and `vhosts\<project>.conf`.
     pub config_dir: PathBuf,
     pub log_dir: PathBuf,
@@ -50,7 +51,7 @@ pub struct WebServerConfig {
 
 impl WebServerConfig {
     /// Every port Apache must `Listen` on: the shared port plus dedicated loopback ports.
-    pub fn listen_ports(&self) -> Vec<u16> {
+    pub fn listen_ports(&self) -> Vec<Port> {
         let mut ports = vec![self.listen_port];
         ports.extend(self.vhosts.iter().filter_map(|v| v.loopback_port));
         ports.sort_unstable();
@@ -71,7 +72,7 @@ pub struct ExtensionLoad {
 
 /// Splits site addresses into vhost addressing: name-based names and an optional dedicated
 /// loopback port. Works for `Project::addresses` and `WorktreeEnvironment::addresses()`.
-pub fn vhost_addressing(addresses: &[SiteAddress]) -> (Vec<Hostname>, Option<u16>) {
+pub fn vhost_addressing(addresses: &[SiteAddress]) -> (Vec<Hostname>, Option<Port>) {
     let names = addresses.iter().filter_map(|a| a.host().cloned()).collect();
     let port = addresses.iter().find_map(|a| a.loopback());
     (names, port)
@@ -121,10 +122,10 @@ mod tests {
 
     #[test]
     fn addressing_splits_names_and_port() {
-        let addrs = vec![SiteAddress::LoopbackPort(8101), SiteAddress::localhost("fix.shop").unwrap()];
+        let addrs = vec![SiteAddress::LoopbackPort(Port::of(8101)), SiteAddress::localhost("fix.shop").unwrap()];
         let (names, port) = vhost_addressing(&addrs);
         assert_eq!(names.iter().map(|h| h.as_str()).collect::<Vec<_>>(), ["fix.shop.localhost"]);
-        assert_eq!(port, Some(8101));
+        assert_eq!(port, Some(Port::of(8101)));
     }
 
     #[test]

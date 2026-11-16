@@ -28,6 +28,7 @@ use lampo_domain::service::{ServiceId, ServiceKind, ServiceLaunch, ServiceState,
 use lampo_domain::settings::Settings;
 use lampo_domain::shim::ShimIndex;
 use lampo_domain::site::WorktreeSlug;
+use lampo_domain::tcp_port::Port;
 use lampo_domain::vc_runtime::{InstalledVcRuntime, VcRedistributable};
 use lampo_domain::version::{PackageVersion, VersionSeries};
 use lampo_domain::web::{PhpIniSpec, WebServerConfig};
@@ -472,10 +473,10 @@ impl ServiceRunner for FakeRunner {
 }
 
 #[derive(Default)]
-pub struct FakePorts(pub Mutex<BTreeMap<u16, Option<String>>>, pub std::sync::atomic::AtomicU64);
+pub struct FakePorts(pub Mutex<BTreeMap<Port, Option<String>>>, pub std::sync::atomic::AtomicU64);
 impl FakePorts {
     pub fn busy(&self, port: u16, owner: &str) {
-        lock(&self.0).insert(port, Some(owner.into()));
+        lock(&self.0).insert(Port::of(port), Some(owner.into()));
     }
     /// Makes every probe take `ms` milliseconds (widens race windows in concurrency tests).
     pub fn slow(&self, ms: u64) {
@@ -483,7 +484,7 @@ impl FakePorts {
     }
 }
 impl PortProbe for FakePorts {
-    fn check(&self, port: u16) -> PortResult<PortAvailability> {
+    fn check(&self, port: Port) -> PortResult<PortAvailability> {
         let delay = self.1.load(Ordering::SeqCst);
         if delay > 0 {
             std::thread::sleep(Duration::from_millis(delay));
@@ -1037,7 +1038,7 @@ impl World {
     }
 
     /// Registers a project file that does not load, naming `loopback_ports`.
-    pub fn unreadable_project(&self, file: &str, loopback_ports: &[u16]) {
+    pub fn unreadable_project(&self, file: &str, loopback_ports: &[Port]) {
         let reason = format!("invalid data in {file}: a project needs at least one address");
         lock(&self.projects.1).push(UnreadableProject { file: PathBuf::from(file), reason, loopback_ports: loopback_ports.iter().copied().collect() });
     }

@@ -11,6 +11,7 @@ use lampo_domain::project::{ApacheDirectives, ProjectRoot, PublicDir};
 use lampo_domain::service::{ServiceId, ServiceState};
 use lampo_domain::site::SiteId;
 use lampo_domain::worktree::{DatabaseMode, Occupancy, WorktreeEnvironment};
+use lampo_domain::tcp_port::Port;
 
 use super::{cli, gui};
 use crate::dto::SettingsPatchRequest;
@@ -22,9 +23,16 @@ use crate::mapping::package_id_to_dto;
 fn worktree(w: &World, parent: &str, root: &str, branch: &str, port: u16) -> WorktreeEnvironment {
     let p = w.projects.get(&lampo_domain::project::ProjectId::new(parent).unwrap()).unwrap().unwrap();
     let existing = w.worktrees.list_all().unwrap();
-    let env =
-        WorktreeEnvironment::derive(&p, &Occupancy { worktrees: &existing, ..Default::default() }, ProjectRoot::new(root).unwrap(), Some(branch.into()), port, &DatabaseMode::Shared, 1)
-            .unwrap();
+    let env = WorktreeEnvironment::derive(
+        &p,
+        &Occupancy { worktrees: &existing, ..Default::default() },
+        ProjectRoot::new(root).unwrap(),
+        Some(branch.into()),
+        Port::of(port),
+        &DatabaseMode::Shared,
+        1,
+    )
+    .unwrap();
     w.worktrees.save(&env).unwrap();
     w.fs.add(root);
     env
@@ -89,7 +97,7 @@ async fn worktree_environments_are_served_while_they_exist_and_inherit_the_paren
     assert!(report.started.contains(&"redis".to_string()), "the inactive parent's needs come with its worktree");
     let vhost = w.web.last().unwrap().vhosts.into_iter().next().unwrap();
     assert_eq!(vhost.site.to_string(), "shop@fix-1");
-    assert_eq!(vhost.loopback_port, Some(8100));
+    assert_eq!(vhost.loopback_port, Some(Port::of(8100)));
     assert_eq!(vhost.server_names.iter().map(|h| h.to_string()).collect::<Vec<_>>(), ["fix-1.shop.localhost"]);
     assert_eq!(vhost.document_root, PathBuf::from("D:\\wt\\fix"));
     assert_eq!(w.web.last().unwrap().listen_ports(), vec![80, 8100]);
@@ -241,7 +249,7 @@ async fn services_are_restarted_when_their_configuration_changes() {
     w.hosts_in_sync();
     w.env.sync(&gui()).await.unwrap();
     let mut s = w.settings.load().unwrap();
-    s.services[0].port = 3316;
+    s.services[0].port = Port::of(3316);
     w.settings.save(&s).unwrap();
     w.clear_calls();
     let report = w.env.sync(&gui()).await.unwrap();
@@ -308,7 +316,7 @@ async fn shim_index_lists_projects_worktrees_and_the_default_with_the_right_comp
     let old = index.by_site(&"old".parse().unwrap()).unwrap();
     assert_eq!(old.target.composer_phar.as_ref().unwrap(), &PathBuf::from("C:\\lampo\\packages\\composer-2.2.25\\composer.phar"));
     let old_mysql = &old.target.services[&ServiceKind::MYSQL];
-    assert_eq!((old_mysql.port, old_mysql.database.is_none()), (3306, true), "no MySQL → default instance, no database");
+    assert_eq!((old_mysql.port, old_mysql.database.is_none()), (Port::of(3306), true), "no MySQL → default instance, no database");
     let shop = index.by_site(&"shop".parse().unwrap()).unwrap();
     assert_eq!(shop.target.composer_phar.as_ref().unwrap(), &PathBuf::from("C:\\lampo\\packages\\composer-2.8.4\\composer.phar"));
     assert_eq!(shop.target.phprc_dir.as_ref().unwrap(), &w.paths.php_ini_dir(&"shop".parse().unwrap()));
@@ -356,8 +364,8 @@ async fn a_new_service_kind_is_added_by_registering_a_descriptor_and_a_runner() 
         fn versioned(&self) -> bool {
             false
         }
-        fn default_port(&self) -> u16 {
-            11211
+        fn default_port(&self) -> Port {
+            Port::of(11211)
         }
         fn has_data_dir(&self) -> bool {
             false
@@ -385,7 +393,7 @@ async fn a_new_service_kind_is_added_by_registering_a_descriptor_and_a_runner() 
     let report = w.env.sync(&gui()).await.unwrap();
     assert!(report.started.contains(&"memcached".to_string()), "{report:?}");
     let launch = runner.launches.lock().unwrap().last().cloned().unwrap();
-    assert_eq!((launch.port, launch.data_dir.is_none()), (11211, true));
+    assert_eq!((launch.port, launch.data_dir.is_none()), (Port::of(11211), true));
     assert_eq!(launch.config_dir, w.paths.generated_dir().join("memcached"));
 
     let listed = ServiceQueries::new(w.runners(), w.services.clone(), w.projects.clone(), w.worktrees.clone(), w.settings.clone()).list().unwrap();
@@ -423,7 +431,7 @@ async fn mailpit_runs_for_its_sites_and_feeds_php_mail() {
     assert!(report.started.contains(&"mailpit".to_string()), "{report:?}");
     let mailpit = ServiceId::new(ServiceKind::MAILPIT, None);
     let launch = w.mailpit.launches.lock().unwrap().last().cloned().unwrap();
-    assert_eq!((launch.port, launch.ui_port), (1025, Some(8025)));
+    assert_eq!((launch.port, launch.ui_port), (Port::of(1025), Some(Port::of(8025))));
     assert_eq!(launch.data_dir, Some(w.paths.service_data_dir(&mailpit)));
 
     let ini = |site: &str| w.ini.0.lock().unwrap().iter().find(|s| s.site.to_string() == site).cloned().unwrap();
@@ -468,9 +476,9 @@ async fn mailpit_runs_for_its_sites_and_feeds_php_mail() {
     let changes: Vec<(&str, &str, &str)> = result.changes.iter().map(|c| (c.setting.as_str(), c.from.as_str(), c.to.as_str())).collect();
     assert_eq!(changes, [("mailpit.ui-port", "8025", "9025")]);
     assert!(result.sync.restarted.contains(&"mailpit".to_string()), "{:?}", result.sync);
-    assert_eq!(w.mailpit.launches.lock().unwrap().last().unwrap().ui_port, Some(9025));
+    assert_eq!(w.mailpit.launches.lock().unwrap().last().unwrap().ui_port, Some(Port::of(9025)));
     assert!(result.notes.iter().any(|n| n.contains("web UI is now at http://127.0.0.1:9025")), "{:?}", result.notes);
-    assert_eq!(w.settings.load().unwrap().service_ui_port(&mailpit), Some(9025));
+    assert_eq!(w.settings.load().unwrap().service_ui_port(&mailpit), Some(Port::of(9025)));
 
     let no_ui = SettingsPatchRequest { service_ui_ports: [("redis".to_string(), 9026)].into(), ..Default::default() };
     let e = w.patch_settings().execute(no_ui, &cli()).await.unwrap_err();

@@ -202,7 +202,7 @@ pub(crate) fn worktree_dto(w: &WorktreeEnvironment, parent: &Project, settings: 
         branch: w.branch.clone(),
         url: w.url(),
         urls: vec![w.url(), SiteAddress::Localhost(alias.clone()).url(settings.apache_port, TlsMode::Disabled)],
-        loopback_port: w.loopback_port,
+        loopback_port: w.loopback_port.get(),
         localhost_alias: alias.to_string(),
         document_root: w.document_root(parent).display().to_string(),
         database_mode: mode,

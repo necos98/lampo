@@ -12,6 +12,7 @@ use std::sync::Arc;
 use lampo_domain::ports::{PortAvailability, PortProbe, ProjectRepository, SettingsRepository, WorktreeRepository};
 use lampo_domain::project::Project;
 use lampo_domain::settings::Settings;
+use lampo_domain::tcp_port::Port;
 use lampo_domain::worktree::{WorktreeEnvironment, allocate_loopback_port, used_loopback_ports};
 
 use crate::error::AppResult;
@@ -22,7 +23,7 @@ pub struct SiteSnapshot {
     pub projects: Vec<Project>,
     /// Loopback ports named by project files that do not load: never handed out, so a repaired
     /// project does not find its listener taken.
-    pub reserved_ports: BTreeSet<u16>,
+    pub reserved_ports: BTreeSet<Port>,
     pub worktrees: Vec<WorktreeEnvironment>,
     pub settings: Settings,
 }
@@ -48,7 +49,7 @@ impl LoopbackPortAllocator {
 
     /// Lowest port of the configured range that is neither assigned to a site, nor named by an
     /// unreadable project file, nor a service port, nor busy on the OS.
-    fn free_port(&self, snap: &SiteSnapshot) -> AppResult<u16> {
+    fn free_port(&self, snap: &SiteSnapshot) -> AppResult<Port> {
         let mut used = used_loopback_ports(&snap.projects, &snap.worktrees);
         used.extend(&snap.reserved_ports);
         loop {
@@ -65,7 +66,7 @@ impl LoopbackPortAllocator {
     /// Allocate-and-reserve: under the lock, picks a free port and runs `commit(port, snapshot)`,
     /// which must persist the site owning the port before returning. No other allocation or
     /// reservation can observe the registry in between.
-    pub async fn allocate<T>(&self, commit: impl FnOnce(u16, &SiteSnapshot) -> AppResult<T>) -> AppResult<T> {
+    pub async fn allocate<T>(&self, commit: impl FnOnce(Port, &SiteSnapshot) -> AppResult<T>) -> AppResult<T> {
         let _guard = self.lock.lock().await;
         let snap = self.snapshot()?;
         let port = self.free_port(&snap)?;
@@ -83,7 +84,7 @@ impl LoopbackPortAllocator {
 
     /// The port [`Self::allocate`] would pick right now, without reserving it (address
     /// suggestions shown before a project is created).
-    pub async fn peek(&self) -> AppResult<u16> {
+    pub async fn peek(&self) -> AppResult<Port> {
         let _guard = self.lock.lock().await;
         let snap = self.snapshot()?;
         self.free_port(&snap)

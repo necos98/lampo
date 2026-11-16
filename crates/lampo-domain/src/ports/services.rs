@@ -15,6 +15,7 @@ use crate::mysql::{DatabaseName, MysqlSeries};
 use crate::ports::events::ProgressSink;
 use crate::progress::CancelFlag;
 use crate::service::{LogStream, ServiceId, ServiceKind, ServiceLaunch, ServiceStatus};
+use crate::tcp_port::Port;
 
 /// A program invocation.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -60,7 +61,7 @@ pub trait ProcessSupervisor: Send + Sync {
     fn is_alive(&self, child: ChildId) -> bool;
     /// Whether the TCP listener on `port` belongs to the child's process tree, i.e. the port
     /// is served by this child and not by somebody else's server.
-    fn owns_listener(&self, child: ChildId, port: u16) -> bool;
+    fn owns_listener(&self, child: ChildId, port: Port) -> bool;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,7 +184,7 @@ pub struct MysqlEndpoint {
     pub series: MysqlSeries,
     /// Directory with `mysql.exe` / `mysqldump.exe`.
     pub client_dir: PathBuf,
-    pub port: u16,
+    pub port: Port,
     pub user: String,
 }
 
@@ -233,5 +234,5 @@ pub enum PortAvailability {
 
 /// Checks local TCP ports before starting services.
 pub trait PortProbe: Send + Sync {
-    fn check(&self, port: u16) -> PortResult<PortAvailability>;
+    fn check(&self, port: Port) -> PortResult<PortAvailability>;
 }

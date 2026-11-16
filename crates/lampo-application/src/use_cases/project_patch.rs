@@ -18,6 +18,7 @@ use lampo_domain::php::{ExtensionName, IniKey, php_ini_overrides};
 use lampo_domain::project::{ApacheDirectives, DisplayName, Project, ProjectEnvironment, PublicDir};
 use lampo_domain::service::ServiceKind;
 use lampo_domain::settings::Settings;
+use lampo_domain::tcp_port::Port;
 use lampo_domain::version::VersionSeries;
 
 use super::allocation::SiteSnapshot;
@@ -51,7 +52,7 @@ impl PatchProjectEnvironment {
     pub async fn execute(&self, request: ProjectPatchRequest, ctx: &CallContext) -> AppResult<ProjectDto> {
         let patch = Patch::parse(&request)?;
         let catalog = self.writer.services().clone();
-        let change = |project: &mut Project, snap: &SiteSnapshot, free_port: Option<u16>| -> AppResult<bool> {
+        let change = |project: &mut Project, snap: &SiteSnapshot, free_port: Option<Port>| -> AppResult<bool> {
             let mut env = project.environment.clone();
             patch.apply(&mut env, catalog.as_ref(), &snap.settings)?;
             if patch.database.is_some() {
@@ -212,7 +213,7 @@ impl Patch {
     /// Removals first, then additions appended in order (the first address, the primary one,
     /// stays first unless removed: then the next one becomes primary, as in the GUI).
     /// `free_port` is set when [`Self::wants_free_port`].
-    fn apply_addresses(&self, addresses: &mut Vec<SiteAddress>, free_port: Option<u16>) -> AppResult<()> {
+    fn apply_addresses(&self, addresses: &mut Vec<SiteAddress>, free_port: Option<Port>) -> AppResult<()> {
         if self.addresses_add.is_empty() && self.addresses_remove.is_empty() {
             return Ok(());
         }

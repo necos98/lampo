@@ -114,7 +114,7 @@ impl PortRange {
 
 impl Default for PortRange {
     fn default() -> Self {
-        Self { start: Port::of(crate::address::LOOPBACK_PORT_RANGE_START), end: Port::of(8199) }
+        Self { start: crate::address::LOOPBACK_PORT_RANGE_START, end: Port::of(8199) }
     }
 }
 

@@ -11,6 +11,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use lampo_domain::ports::{CommandSpec, EventPublisher, ProcessSupervisor, ServiceRunner};
 use lampo_domain::service::{ServiceId, ServiceKind, ServiceLaunch, ServiceStatus};
+use lampo_domain::tcp_port::Port;
 use lampo_domain::PortResult;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -27,9 +28,9 @@ fn is_microsoft_port(server_exe: &Path) -> bool {
     server_exe.parent().is_some_and(|dir| dir.join("redis.windows.conf").is_file() || dir.join("redis.windows-service.conf").is_file())
 }
 
-async fn redis_command(port: u16, command: &[u8], expect_reply: bool) -> Option<String> {
+async fn redis_command(port: Port, command: &[u8], expect_reply: bool) -> Option<String> {
     let attempt = async {
-        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.ok()?;
+        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port.get())).await.ok()?;
         s.write_all(command).await.ok()?;
         if !expect_reply {
             return Some(String::new());
@@ -156,7 +157,7 @@ mod tests {
         let launch = ServiceLaunch {
             service: ServiceId::new(lampo_domain::service::ServiceKind::REDIS, None),
             install_dir: r"C:\pk\redis".into(),
-            port: 6380,
+            port: Port::of(6380),
             ui_port: None,
             config_dir: r"C:\gen\redis".into(),
             data_dir: Some(r"C:\Data Dir\redis\data".into()),
@@ -179,7 +180,7 @@ mod tests {
         let launch = ServiceLaunch {
             service: ServiceId::new(lampo_domain::service::ServiceKind::REDIS, None),
             install_dir: dir.path().to_path_buf(),
-            port: 6380,
+            port: Port::of(6380),
             ui_port: None,
             config_dir: r"C:\gen\redis".into(),
             data_dir: None,

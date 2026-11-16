@@ -147,7 +147,7 @@ impl AgentContextQuery {
                         kind: id.kind().to_string(),
                         label: self.services.label(&id),
                         host: "127.0.0.1".into(),
-                        port,
+                        port: port.get(),
                         ui_url: self.services.ui_url(&id, &settings),
                     })
                 })

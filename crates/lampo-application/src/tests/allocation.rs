@@ -10,6 +10,7 @@ use lampo_domain::ports::{ProjectRepository, WorktreeRepository};
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::project::{ProjectId, ProjectRoot, check_conflicts};
 use lampo_domain::worktree::{DatabaseMode, Occupancy, WorktreeEnvironment};
+use lampo_domain::tcp_port::Port;
 
 use super::cli;
 use crate::dto::*;
@@ -18,7 +19,7 @@ use crate::testing::*;
 use crate::use_cases::*;
 
 /// Every loopback port in use, failing on a duplicate.
-fn assert_distinct_ports(w: &World) -> BTreeSet<u16> {
+fn assert_distinct_ports(w: &World) -> BTreeSet<Port> {
     let mut seen = BTreeSet::new();
     for p in w.projects.list().unwrap() {
         for port in p.addresses().iter().filter_map(SiteAddress::loopback) {
@@ -85,7 +86,7 @@ async fn concurrent_allocations_never_hand_out_the_same_port() {
         assert!(ports.insert(t.await.unwrap().unwrap()));
     }
     assert_eq!(assert_distinct_ports(&w), ports);
-    assert!(!ports.contains(&8101), "busy on the OS");
+    assert!(!ports.contains(&Port::of(8101)), "busy on the OS");
     assert_eq!(ports.len(), 16);
 }
 

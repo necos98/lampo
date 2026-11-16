@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use lampo_domain::PortResult;
 use lampo_domain::ports::CommandSpec;
 use lampo_domain::service::ServiceLaunch;
+use lampo_domain::tcp_port::Port;
 
 /// Default [`ServiceDriver::is_port_conflict`] markers (lowercase): Windows' WSAEADDRINUSE text
 /// and the bind errors of mysqld and redis-server.
@@ -35,7 +36,7 @@ pub trait ServiceDriver: Send + Sync {
     fn stop_grace(&self) -> Duration;
     /// The ports the spawned process itself must listen on before [`Self::probe`] is tried
     /// (Apache: every `Listen` of its configuration). Default: `launch.port`.
-    fn ready_ports(&self, launch: &ServiceLaunch) -> PortResult<Vec<u16>> {
+    fn ready_ports(&self, launch: &ServiceLaunch) -> PortResult<Vec<Port>> {
         Ok(vec![launch.port])
     }
     /// One readiness attempt: the service speaks its protocol on `launch.port`. Only called

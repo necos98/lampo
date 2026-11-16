@@ -10,16 +10,17 @@ use lampo_domain::PortError;
 use lampo_domain::events::DomainEvent;
 use lampo_domain::ports::{ChildId, CommandSpec, ProcessObserver, SpawnedChild};
 use lampo_domain::service::{LogStream, ServiceState};
+use lampo_domain::tcp_port::Port;
 
 use super::*;
 use crate::apache::driver::START_TIMEOUT;
 use crate::apache::signal::HttpdSignal;
 
-const LOOPBACK_PORT: u16 = 8101;
+const LOOPBACK_PORT: Port = Port::of(8101);
 
 /// A port nobody listens on: the host checks the real TCP table before spawning.
-fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+fn free_port() -> Port {
+    Port::new(std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()).unwrap()
 }
 
 /// Owns every port while alive, except those in `unowned` (another server holds them, or
@@ -30,17 +31,17 @@ struct FakeSupervisor {
     next: AtomicU64,
     observers: Mutex<Vec<Arc<dyn ProcessObserver>>>,
     specs: Mutex<Vec<CommandSpec>>,
-    unowned: Mutex<HashSet<u16>>,
+    unowned: Mutex<HashSet<Port>>,
     terminated: AtomicU64,
 }
 
 impl FakeSupervisor {
-    fn disown(&self, port: u16) {
+    fn disown(&self, port: Port) {
         self.unowned.lock().unwrap().insert(port);
     }
 
     /// The port becomes httpd's after `delay`.
-    fn own_after(self: &Arc<Self>, port: u16, delay: Duration) {
+    fn own_after(self: &Arc<Self>, port: Port, delay: Duration) {
         self.disown(port);
         let sup = self.clone();
         tokio::spawn(async move {
@@ -67,7 +68,7 @@ impl ProcessSupervisor for FakeSupervisor {
     fn is_alive(&self, _child: ChildId) -> bool {
         self.alive.load(Ordering::SeqCst)
     }
-    fn owns_listener(&self, child: ChildId, port: u16) -> bool {
+    fn owns_listener(&self, child: ChildId, port: Port) -> bool {
         self.is_alive(child) && !self.unowned.lock().unwrap().contains(&port)
     }
 }
@@ -226,7 +227,7 @@ async fn bind_failure_maps_to_port_in_use() {
     });
     let err = f.runner.start(&launch).await.unwrap_err();
     killer.await.unwrap();
-    assert_eq!(err, PortError::PortInUse { port: f.launch.port, owner: None });
+    assert_eq!(err, PortError::PortInUse { port: f.launch.port.get(), owner: None });
     assert_eq!(f.runner.status(&ServiceId::apache()).state, ServiceState::Failed);
 }
 

@@ -16,6 +16,7 @@ use lampo_domain::ports::{EventPublisher, FileSystemInspector, InstalledPackageR
 use lampo_domain::preset::Preset;
 use lampo_domain::project::{DisplayName, Project, ProjectEnvironment, ProjectId, ProjectRoot, TlsMode, unique_project_id};
 use lampo_domain::service::ServiceKind;
+use lampo_domain::tcp_port::Port;
 use lampo_domain::worktree::WorktreeEnvironment;
 
 use super::allocation::{LoopbackPortAllocator, SiteSnapshot};
@@ -218,7 +219,7 @@ impl CreateProject {
         }
         let explicit = request.addresses.as_ref().map(|list| list.iter().map(address_from_dto).collect::<Result<Vec<_>, _>>()).transpose()?;
 
-        let build = |snap: &SiteSnapshot, port: Option<u16>| -> AppResult<Project> {
+        let build = |snap: &SiteSnapshot, port: Option<Port>| -> AppResult<Project> {
             let id = requested_id.clone().unwrap_or_else(|| unique_project_id(&snap.projects, &ProjectId::from_name(name.as_str())));
             let addresses = match (&explicit, port) {
                 (Some(list), _) => list.clone(),

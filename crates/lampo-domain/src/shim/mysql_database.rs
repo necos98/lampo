@@ -105,7 +105,7 @@ pub(crate) mod tests {
             service: "mysql-8.4".parse().unwrap(),
             client_dir: PathBuf::from(r"C:\mysql\bin"),
             host: "127.0.0.1".into(),
-            port: 3306,
+            port: crate::tcp_port::Port::of(3306),
             user: Some("root".into()),
             database: database.map(str::to_string),
             data_dir: data_dir.map(PathBuf::from),

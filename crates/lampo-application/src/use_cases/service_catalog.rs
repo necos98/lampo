@@ -13,6 +13,7 @@ use lampo_domain::project::{Project, ProjectEnvironment};
 use lampo_domain::service::{ServiceDescriptor, ServiceId, ServiceKind, ServiceLaunch, plan_services};
 use lampo_domain::settings::Settings;
 use lampo_domain::shim::ShimService;
+use lampo_domain::tcp_port::Port;
 use lampo_domain::worktree::WorktreeEnvironment;
 use lampo_domain::DomainError;
 
@@ -59,13 +60,13 @@ impl ServiceCatalog {
     }
 
     /// Port of `id`: the configured one, else the default of an unversioned kind.
-    pub fn port(&self, id: &ServiceId, settings: &Settings) -> Option<u16> {
+    pub fn port(&self, id: &ServiceId, settings: &Settings) -> Option<Port> {
         settings.service_port(id).or_else(|| self.descriptor(id.kind()).filter(|d| !d.versioned()).map(|d| d.default_port()))
     }
 
     /// Web UI port of `id` for kinds with a second listener (Mailpit): the configured one,
     /// else the kind's default. `None` for single-port kinds.
-    pub fn ui_port(&self, id: &ServiceId, settings: &Settings) -> Option<u16> {
+    pub fn ui_port(&self, id: &ServiceId, settings: &Settings) -> Option<Port> {
         let default = self.descriptor(id.kind())?.default_ui_port()?;
         Some(settings.service_ui_port(id).unwrap_or(default))
     }
@@ -87,7 +88,7 @@ impl ServiceCatalog {
     }
 
     /// Ports of the services the configuration plans to run, with the service id text.
-    pub fn planned_ports(&self, projects: &[Project], worktrees: &[WorktreeEnvironment], settings: &Settings) -> Vec<(String, u16)> {
+    pub fn planned_ports(&self, projects: &[Project], worktrees: &[WorktreeEnvironment], settings: &Settings) -> Vec<(String, Port)> {
         let mut out = Vec::new();
         for id in plan_services(projects, worktrees, settings).keys() {
             out.extend(self.port(id, settings).map(|p| (id.to_string(), p)));

@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use lampo_domain::ports::ChildId;
 use lampo_domain::service::{ServiceId, ServiceLaunch, ServiceState};
+use lampo_domain::tcp_port::Port;
 use tokio::sync::watch;
 use tokio::time::Instant;
 
@@ -26,7 +27,7 @@ pub(super) enum Readiness {
 pub(super) struct Awaited {
     pub(super) child: ChildId,
     pub(super) generation: u64,
-    pub(super) ports: Vec<u16>,
+    pub(super) ports: Vec<Port>,
     /// Becomes `true` when the process exits.
     pub(super) exited: watch::Receiver<bool>,
 }
@@ -46,7 +47,7 @@ impl ServiceHost {
             // The listener may be a child of the spawned process (mysqld 8 runs a monitor
             // process on Windows, httpd a worker child); anything else on the port is somebody
             // else's server.
-            let missing: Vec<u16> = awaited.ports.iter().copied().filter(|&port| !self.supervisor.owns_listener(awaited.child, port)).collect();
+            let missing: Vec<Port> = awaited.ports.iter().copied().filter(|&port| !self.supervisor.owns_listener(awaited.child, port)).collect();
             if missing.is_empty() && driver.probe(launch).await {
                 return Readiness::Ready;
             }
@@ -78,13 +79,13 @@ impl ServiceHost {
 
 /// Names the ports other than `port` the process never listened on, if any; otherwise the
 /// service did not answer on `port`.
-fn timeout_reason(port: u16, missing: &[u16], waited: Duration) -> String {
+fn timeout_reason(port: Port, missing: &[Port], waited: Duration) -> String {
     let secs = waited.as_secs();
     if missing.iter().all(|&p| p == port) {
         return format!("did not accept connections on port {port} within {secs}s");
     }
     let noun = if missing.len() == 1 { "port" } else { "ports" };
-    let list = missing.iter().map(u16::to_string).collect::<Vec<_>>().join(", ");
+    let list = missing.iter().map(Port::to_string).collect::<Vec<_>>().join(", ");
     format!("did not listen on {noun} {list} within {secs}s")
 }
 
@@ -95,9 +96,9 @@ mod tests {
     #[test]
     fn timeouts_name_the_ports_never_listened_on() {
         let waited = Duration::from_secs(20);
-        assert_eq!(timeout_reason(80, &[], waited), "did not accept connections on port 80 within 20s");
-        assert_eq!(timeout_reason(80, &[80], waited), "did not accept connections on port 80 within 20s");
-        assert_eq!(timeout_reason(80, &[8101], waited), "did not listen on port 8101 within 20s");
-        assert_eq!(timeout_reason(80, &[80, 8101], waited), "did not listen on ports 80, 8101 within 20s");
+        assert_eq!(timeout_reason(Port::of(80), &[], waited), "did not accept connections on port 80 within 20s");
+        assert_eq!(timeout_reason(Port::of(80), &[Port::of(80)], waited), "did not accept connections on port 80 within 20s");
+        assert_eq!(timeout_reason(Port::of(80), &[Port::of(8101)], waited), "did not listen on port 8101 within 20s");
+        assert_eq!(timeout_reason(Port::of(80), &[Port::of(80), Port::of(8101)], waited), "did not listen on ports 80, 8101 within 20s");
     }
 }

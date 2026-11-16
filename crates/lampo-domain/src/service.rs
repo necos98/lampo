@@ -21,6 +21,7 @@ use crate::package::{EntryRole, PackageKind};
 use crate::project::Project;
 use crate::settings::Settings;
 use crate::site::SiteId;
+use crate::tcp_port::Port;
 use crate::version::VersionSeries;
 use crate::worktree::WorktreeEnvironment;
 
@@ -164,7 +165,7 @@ pub trait ServiceDescriptor: Send + Sync {
     /// service names the series it wants.
     fn versioned(&self) -> bool;
     /// Port of an instance not listed in the settings.
-    fn default_port(&self) -> u16;
+    fn default_port(&self) -> Port;
     /// Keeps persistent data (`<data>\<kind>[\<series>]\data`).
     fn has_data_dir(&self) -> bool;
     /// Writes its own error log next to the captured output (`<service>-error` log source).
@@ -174,12 +175,12 @@ pub trait ServiceDescriptor: Send + Sync {
     /// Default port of the instance's second listener, its web UI (Mailpit's 8025); `None`
     /// for kinds with a single port. Configurable per instance
     /// (`ServiceInstanceSettings::ui_port`).
-    fn default_ui_port(&self) -> Option<u16> {
+    fn default_ui_port(&self) -> Option<Port> {
         None
     }
     /// php.ini values every site using an instance of this kind gets, given the instance's
     /// port (Mailpit: `SMTP`/`smtp_port` for `mail()`). The project's php.ini values win.
-    fn php_ini(&self, _port: u16) -> Vec<(&'static str, String)> {
+    fn php_ini(&self, _port: Port) -> Vec<(&'static str, String)> {
         Vec::new()
     }
     /// Validates the version series a project asks for.
@@ -217,8 +218,8 @@ pub mod builtin {
         fn versioned(&self) -> bool {
             false
         }
-        fn default_port(&self) -> u16 {
-            80
+        fn default_port(&self) -> Port {
+            Port::of(80)
         }
         fn has_data_dir(&self) -> bool {
             false
@@ -245,8 +246,8 @@ pub mod builtin {
         fn versioned(&self) -> bool {
             true
         }
-        fn default_port(&self) -> u16 {
-            3306
+        fn default_port(&self) -> Port {
+            Port::of(3306)
         }
         fn has_data_dir(&self) -> bool {
             true
@@ -277,8 +278,8 @@ pub mod builtin {
         fn versioned(&self) -> bool {
             false
         }
-        fn default_port(&self) -> u16 {
-            6379
+        fn default_port(&self) -> Port {
+            Port::of(6379)
         }
         fn has_data_dir(&self) -> bool {
             true
@@ -307,8 +308,8 @@ pub mod builtin {
             false
         }
         /// SMTP.
-        fn default_port(&self) -> u16 {
-            1025
+        fn default_port(&self) -> Port {
+            Port::of(1025)
         }
         fn has_data_dir(&self) -> bool {
             true
@@ -321,11 +322,11 @@ pub mod builtin {
         fn client(&self) -> Option<ServiceClient> {
             Some(ServiceClient { user: None, env_prefix: "MAIL", client_dir: EntryRole::ClientDir })
         }
-        fn default_ui_port(&self) -> Option<u16> {
-            Some(8025)
+        fn default_ui_port(&self) -> Option<Port> {
+            Some(Port::of(8025))
         }
         /// Windows PHP's `mail()` speaks SMTP to `SMTP`:`smtp_port` (no auth, no TLS).
-        fn php_ini(&self, port: u16) -> Vec<(&'static str, String)> {
+        fn php_ini(&self, port: Port) -> Vec<(&'static str, String)> {
             vec![("SMTP", "127.0.0.1".into()), ("smtp_port", port.to_string()), ("sendmail_from", "lampo@localhost".into())]
         }
     }
@@ -352,7 +353,7 @@ pub struct ServiceStatus {
     pub service: ServiceId,
     pub state: ServiceState,
     pub pid: Option<u32>,
-    pub port: Option<u16>,
+    pub port: Option<Port>,
     /// Human-readable detail (last error line, exit code…), English.
     pub message: Option<String>,
 }
@@ -371,10 +372,10 @@ pub struct ServiceLaunch {
     pub service: ServiceId,
     /// Root of the installed package (`...\packages\mysql-8.4`).
     pub install_dir: PathBuf,
-    pub port: u16,
+    pub port: Port,
     /// Second listener (the web UI) of kinds that have one
     /// ([`ServiceDescriptor::default_ui_port`]).
-    pub ui_port: Option<u16>,
+    pub ui_port: Option<Port>,
     /// Generated configuration for this instance (`httpd.conf`, `my.ini`, `redis.conf` live here).
     pub config_dir: PathBuf,
     /// Persistent data (MySQL data dir, Redis dump dir). `None` for Apache.
@@ -384,7 +385,7 @@ pub struct ServiceLaunch {
 
 impl ServiceLaunch {
     /// Every port the instance listens on (all must be free before a start).
-    pub fn ports(&self) -> Vec<u16> {
+    pub fn ports(&self) -> Vec<Port> {
         std::iter::once(self.port).chain(self.ui_port).collect()
     }
 }
@@ -471,24 +472,24 @@ mod tests {
     #[test]
     fn mailpit_has_smtp_and_ui_ports_and_php_mail_settings() {
         let d = builtin::Mailpit;
-        assert_eq!((d.kind(), d.default_port(), d.default_ui_port()), (ServiceKind::MAILPIT, 1025, Some(8025)));
+        assert_eq!((d.kind(), d.default_port(), d.default_ui_port()), (ServiceKind::MAILPIT, Port::of(1025), Some(Port::of(8025))));
         assert!(d.has_data_dir() && !d.versioned());
         assert_eq!(d.client().unwrap().env_prefix, "MAIL");
-        assert_eq!(d.php_ini(2025), [("SMTP", "127.0.0.1".to_string()), ("smtp_port", "2025".to_string()), ("sendmail_from", "lampo@localhost".to_string())]);
+        assert_eq!(d.php_ini(Port::of(2025)), [("SMTP", "127.0.0.1".to_string()), ("smtp_port", "2025".to_string()), ("sendmail_from", "lampo@localhost".to_string())]);
         assert_eq!(builtin::Redis.default_ui_port(), None);
-        assert!(builtin::Redis.php_ini(6379).is_empty());
+        assert!(builtin::Redis.php_ini(Port::of(6379)).is_empty());
         assert!(builtin::all().iter().any(|d| d.kind() == ServiceKind::MAILPIT));
         let launch = ServiceLaunch {
             service: ServiceId::new(ServiceKind::MAILPIT, None),
             install_dir: "C:\\m".into(),
-            port: 1025,
-            ui_port: Some(8025),
+            port: Port::of(1025),
+            ui_port: Some(Port::of(8025)),
             config_dir: "C:\\c".into(),
             data_dir: None,
             log_dir: "C:\\l".into(),
         };
-        assert_eq!(launch.ports(), [1025, 8025]);
-        assert_eq!(ServiceLaunch { ui_port: None, ..launch }.ports(), [1025]);
+        assert_eq!(launch.ports(), [Port::of(1025), Port::of(8025)]);
+        assert_eq!(ServiceLaunch { ui_port: None, ..launch }.ports(), [Port::of(1025)]);
     }
 
     #[test]
@@ -502,8 +503,16 @@ mod tests {
         use crate::worktree::{DatabaseMode, Occupancy, WorktreeEnvironment};
         let mut parent = project("shop", "C:\\a");
         parent.environment.use_service(ServiceKind::REDIS, None);
-        let wt =
-            WorktreeEnvironment::derive(&parent, &Occupancy::default(), crate::project::ProjectRoot::new("D:\\wt\\x").unwrap(), Some("x".into()), 8100, &DatabaseMode::Shared, 0).unwrap();
+        let wt = WorktreeEnvironment::derive(
+            &parent,
+            &Occupancy::default(),
+            crate::project::ProjectRoot::new("D:\\wt\\x").unwrap(),
+            Some("x".into()),
+            crate::tcp_port::Port::of(8100),
+            &DatabaseMode::Shared,
+            0,
+        )
+        .unwrap();
         let orphan = WorktreeEnvironment { parent: crate::project::ProjectId::new("gone").unwrap(), ..wt.clone() };
         let plan = plan_services(&[parent], &[wt, orphan], &Settings::default());
         assert_eq!(plan[&ServiceId::apache()].iter().map(|s| s.to_string()).collect::<Vec<_>>(), ["shop@x"]);

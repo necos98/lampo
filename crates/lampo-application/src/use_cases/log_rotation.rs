@@ -74,6 +74,7 @@ mod tests {
     use std::sync::Mutex;
 
     use lampo_domain::project::{ProjectId, ProjectRoot};
+    use lampo_domain::tcp_port::Port;
     use lampo_domain::worktree::{DatabaseMode, Occupancy, WorktreeEnvironment};
     use lampo_domain::{PortError, PortResult};
 
@@ -108,7 +109,7 @@ mod tests {
     fn worktree_of_shop(w: &World) -> WorktreeEnvironment {
         let shop = w.projects.get(&ProjectId::new("shop").unwrap()).unwrap().unwrap();
         let root = ProjectRoot::new(r"C:\sites\shop-feature").unwrap();
-        let env = WorktreeEnvironment::derive(&shop, &Occupancy::default(), root, Some("feature-x".into()), 8101, &DatabaseMode::Shared, 1).unwrap();
+        let env = WorktreeEnvironment::derive(&shop, &Occupancy::default(), root, Some("feature-x".into()), Port::of(8101), &DatabaseMode::Shared, 1).unwrap();
         w.worktrees.save(&env).unwrap();
         env
     }

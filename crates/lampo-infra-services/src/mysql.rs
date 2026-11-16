@@ -17,6 +17,7 @@ use async_trait::async_trait;
 use lampo_domain::mysql::MysqlSeries;
 use lampo_domain::ports::{CommandRunner, CommandSpec, EventPublisher, ProcessSupervisor, ServiceRunner};
 use lampo_domain::service::{ServiceId, ServiceKind, ServiceLaunch, ServiceStatus};
+use lampo_domain::tcp_port::Port;
 use lampo_domain::{PortError, PortResult};
 use tokio::io::AsyncReadExt;
 use windows_sys::Win32::System::Threading::{EVENT_MODIFY_STATE, OpenEventW, SetEvent};
@@ -89,9 +90,9 @@ pub(crate) fn signal_shutdown_event(pid: u32) -> bool {
 
 /// Reads the server greeting: protocol 10 handshake (or an error packet, which still proves a
 /// MySQL server is accepting connections).
-async fn mysql_greets(port: u16) -> bool {
+async fn mysql_greets(port: Port) -> bool {
     let attempt = async {
-        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.ok()?;
+        let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port.get())).await.ok()?;
         let mut header = [0u8; 5];
         s.read_exact(&mut header).await.ok()?;
         Some(header[4] == 10 || header[4] == 0xFF)
@@ -107,7 +108,7 @@ fn uses_monitor_process(series: MysqlSeries) -> bool {
 }
 
 /// Client arguments common to `mysqladmin` / `mysql` / `mysqldump` on a local instance.
-pub(crate) fn client_args(port: u16, user: &str) -> Vec<String> {
+pub(crate) fn client_args(port: Port, user: &str) -> Vec<String> {
     vec!["--no-defaults".into(), "--protocol=TCP".into(), "--host=127.0.0.1".into(), format!("--port={port}"), format!("--user={user}")]
 }
 
@@ -344,7 +345,7 @@ mod tests {
         ServiceLaunch {
             service: series.service_id(),
             install_dir: r"C:\Lampo\packages\mysql".into(),
-            port: 3307,
+            port: Port::of(3307),
             ui_port: None,
             config_dir: r"C:\Lampo\generated\mysql\5.7".into(),
             data_dir: Some(r"C:\Users\Mario Rossi\Lampo\mysql\5.7\data".into()),

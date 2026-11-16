@@ -1,7 +1,8 @@
 use std::net::{Ipv4Addr, TcpListener};
 
 use lampo_domain::ports::{PortAvailability, PortProbe};
-use lampo_domain::{DomainError, PortResult};
+use lampo_domain::PortResult;
+use lampo_domain::tcp_port::Port;
 
 use crate::win;
 
@@ -17,14 +18,11 @@ const WSAEACCES: i32 = 10013;
 pub struct TcpPortProbe;
 
 impl PortProbe for TcpPortProbe {
-    fn check(&self, port: u16) -> PortResult<PortAvailability> {
-        if port == 0 {
-            return Err(DomainError::InvalidPort(0).into());
-        }
-        if let Ok(Some(pid)) = win::tcp_listener_pid(port) {
+    fn check(&self, port: Port) -> PortResult<PortAvailability> {
+        if let Ok(Some(pid)) = win::tcp_listener_pid(port.get()) {
             return Ok(PortAvailability::InUse { owner: Some(win::describe_process(pid)) });
         }
-        match TcpListener::bind((Ipv4Addr::LOCALHOST, port)) {
+        match TcpListener::bind((Ipv4Addr::LOCALHOST, port.get())) {
             Ok(_) => Ok(PortAvailability::Free),
             Err(e) if e.raw_os_error() == Some(WSAEACCES) => Ok(PortAvailability::InUse { owner: Some("Windows (excluded port range or exclusive socket)".into()) }),
             Err(_) => Ok(PortAvailability::InUse { owner: None }),
@@ -39,7 +37,7 @@ mod tests {
     #[test]
     fn names_the_owner_of_a_busy_port() {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let port = Port::new(listener.local_addr().unwrap().port()).unwrap();
         let me = std::env::current_exe().unwrap();
         let exe = me.file_name().unwrap().to_string_lossy().to_string();
         match TcpPortProbe.check(port).unwrap() {
@@ -50,10 +48,5 @@ mod tests {
         }
         drop(listener);
         assert_eq!(TcpPortProbe.check(port).unwrap(), PortAvailability::Free);
-    }
-
-    #[test]
-    fn rejects_port_zero() {
-        assert!(TcpPortProbe.check(0).is_err());
     }
 }

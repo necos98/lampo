@@ -17,10 +17,11 @@ use lampo_domain::mysql::{DatabaseName, MysqlSeries};
 use lampo_domain::ports::{DatabaseAdmin, DumpImportOptions, MysqlEndpoint, NullEventPublisher, NullProgressSink, ServiceRunner};
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::service::{ServiceLaunch, ServiceState};
+use lampo_domain::tcp_port::Port;
 use lampo_infra_services::{JobObjectSupervisor, MysqlCliAdmin, MysqlRunner};
 
-fn free_port() -> u16 {
-    std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port()
+fn free_port() -> Port {
+    Port::new(std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port()).unwrap()
 }
 
 fn memory_of(pid: u32) -> String {

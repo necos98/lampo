@@ -76,6 +76,7 @@ pub(crate) mod tests_support {
     use lampo_domain::hostname::Hostname;
     use lampo_domain::project::{ApacheDirectives, TlsMode};
     use lampo_domain::site::SiteId;
+    use lampo_domain::tcp_port::Port;
     use lampo_domain::web::{VirtualHost, WebServerConfig};
 
     use super::render::RenderOptions;
@@ -85,7 +86,7 @@ pub(crate) mod tests_support {
         let key = site.file_key();
         VirtualHost {
             server_names: names.iter().map(|n| Hostname::new(n).unwrap()).collect(),
-            loopback_port: port,
+            loopback_port: port.map(Port::of),
             project_root: PathBuf::from(root),
             document_root: PathBuf::from(root).join("public"),
             php_cgi: PathBuf::from(r"C:\Lampo Data\packages\php-8.3.14\php-cgi.exe"),
@@ -108,7 +109,7 @@ pub(crate) mod tests_support {
         WebServerConfig {
             server_root: PathBuf::from(r"C:\Lampo Data\packages\apache-2.4.62"),
             mod_fcgid: PathBuf::from(r"C:\Lampo Data\packages\mod_fcgid-2.3.10\mod_fcgid.so"),
-            listen_port: 80,
+            listen_port: Port::of(80),
             config_dir: PathBuf::from(r"C:\Lampo Data\generated\apache"),
             log_dir: PathBuf::from(r"C:\Lampo Data\logs\apache"),
             vhosts: vec![legacy, shop, worktree],

@@ -23,6 +23,7 @@ use crate::project::ProjectRoot;
 use crate::resolution::env_vars;
 use crate::service::{ServiceId, ServiceKind};
 use crate::site::SiteId;
+use crate::tcp_port::Port;
 
 /// Client defaults of one service for a target: the site's instance, or the kind's default
 /// instance when the site does not use that kind.
@@ -32,7 +33,7 @@ pub struct ShimService {
     /// Directory containing the service's clients (`mysql.exe`, `mysqldump.exe`, `redis-cli.exe`).
     pub client_dir: PathBuf,
     pub host: String,
-    pub port: u16,
+    pub port: Port,
     #[serde(default)]
     pub user: Option<String>,
     /// The site's database/schema: the `mysql`/`mysqldump` shims default to it, `lampo env` exports
@@ -329,7 +330,7 @@ pub(crate) mod tests {
             service: "mysql-8.4".parse().unwrap(),
             client_dir: PathBuf::from(r"C:\mysql\bin"),
             host: "127.0.0.1".into(),
-            port: 3306,
+            port: Port::of(3306),
             user: Some("root".into()),
             database: Some("shop".into()),
             data_dir: Some(PathBuf::from(r"C:\mysql\data")),

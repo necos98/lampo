@@ -29,6 +29,7 @@ impl SettingsRepository for TomlSettingsRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lampo_domain::tcp_port::Port;
     use crate::testutil::paths;
 
     #[test]
@@ -36,7 +37,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let repo = TomlSettingsRepository::new(paths(&dir));
         assert_eq!(repo.load().unwrap(), Settings::default());
-        let s = Settings { apache_port: 8080, close_to_tray: false, default_php: Some(lampo_domain::php::PhpMinor::new(8, 3).unwrap()), ..Default::default() };
+        let s = Settings { apache_port: Port::of(8080), close_to_tray: false, default_php: Some(lampo_domain::php::PhpMinor::new(8, 3).unwrap()), ..Default::default() };
         repo.save(&s).unwrap();
         assert_eq!(repo.load().unwrap(), s);
     }
@@ -49,8 +50,8 @@ mod tests {
         std::fs::write(p.settings_file(), "apache_port = 81\n").unwrap();
         let repo = TomlSettingsRepository::new(p.clone());
         let s = repo.load().unwrap();
-        assert_eq!(s.apache_port, 81);
-        assert_eq!(s.service_port(&"redis".parse().unwrap()), Some(6379));
+        assert_eq!(s.apache_port, Port::of(81));
+        assert_eq!(s.service_port(&"redis".parse().unwrap()), Some(Port::of(6379)));
         std::fs::write(p.settings_file(), "apache_port = \"x").unwrap();
         assert!(repo.load().unwrap_err().to_string().contains("settings.toml"));
     }
@@ -90,7 +91,7 @@ mod tests {
         assert!(s.first_run_completed);
         assert_eq!(
             s.services.iter().map(|i| (i.service.to_string(), i.port)).collect::<Vec<_>>(),
-            [("mysql-8.4".to_string(), 3306), ("mysql-5.7".to_string(), 3307), ("redis".to_string(), 6390), ("mailpit".to_string(), 1025)]
+            [("mysql-8.4".to_string(), Port::of(3306)), ("mysql-5.7".to_string(), Port::of(3307)), ("redis".to_string(), Port::of(6390)), ("mailpit".to_string(), Port::of(1025))]
         );
         repo.save(&s).unwrap();
         let text = std::fs::read_to_string(p.settings_file()).unwrap();

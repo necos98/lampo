@@ -8,6 +8,7 @@ use lampo_domain::php::PhpMinor;
 use lampo_domain::preset::{PresetContext, builtin};
 use lampo_domain::project::{DisplayName, Project, ProjectId, ProjectRoot, TlsMode};
 use lampo_domain::site::WorktreeSlug;
+use lampo_domain::tcp_port::Port;
 use lampo_domain::worktree::{WorktreeDatabase, WorktreeEnvironment};
 
 pub fn paths(dir: &tempfile::TempDir) -> LampoPaths {
@@ -38,7 +39,7 @@ pub fn worktree(parent: &str, slug: &str, root: &str, port: u16) -> WorktreeEnvi
         slug: WorktreeSlug::new(slug).unwrap(),
         root: ProjectRoot::new(root).unwrap(),
         branch: Some(format!("feature/{slug}")),
-        loopback_port: port,
+        loopback_port: Port::of(port),
         database: WorktreeDatabase::Own { name: DatabaseName::new(format!("{parent}_{slug}").replace('-', "_")).unwrap(), cloned_from: Some(DatabaseName::new("shop").unwrap()) },
         created_at_unix_ms: 1_700_000_000_000,
     }

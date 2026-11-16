@@ -8,6 +8,7 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
+use lampo_domain::tcp_port::Port;
 use toml::Value;
 
 use crate::atomic::read_table;
@@ -17,7 +18,7 @@ const PORT_KEY: &str = "port";
 
 /// The ports named by `file`'s addresses: from the parsed `addresses` when the file is valid
 /// TOML (only its values were rejected), else from every `port = <n>` in the text.
-pub fn loopback_ports_in(file: &Path) -> BTreeSet<u16> {
+pub fn loopback_ports_in(file: &Path) -> BTreeSet<Port> {
     match read_table(file) {
         Ok(Some(table)) => table.get(ADDRESSES_KEY).map(address_ports).unwrap_or_default(),
         Ok(None) => BTreeSet::new(),
@@ -25,28 +26,28 @@ pub fn loopback_ports_in(file: &Path) -> BTreeSet<u16> {
     }
 }
 
-fn address_ports(addresses: &Value) -> BTreeSet<u16> {
+fn address_ports(addresses: &Value) -> BTreeSet<Port> {
     let Some(list) = addresses.as_array() else { return BTreeSet::new() };
     list.iter().filter_map(|a| a.get(PORT_KEY)?.as_integer()).filter_map(port).collect()
 }
 
 /// Every `port = <n>` (bare or quoted key) in malformed TOML. A key ending in `port`
 /// (`apache_port`) is not a match.
-fn ports_in_text(text: &str) -> BTreeSet<u16> {
+fn ports_in_text(text: &str) -> BTreeSet<Port> {
     let is_key_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.';
     text.match_indices(PORT_KEY).filter(|(at, _)| !text[..*at].ends_with(is_key_char)).filter_map(|(at, _)| value_after_key(&text[at + PORT_KEY.len()..])).collect()
 }
 
 /// The integer after `= ` in `rest` (what follows a `port` key).
-fn value_after_key(rest: &str) -> Option<u16> {
+fn value_after_key(rest: &str) -> Option<Port> {
     let blank = [' ', '\t'];
     let rest = rest.strip_prefix('"').unwrap_or(rest).trim_start_matches(blank).strip_prefix('=')?.trim_start_matches(blank);
     let digits = &rest[..rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len())];
     digits.parse::<i64>().ok().and_then(port)
 }
 
-fn port(value: i64) -> Option<u16> {
-    u16::try_from(value).ok().filter(|p| *p != 0)
+fn port(value: i64) -> Option<Port> {
+    u16::try_from(value).ok().and_then(Port::new)
 }
 
 #[cfg(test)]
@@ -57,7 +58,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("p.toml");
         std::fs::write(&file, text).unwrap();
-        loopback_ports_in(&file).into_iter().collect()
+        loopback_ports_in(&file).into_iter().map(Port::get).collect()
     }
 
     #[test]

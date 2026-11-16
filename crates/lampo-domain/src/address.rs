@@ -14,9 +14,10 @@ use serde::{Deserialize, Serialize};
 use crate::error::DomainError;
 use crate::hostname::{Hostname, Tld};
 use crate::project::TlsMode;
+use crate::tcp_port::Port;
 
 /// First port of the range suggested for dedicated loopback listeners.
-pub const LOOPBACK_PORT_RANGE_START: u16 = 8100;
+pub const LOOPBACK_PORT_RANGE_START: Port = Port::of(8100);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "SiteAddressRepr", into = "SiteAddressRepr")]
@@ -26,7 +27,7 @@ pub enum SiteAddress {
     /// `shop.localhost` — no hosts entry needed. Served as a name-based vhost on the main port.
     Localhost(Hostname),
     /// `127.0.0.1:<port>` — a dedicated Apache listener for this site only.
-    LoopbackPort(u16),
+    LoopbackPort(Port),
 }
 
 impl SiteAddress {
@@ -43,9 +44,10 @@ impl SiteAddress {
         Ok(Self::Localhost(Hostname::new(format!("{label}.localhost"))?))
     }
 
-    pub fn loopback_port(port: u16) -> Result<Self, DomainError> {
-        if port < 1024 {
-            return Err(DomainError::InvalidPort(port as u32));
+    /// A dedicated listener: never on a privileged port.
+    pub fn loopback_port(port: Port) -> Result<Self, DomainError> {
+        if !port.is_unprivileged() {
+            return Err(DomainError::InvalidPort(u32::from(port.get())));
         }
         Ok(Self::LoopbackPort(port))
     }
@@ -62,7 +64,7 @@ impl SiteAddress {
         let text = text.trim();
         if let Some(port) = text.strip_prefix("127.0.0.1:") {
             let port = port.parse::<u16>().map_err(|_| DomainError::InvalidAddresses(format!("`{text}`: the port must be a number from 1024 to 65535")))?;
-            return Self::loopback_port(port);
+            return Self::loopback_port(Port::try_from(port)?);
         }
         let host = Hostname::new(text)?;
         if host.is_localhost() { Ok(Self::Localhost(host)) } else { Self::hostname(host) }
@@ -80,7 +82,7 @@ impl SiteAddress {
         }
     }
 
-    pub fn loopback(&self) -> Option<u16> {
+    pub fn loopback(&self) -> Option<Port> {
         match self {
             Self::LoopbackPort(p) => Some(*p),
             _ => None,
@@ -88,7 +90,7 @@ impl SiteAddress {
     }
 
     /// Browser URL. `apache_port` is the shared name-based listener.
-    pub fn url(&self, apache_port: u16, tls: TlsMode) -> String {
+    pub fn url(&self, apache_port: Port, tls: TlsMode) -> String {
         let scheme = if tls == TlsMode::LocalCa { "https" } else { "http" };
         let default_port = if tls == TlsMode::LocalCa { 443 } else { 80 };
         match self {
@@ -145,7 +147,7 @@ impl TryFrom<SiteAddressRepr> for SiteAddress {
                 }
                 Ok(Self::Localhost(h))
             }
-            SiteAddressRepr::LoopbackPort { port } => Self::loopback_port(port),
+            SiteAddressRepr::LoopbackPort { port } => Self::loopback_port(Port::try_from(port)?),
         }
     }
 }
@@ -155,7 +157,7 @@ impl From<SiteAddress> for SiteAddressRepr {
         match a {
             SiteAddress::Hostname(h) => Self::Hostname { host: h.into() },
             SiteAddress::Localhost(h) => Self::Localhost { host: h.into() },
-            SiteAddress::LoopbackPort(port) => Self::LoopbackPort { port },
+            SiteAddress::LoopbackPort(port) => Self::LoopbackPort { port: port.get() },
         }
     }
 }
@@ -176,20 +178,20 @@ mod tests {
     fn variants_are_kept_apart() {
         assert!(SiteAddress::hostname(Hostname::new("shop.localhost").unwrap()).is_err());
         assert!(SiteAddress::localhost("feature-x.shop").is_ok());
-        assert!(SiteAddress::loopback_port(80).is_err());
+        assert!(SiteAddress::loopback_port(Port::of(80)).is_err());
     }
 
     #[test]
     fn urls() {
         let host = SiteAddress::hostname(Hostname::new("shop.test").unwrap()).unwrap();
-        assert_eq!(host.url(80, TlsMode::Disabled), "http://shop.test");
-        assert_eq!(host.url(8080, TlsMode::Disabled), "http://shop.test:8080");
-        assert_eq!(SiteAddress::LoopbackPort(8101).url(80, TlsMode::Disabled), "http://127.0.0.1:8101");
+        assert_eq!(host.url(Port::of(80), TlsMode::Disabled), "http://shop.test");
+        assert_eq!(host.url(Port::of(8080), TlsMode::Disabled), "http://shop.test:8080");
+        assert_eq!(SiteAddress::LoopbackPort(Port::of(8101)).url(Port::of(80), TlsMode::Disabled), "http://127.0.0.1:8101");
     }
 
     #[test]
     fn serde_validates() {
-        let json = serde_json::to_string(&SiteAddress::LoopbackPort(8101)).unwrap();
+        let json = serde_json::to_string(&SiteAddress::LoopbackPort(Port::of(8101))).unwrap();
         assert_eq!(json, r#"{"kind":"loopback-port","port":8101}"#);
         assert!(serde_json::from_str::<SiteAddress>(r#"{"kind":"localhost","host":"shop.test"}"#).is_err());
         assert!(serde_json::from_str::<SiteAddress>(r#"{"kind":"hostname","host":"shop.localhost"}"#).is_err());
@@ -202,7 +204,7 @@ mod tests {
         }
         assert!(SiteAddress::parse(" Shop.Test ").unwrap().needs_hosts_entry());
         assert!(matches!(SiteAddress::parse("shop.localhost").unwrap(), SiteAddress::Localhost(_)));
-        assert_eq!(SiteAddress::parse("127.0.0.1:8101").unwrap().loopback(), Some(8101));
+        assert_eq!(SiteAddress::parse("127.0.0.1:8101").unwrap().loopback(), Some(Port::of(8101)));
         for bad in ["", "shop", "127.0.0.1:80", "127.0.0.1:x", "127.0.0.1:70000", "127.0.0.1", "http://shop.test"] {
             assert!(SiteAddress::parse(bad).is_err(), "{bad}");
         }
@@ -210,7 +212,7 @@ mod tests {
 
     #[test]
     fn duplicates_rejected() {
-        let a = SiteAddress::LoopbackPort(8101);
+        let a = SiteAddress::LoopbackPort(Port::of(8101));
         assert!(validate_addresses(&[a.clone(), a]).is_err());
         assert!(validate_addresses(&[]).is_err());
     }

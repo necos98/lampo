@@ -204,6 +204,7 @@ impl DatabaseAdmin for MysqlCliAdmin {
 mod tests {
     use super::*;
     use lampo_domain::mysql::MysqlSeries;
+    use lampo_domain::tcp_port::Port;
     use lampo_domain::ports::{NullProgressSink, StreamCompression};
     use std::sync::Mutex;
 
@@ -252,7 +253,7 @@ mod tests {
     fn endpoint(dir: &Path) -> MysqlEndpoint {
         std::fs::write(dir.join("mysql.exe"), b"").unwrap();
         std::fs::write(dir.join("mysqldump.exe"), b"").unwrap();
-        MysqlEndpoint { series: MysqlSeries::DEFAULT, client_dir: dir.to_path_buf(), port: 3306, user: "root".into() }
+        MysqlEndpoint { series: MysqlSeries::DEFAULT, client_dir: dir.to_path_buf(), port: Port::of(3306), user: "root".into() }
     }
 
     #[tokio::test]

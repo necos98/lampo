@@ -10,6 +10,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use lampo_domain::ports::CommandSpec;
 use lampo_domain::service::ServiceLaunch;
+use lampo_domain::tcp_port::Port;
 use lampo_domain::{PortError, PortResult};
 use lampo_infra_services::ServiceDriver;
 
@@ -69,7 +70,7 @@ impl ServiceDriver for ApacheDriver {
     }
 
     /// Every port of the live configuration, a vhost's dedicated loopback port included.
-    fn ready_ports(&self, launch: &ServiceLaunch) -> PortResult<Vec<u16>> {
+    fn ready_ports(&self, launch: &ServiceLaunch) -> PortResult<Vec<Port>> {
         ports_to_own(&main_conf_path(&launch.config_dir), launch.port)
     }
 

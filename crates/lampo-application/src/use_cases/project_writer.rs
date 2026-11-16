@@ -9,6 +9,7 @@ use std::sync::Arc;
 use lampo_domain::events::DomainEvent;
 use lampo_domain::ports::{EventPublisher, ProjectRepository};
 use lampo_domain::project::{Project, ProjectId, check_conflicts};
+use lampo_domain::tcp_port::Port;
 
 use super::allocation::{LoopbackPortAllocator, SiteSnapshot};
 use super::environment::EnvironmentSync;
@@ -66,7 +67,7 @@ impl ProjectWriter {
     }
 
     /// Like [`Self::insert`], also handing `build` a free loopback port picked under the same lock.
-    pub(crate) async fn insert_with_free_port(&self, build: impl FnOnce(&SiteSnapshot, u16) -> AppResult<Project>) -> AppResult<Project> {
+    pub(crate) async fn insert_with_free_port(&self, build: impl FnOnce(&SiteSnapshot, Port) -> AppResult<Project>) -> AppResult<Project> {
         let project = self.allocator.allocate(|port, snap| self.commit_new(snap, build(snap, port)?)).await?;
         self.changed(&project.id);
         Ok(project)
@@ -80,7 +81,7 @@ impl ProjectWriter {
 
     /// Like [`Self::modify`], also handing `change` a free loopback port picked under the same
     /// lock (it may leave it unused).
-    pub(crate) async fn modify_with_free_port(&self, project_id: &str, change: impl FnOnce(&mut Project, &SiteSnapshot, u16) -> AppResult<bool>) -> AppResult<Project> {
+    pub(crate) async fn modify_with_free_port(&self, project_id: &str, change: impl FnOnce(&mut Project, &SiteSnapshot, Port) -> AppResult<bool>) -> AppResult<Project> {
         self.allocator.allocate(|port, snap| self.commit_change(project_id, snap, |project, snap| change(project, snap, port))).await
     }
 

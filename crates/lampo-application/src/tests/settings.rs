@@ -8,6 +8,7 @@ use lampo_domain::events::DomainEvent;
 use lampo_domain::mysql::MysqlSeries;
 use lampo_domain::ports::{ProjectRepository, SettingsRepository};
 use lampo_domain::service::{ServiceId, ServiceState};
+use lampo_domain::tcp_port::Port;
 
 use super::allocation::after_a_locked_commit;
 use super::{cli, gui};
@@ -40,7 +41,7 @@ async fn ports_change_in_place_and_running_services_restart() {
     let result = w.patch_settings().execute(request, &cli()).await.unwrap();
 
     let stored = w.settings.load().unwrap();
-    assert_eq!((stored.apache_port, stored.mysql_port(MysqlSeries::DEFAULT), stored.service_port(&redis_id())), (8080, Some(3310), Some(6380)));
+    assert_eq!((stored.apache_port, stored.mysql_port(MysqlSeries::DEFAULT), stored.service_port(&redis_id())), (Port::of(8080), Some(Port::of(3310)), Some(Port::of(6380))));
     assert!(!stored.close_to_tray, "untouched fields keep their stored value");
     assert_eq!(result.settings.apache_port, 8080);
     let changes: Vec<(&str, &str, &str)> = result.changes.iter().map(|c| (c.setting.as_str(), c.from.as_str(), c.to.as_str())).collect();
@@ -89,7 +90,7 @@ async fn unchanged_values_are_a_no_op_without_a_sync() {
 async fn invalid_patches_are_rejected_and_nothing_is_saved() {
     let w = World::with_basics();
     w.project("shop", "C:\\sites\\shop", false);
-    w.update_project("shop", |p| add_address(p, SiteAddress::LoopbackPort(8101)));
+    w.update_project("shop", |p| add_address(p, SiteAddress::LoopbackPort(Port::of(8101))));
     let original = w.settings.load().unwrap();
     let patch = w.patch_settings();
     let cases: Vec<(SettingsPatchRequest, ErrorCode, &str)> = vec![
@@ -127,7 +128,7 @@ async fn a_new_port_must_be_free_unless_a_lampo_service_holds_it() {
     let result = w.patch_settings().execute(swap, &cli()).await.unwrap();
     assert_eq!(result.changes.len(), 2);
     let stored = w.settings.load().unwrap();
-    assert_eq!((stored.mysql_port(MysqlSeries::DEFAULT), stored.mysql_port(MysqlSeries::LEGACY_5_7)), (Some(3307), Some(3306)));
+    assert_eq!((stored.mysql_port(MysqlSeries::DEFAULT), stored.mysql_port(MysqlSeries::LEGACY_5_7)), (Some(Port::of(3307)), Some(Port::of(3306))));
 }
 
 // --- GUI save (`SettingsService::update`): same lock and checks as `lampo settings set` --------
@@ -136,7 +137,7 @@ async fn a_new_port_must_be_free_unless_a_lampo_service_holds_it() {
 fn with_loopback_site() -> World {
     let w = World::with_basics();
     w.project("shop", "C:\\sites\\shop", false);
-    w.update_project("shop", |p| add_address(p, SiteAddress::LoopbackPort(8101)));
+    w.update_project("shop", |p| add_address(p, SiteAddress::LoopbackPort(Port::of(8101))));
     w.hosts_in_sync();
     w
 }
@@ -217,7 +218,7 @@ async fn gui_save_cannot_add_or_remove_service_instances() {
     let saved = w.settings_service().update(reordered, &gui()).await.unwrap();
     let ids: Vec<&str> = saved.services.iter().map(|s| s.service.as_str()).collect();
     assert_eq!(ids, current.services.iter().map(|s| s.service.as_str()).collect::<Vec<_>>());
-    assert_eq!(w.settings.load().unwrap().service_port(&redis_id()), Some(6380));
+    assert_eq!(w.settings.load().unwrap().service_port(&redis_id()), Some(Port::of(6380)));
 }
 
 /// The GUI save takes the allocator lock, so a project saved meanwhile under the lock is part of
@@ -233,10 +234,10 @@ async fn gui_save_waits_for_the_allocator_lock() {
     let projects = w.projects.clone();
     let take_8101 = move |snap: &SiteSnapshot| {
         let mut shop = snap.projects[0].clone();
-        add_address(&mut shop, SiteAddress::LoopbackPort(8101));
+        add_address(&mut shop, SiteAddress::LoopbackPort(Port::of(8101)));
         Ok(projects.save(&shop)?)
     };
     let saved = after_a_locked_commit(&w, take_8101, async move { service.update(dto, &gui()).await }).await;
     assert_eq!(saved.unwrap_err().code, ErrorCode::Conflict);
-    assert_eq!(w.settings.load().unwrap().service_port(&redis_id()), Some(6379));
+    assert_eq!(w.settings.load().unwrap().service_port(&redis_id()), Some(Port::of(6379)));
 }

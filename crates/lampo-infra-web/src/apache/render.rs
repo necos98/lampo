@@ -4,6 +4,7 @@
 use std::path::Path;
 
 use lampo_domain::project::TlsMode;
+use lampo_domain::tcp_port::Port;
 use lampo_domain::web::{VirtualHost, WebServerConfig};
 use lampo_domain::{PortError, PortResult};
 use minijinja::{Environment, UndefinedBehavior};
@@ -333,7 +334,7 @@ impl ApacheConfigRenderer {
         out
     }
 
-    fn shared_addresses(&self, port: u16) -> Vec<String> {
+    fn shared_addresses(&self, port: Port) -> Vec<String> {
         let mut out = vec![format!("127.0.0.1:{port}")];
         if self.options.ipv6_loopback {
             out.push(format!("[::1]:{port}"));
@@ -363,7 +364,7 @@ const LOOPBACK_HOST_NAMES: &[&str] = &["localhost", "127.0.0.1"];
 
 /// `<VirtualHost 127.0.0.1:<port>>`: answers to every name of the site (or its internal name
 /// when it has none) and to the loopback names. Apache matches them without the `:port`.
-fn dedicated_port_block(vhost: &VirtualHost, port: u16, internal_name: String) -> VhostBlock {
+fn dedicated_port_block(vhost: &VirtualHost, port: Port, internal_name: String) -> VhostBlock {
     let mut names = vhost.server_names.iter().map(ToString::to_string);
     let server_name = names.next().unwrap_or(internal_name);
     let mut aliases: Vec<String> = names.collect();

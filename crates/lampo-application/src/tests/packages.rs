@@ -8,6 +8,7 @@ use lampo_domain::package::{PackageKind, PackagePayload};
 use lampo_domain::ports::{InstalledPackageRegistry, PackageCatalogSource, ProjectRepository, SettingsRepository};
 use lampo_domain::progress::{CancelFlag, ProgressStage};
 use lampo_domain::vc_runtime::VcRuntime;
+use lampo_domain::tcp_port::Port;
 
 use super::allocation::after_a_locked_commit;
 use super::{cli, gui};
@@ -159,7 +160,7 @@ fn apache_moved_to_8080(w: &World) -> impl FnOnce(&SiteSnapshot) -> AppResult<()
     let repo = w.settings.clone();
     move |snap| {
         let mut next = snap.settings.clone();
-        next.apache_port = 8080;
+        next.apache_port = Port::of(8080);
         Ok(repo.save(&next)?)
     }
 }
@@ -191,7 +192,7 @@ async fn the_default_php_adoption_waits_for_the_allocator_lock() {
     let op = async move { install.execute(request("php", None, Some("8.3")), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await };
     after_a_locked_commit(&k.w, apache_moved_to_8080(&k.w), op).await.unwrap();
     let stored = k.w.settings.load().unwrap();
-    assert_eq!((stored.apache_port, stored.default_php), (8080, Some(php("8.3"))));
+    assert_eq!((stored.apache_port, stored.default_php), (Port::of(8080), Some(php("8.3"))));
 }
 
 /// The wizard records its completion under the allocator lock (here it has nothing left to
@@ -681,7 +682,7 @@ async fn shutdown_stops_custom_mysql_series_too() {
     use lampo_domain::settings::ServiceInstanceSettings;
     let w = World::with_basics();
     let custom = MysqlSeries::parse("8.0").unwrap();
-    w.settings.0.lock().unwrap().services.push(ServiceInstanceSettings::new(custom.service_id(), 3308, false));
+    w.settings.0.lock().unwrap().services.push(ServiceInstanceSettings::new(custom.service_id(), Port::of(3308), false));
     w.mysql.set(&custom.service_id(), ServiceState::Running);
     w.apache.set(&ServiceId::apache(), ServiceState::Running);
     Shutdown::new(w.runners(), w.services.clone(), w.settings.clone()).run().await.unwrap();

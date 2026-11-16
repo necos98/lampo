@@ -558,7 +558,7 @@ impl Project {
 pub fn check_conflicts(existing: &[Project], worktrees: &[WorktreeEnvironment], candidate: &Project, is_new: bool, settings: &Settings) -> Result<(), DomainError> {
     for port in candidate.addresses.iter().filter_map(SiteAddress::loopback) {
         if let Some(service) = settings.service_on_port(port) {
-            return Err(DomainError::LoopbackPortTaken { port, service });
+            return Err(DomainError::LoopbackPortTaken { port: port.get(), service });
         }
     }
     check_worktree_conflicts(worktrees, candidate)?;
@@ -581,7 +581,7 @@ pub fn check_conflicts(existing: &[Project], worktrees: &[WorktreeEnvironment], 
                 }
                 if let (Some(a), Some(b)) = (mine.loopback(), theirs.loopback()) {
                     if a == b {
-                        return Err(DomainError::DuplicateLoopbackPort { port: a, other: other.id.to_string() });
+                        return Err(DomainError::DuplicateLoopbackPort { port: a.get(), other: other.id.to_string() });
                     }
                 }
             }
@@ -599,7 +599,7 @@ fn check_worktree_conflicts(worktrees: &[WorktreeEnvironment], candidate: &Proje
             return Err(DomainError::DuplicateProjectRoot { root: candidate.root.to_string(), other: w.site_id().to_string() });
         }
         if candidate.addresses.iter().filter_map(SiteAddress::loopback).any(|port| port == w.loopback_port) {
-            return Err(DomainError::DuplicateLoopbackPort { port: w.loopback_port, other: w.site_id().to_string() });
+            return Err(DomainError::DuplicateLoopbackPort { port: w.loopback_port.get(), other: w.site_id().to_string() });
         }
         let alias = w.localhost_alias();
         if candidate.addresses.iter().filter_map(SiteAddress::host).any(|host| *host == alias) {
@@ -630,6 +630,7 @@ pub fn unique_project_id(existing: &[Project], base: &ProjectId) -> ProjectId {
 pub(crate) mod tests {
     use super::*;
     use crate::hostname::Tld;
+    use crate::tcp_port::Port;
 
     pub(crate) fn project(id: &str, root: &str) -> Project {
         let id = ProjectId::new(id).unwrap();
@@ -708,7 +709,7 @@ pub(crate) mod tests {
         env.set_mysql(Some(MysqlSeries::LEGACY_5_7));
         p.set_environment(env).unwrap();
         let conn = p.database_connection(&Settings::default()).unwrap().unwrap();
-        assert_eq!(conn.port, 3307);
+        assert_eq!(conn.port, Port::of(3307));
         assert_eq!(conn.user, "root");
     }
 
@@ -729,7 +730,7 @@ pub(crate) mod tests {
         let p = project("shop", "C:\\sites\\shop");
         let mut s = Settings::default();
         assert_eq!(p.url(&s), "http://shop.test");
-        s.apache_port = 8080;
+        s.apache_port = Port::of(8080);
         assert_eq!(p.url(&s), "http://shop.test:8080");
     }
 
@@ -737,7 +738,7 @@ pub(crate) mod tests {
     fn detects_conflicts() {
         let s = Settings::default();
         let mut a = project("shop", "C:\\sites\\shop");
-        a.addresses.push(SiteAddress::LoopbackPort(8101));
+        a.addresses.push(SiteAddress::LoopbackPort(Port::of(8101)));
         let existing = vec![a.clone()];
         assert!(matches!(check_conflicts(&existing, &[], &a, true, &s), Err(DomainError::DuplicateProjectId(_))));
         assert!(check_conflicts(&existing, &[], &a, false, &s).is_ok());
@@ -750,11 +751,11 @@ pub(crate) mod tests {
         assert!(matches!(check_conflicts(&existing, &[], &same_host, true, &s), Err(DomainError::DuplicateHostname { .. })));
 
         let mut same_port = project("api", "C:\\sites\\api");
-        same_port.addresses.push(SiteAddress::LoopbackPort(8101));
+        same_port.addresses.push(SiteAddress::LoopbackPort(Port::of(8101)));
         assert!(matches!(check_conflicts(&existing, &[], &same_port, true, &s), Err(DomainError::DuplicateLoopbackPort { port: 8101, .. })));
 
         let mut on_mysql = project("db", "C:\\sites\\db");
-        on_mysql.addresses.push(SiteAddress::LoopbackPort(3306));
+        on_mysql.addresses.push(SiteAddress::LoopbackPort(Port::of(3306)));
         assert!(matches!(check_conflicts(&[], &[], &on_mysql, true, &s), Err(DomainError::LoopbackPortTaken { port: 3306, .. })));
     }
 
@@ -763,9 +764,9 @@ pub(crate) mod tests {
         use crate::worktree::{DatabaseMode, Occupancy};
         let s = Settings::default();
         let shop = project("shop", "C:\\sites\\shop");
-        let wt = WorktreeEnvironment::derive(&shop, &Occupancy::default(), ProjectRoot::new("D:\\wt\\a").unwrap(), Some("fix".into()), 8100, &DatabaseMode::Shared, 0).unwrap();
+        let wt = WorktreeEnvironment::derive(&shop, &Occupancy::default(), ProjectRoot::new("D:\\wt\\a").unwrap(), Some("fix".into()), Port::of(8100), &DatabaseMode::Shared, 0).unwrap();
         let mut api = project("api", "C:\\sites\\api");
-        api.addresses.push(SiteAddress::LoopbackPort(8100));
+        api.addresses.push(SiteAddress::LoopbackPort(Port::of(8100)));
         let err = check_conflicts(std::slice::from_ref(&shop), std::slice::from_ref(&wt), &api, true, &s).unwrap_err();
         assert_eq!(err, DomainError::DuplicateLoopbackPort { port: 8100, other: "shop@fix".into() });
         // Updating an existing project is held to the same rule.
@@ -780,7 +781,7 @@ pub(crate) mod tests {
         use crate::worktree::{DatabaseMode, Occupancy};
         let s = Settings::default();
         let shop = project("shop", r"C:\sites\shop");
-        let wt = WorktreeEnvironment::derive(&shop, &Occupancy::default(), ProjectRoot::new(r"D:\wt\fix").unwrap(), Some("fix".into()), 8100, &DatabaseMode::Shared, 0).unwrap();
+        let wt = WorktreeEnvironment::derive(&shop, &Occupancy::default(), ProjectRoot::new(r"D:\wt\fix").unwrap(), Some("fix".into()), Port::of(8100), &DatabaseMode::Shared, 0).unwrap();
         let (projects, worktrees) = (std::slice::from_ref(&shop), std::slice::from_ref(&wt));
 
         let in_the_worktree = project("fix", r"d:\WT\fix");
@@ -816,7 +817,7 @@ pub(crate) mod tests {
     #[test]
     fn hosts_file_names_skip_localhost_and_ports() {
         let mut p = project("shop", "C:\\sites\\shop");
-        p.addresses.push(SiteAddress::LoopbackPort(8101));
+        p.addresses.push(SiteAddress::LoopbackPort(Port::of(8101)));
         assert_eq!(p.hosts_file_names().map(|h| h.as_str()).collect::<Vec<_>>(), ["shop.test"]);
         assert_eq!(p.urls(&Settings::default()), ["http://shop.test", "http://shop.localhost", "http://127.0.0.1:8101"]);
         assert!(p.set_addresses(vec![]).is_err());

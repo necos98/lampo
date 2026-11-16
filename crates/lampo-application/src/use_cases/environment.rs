@@ -13,6 +13,7 @@ use lampo_domain::ports::{
     ShimIndexWriter, WebServerConfigurator, WorktreeRepository,
 };
 use lampo_domain::service::{ServiceId, ServiceLaunch, ServiceState, plan_services};
+use lampo_domain::tcp_port::Port;
 use lampo_domain::web::{PhpIniSpec, WebServerConfig};
 use lampo_domain::PortError;
 
@@ -194,9 +195,9 @@ impl ApplyEnvironment {
         }
     }
 
-    fn port_busy(&self, ports: &[u16]) -> Option<AppError> {
+    fn port_busy(&self, ports: &[Port]) -> Option<AppError> {
         ports.iter().find_map(|&port| match self.deps.port_probe.check(port) {
-            Ok(PortAvailability::InUse { owner }) => Some(PortError::PortInUse { port, owner }.into()),
+            Ok(PortAvailability::InUse { owner }) => Some(PortError::PortInUse { port: port.get(), owner }.into()),
             Ok(PortAvailability::Free) => None,
             Err(e) => {
                 tracing::warn!("cannot probe port {port}: {e}");
@@ -215,7 +216,7 @@ impl ApplyEnvironment {
     }
 
     /// `PortInUse` if one of `ports` is taken, otherwise `prepare` + `start`.
-    async fn start_with(&self, runner: &dyn ServiceRunner, launch: &ServiceLaunch, ports: &[u16]) -> AppResult<()> {
+    async fn start_with(&self, runner: &dyn ServiceRunner, launch: &ServiceLaunch, ports: &[Port]) -> AppResult<()> {
         if let Some(busy) = self.port_busy(ports) {
             return Err(busy);
         }

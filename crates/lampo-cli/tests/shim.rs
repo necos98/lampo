@@ -8,6 +8,7 @@ use std::process::{Command, Stdio};
 use lampo_domain::php::{ComposerChannel, PhpMinor};
 use lampo_domain::project::ProjectRoot;
 use lampo_domain::shim::{ShimEntry, ShimIndex, ShimTarget};
+use lampo_domain::tcp_port::Port;
 
 struct Sandbox {
     _dir: tempfile::TempDir,
@@ -198,7 +199,7 @@ fn install_mysql(sb: &Sandbox, database_exists: bool) -> PathBuf {
         service: "mysql-8.4".parse().unwrap(),
         client_dir: sb.php_dir.clone(),
         host: "127.0.0.1".into(),
-        port: 3307,
+        port: Port::of(3307),
         user: Some("root".into()),
         database: Some("shop_feature".into()),
         data_dir: Some(data_dir),

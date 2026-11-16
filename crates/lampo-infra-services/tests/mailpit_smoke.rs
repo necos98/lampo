@@ -14,17 +14,18 @@ use std::time::Duration;
 
 use lampo_domain::ports::{NullEventPublisher, ServiceRunner};
 use lampo_domain::service::{ServiceId, ServiceKind, ServiceLaunch, ServiceState};
+use lampo_domain::tcp_port::Port;
 use lampo_infra_services::{JobObjectSupervisor, MailpitRunner};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
-fn free_port() -> u16 {
-    std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port()
+fn free_port() -> Port {
+    Port::new(std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port()).unwrap()
 }
 
 /// One SMTP exchange: each command waits for its reply, whose code must match.
-async fn send_mail(port: u16, subject: &str) {
-    let stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+async fn send_mail(port: Port, subject: &str) {
+    let stream = TcpStream::connect(("127.0.0.1", port.get())).await.unwrap();
     let (read, mut write) = stream.into_split();
     let mut lines = BufReader::new(read).lines();
     let mut expect = async |code: &str| loop {
@@ -47,8 +48,8 @@ async fn send_mail(port: u16, subject: &str) {
 }
 
 /// `GET <path>` over plain HTTP/1.0 (no client crate needed); the body.
-async fn http_get(port: u16, path: &str) -> String {
-    let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+async fn http_get(port: Port, path: &str) -> String {
+    let mut s = TcpStream::connect(("127.0.0.1", port.get())).await.unwrap();
     s.write_all(format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\n\r\n").as_bytes()).await.unwrap();
     let mut response = String::new();
     s.read_to_string(&mut response).await.unwrap();

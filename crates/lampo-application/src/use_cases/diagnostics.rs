@@ -18,6 +18,7 @@ use lampo_domain::ports::{
 use lampo_domain::project::Project;
 use lampo_domain::settings::Settings;
 use lampo_domain::shim::ShimTool;
+use lampo_domain::tcp_port::Port;
 use lampo_domain::vc_runtime::VcRedistributable;
 use lampo_domain::worktree::WorktreeEnvironment;
 
@@ -132,7 +133,7 @@ pub struct PortsCheck {
 impl DoctorCheck for PortsCheck {
     fn run(&self, facts: &DoctorFacts, report: &mut DoctorReportDto) -> DoctorCheckDto {
         if !facts.app_running {
-            let mut wanted: BTreeMap<u16, String> = BTreeMap::new();
+            let mut wanted: BTreeMap<Port, String> = BTreeMap::new();
             for (id, port) in self.services.planned_ports(&facts.projects, &facts.worktrees, &facts.settings) {
                 wanted.entry(port).or_insert(id);
             }
@@ -144,7 +145,7 @@ impl DoctorCheck for PortsCheck {
             report.port_conflicts = wanted
                 .into_iter()
                 .filter_map(|(port, wanted_by)| match self.probe.check(port) {
-                    Ok(PortAvailability::InUse { owner }) => Some(PortConflictDto { port, wanted_by, owner }),
+                    Ok(PortAvailability::InUse { owner }) => Some(PortConflictDto { port: port.get(), wanted_by, owner }),
                     Ok(PortAvailability::Free) => None,
                     Err(e) => {
                         tracing::warn!("cannot probe port {port}: {e}");

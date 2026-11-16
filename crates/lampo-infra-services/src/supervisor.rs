@@ -29,6 +29,7 @@ use lampo_domain::ports::{
 };
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::service::LogStream;
+use lampo_domain::tcp_port::Port;
 use lampo_domain::{PortError, PortResult};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::NamedPipeServer;
@@ -355,13 +356,13 @@ impl ProcessSupervisor for JobObjectSupervisor {
         self.entry(child).is_some_and(|e| !win::has_exited(&e.handle))
     }
 
-    fn owns_listener(&self, child: ChildId, port: u16) -> bool {
+    fn owns_listener(&self, child: ChildId, port: Port) -> bool {
         let Some(entry) = self.entry(child) else { return false };
-        match win::tcp_listener_pid(port) {
+        match win::tcp_listener_pid(port.get()) {
             Ok(Some(pid)) => pid == entry.pid || win::is_process_in_job(pid, &entry.tree.0),
             Ok(None) => false,
             Err(e) => {
-                tracing::debug!(port, error = %e, "cannot read the TCP listener table");
+                tracing::debug!(port = port.get(), error = %e, "cannot read the TCP listener table");
                 false
             }
         }

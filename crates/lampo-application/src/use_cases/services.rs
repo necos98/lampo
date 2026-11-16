@@ -3,6 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use lampo_domain::ports::{ProjectRepository, ServiceRunner, SettingsRepository, WorktreeRepository};
 use lampo_domain::service::{ServiceId, plan_services};
+use lampo_domain::tcp_port::Port;
 
 use super::environment::{EnvironmentSync, ServiceLifecycle, is_up};
 use super::generation::runner_for;
@@ -63,8 +64,8 @@ impl ServiceQueries {
                     label: self.catalog.label(&id),
                     state: payload.as_ref().map(|p| p.state).unwrap_or(ServiceStateDto::Unknown),
                     pid: status.as_ref().and_then(|s| s.pid),
-                    port: status.as_ref().and_then(|s| s.port).or_else(|| self.catalog.port(&id, &settings)),
-                    ui_port: self.catalog.ui_port(&id, &settings),
+                    port: status.as_ref().and_then(|s| s.port).or_else(|| self.catalog.port(&id, &settings)).map(Port::get),
+                    ui_port: self.catalog.ui_port(&id, &settings).map(Port::get),
                     ui_url: self.catalog.ui_url(&id, &settings),
                     message: status.and_then(|s| s.message),
                     required: plan.contains_key(&id),
@@ -108,8 +109,8 @@ impl ServiceStatusSource for OfflineServiceStatus {
                 label: self.catalog.label(&id),
                 state: ServiceStateDto::Unknown,
                 pid: None,
-                port: self.catalog.port(&id, &settings),
-                ui_port: self.catalog.ui_port(&id, &settings),
+                port: self.catalog.port(&id, &settings).map(Port::get),
+                ui_port: self.catalog.ui_port(&id, &settings).map(Port::get),
                 ui_url: self.catalog.ui_url(&id, &settings),
                 message: Some("the Lampo app is not running".into()),
                 required: false,

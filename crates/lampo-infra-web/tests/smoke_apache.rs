@@ -32,6 +32,7 @@ use lampo_domain::ports::{
 use lampo_domain::project::{ApacheDirectives, TlsMode};
 use lampo_domain::service::{LogStream, ServiceId, ServiceLaunch, ServiceState};
 use lampo_domain::site::SiteId;
+use lampo_domain::tcp_port::Port;
 use lampo_domain::web::{ExtensionLoad, PhpIniSpec, VirtualHost, WebServerConfig};
 use lampo_domain::{PortError, PortResult};
 use lampo_infra_web::{ApacheConfigurator, ApacheRunner, PhpIniRenderer, RenderOptions};
@@ -128,8 +129,8 @@ impl ProcessSupervisor for TokioSupervisor {
 
     /// Stand-in: something accepts on the port while the child lives (the ports are free high
     /// ones picked by this test, so it is httpd).
-    fn owns_listener(&self, child: ChildId, port: u16) -> bool {
-        self.is_alive(child) && TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_millis(200)).is_ok()
+    fn owns_listener(&self, child: ChildId, port: Port) -> bool {
+        self.is_alive(child) && TcpStream::connect_timeout(&([127, 0, 0, 1], port.get()).into(), Duration::from_millis(200)).is_ok()
     }
 }
 
@@ -228,7 +229,7 @@ fn site(data: &Path, id: &str, names: &[&str], port: Option<u16>, docroot: &Path
         vhost: VirtualHost {
             site: site.clone(),
             server_names: names.iter().map(|n| Hostname::new(n).unwrap()).collect(),
-            loopback_port: port,
+            loopback_port: port.map(Port::of),
             project_root: docroot.parent().unwrap().to_path_buf(),
             document_root: docroot.to_path_buf(),
             php_cgi: php_dir.join("php-cgi.exe"),
@@ -322,7 +323,7 @@ async fn real_apache_serves_php_sites() {
     let mut config = WebServerConfig {
         server_root: apache.clone(),
         mod_fcgid: fcgid.clone(),
-        listen_port: shared,
+        listen_port: Port::of(shared),
         config_dir: data.join("generated").join("apache"),
         log_dir: data.join("logs").join("apache"),
         vhosts: vec![shop.vhost.clone(), wt.vhost.clone()],
@@ -350,7 +351,7 @@ async fn real_apache_serves_php_sites() {
     let launch = ServiceLaunch {
         service: ServiceId::apache(),
         install_dir: apache.clone(),
-        port: shared,
+        port: Port::of(shared),
         ui_port: None,
         config_dir: config.config_dir.clone(),
         data_dir: None,

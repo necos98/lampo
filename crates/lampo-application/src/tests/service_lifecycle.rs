@@ -9,6 +9,7 @@ use lampo_domain::mysql::MysqlSeries;
 use lampo_domain::ports::SettingsRepository;
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::service::{ServiceId, ServiceState};
+use lampo_domain::tcp_port::Port;
 
 use super::{cli, gui};
 use crate::dto::{DatabaseImportRequest, ServicesRequest};
@@ -28,7 +29,7 @@ fn services(ids: &[&ServiceId]) -> ServicesRequest {
 
 fn move_default_mysql_to(w: &World, port: u16) {
     let mut s = w.settings.load().unwrap();
-    s.services[0].port = port;
+    s.services[0].port = Port::of(port);
     w.settings.save(&s).unwrap();
 }
 

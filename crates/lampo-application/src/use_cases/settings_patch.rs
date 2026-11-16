@@ -13,7 +13,7 @@ use lampo_domain::php::PhpMinor;
 use lampo_domain::project::Project;
 use lampo_domain::service::{ServiceId, ServiceKind};
 use lampo_domain::settings::Settings;
-use lampo_domain::tcp_port::PortRange;
+use lampo_domain::tcp_port::{Port, PortRange};
 use lampo_domain::worktree::WorktreeEnvironment;
 
 use super::environment::EnvironmentSync;
@@ -61,17 +61,18 @@ impl PatchSettings {
 
 /// The request, parsed before taking the lock.
 struct Patch {
-    apache_port: Option<u16>,
-    service_ports: Vec<(ServiceId, u16)>,
+    apache_port: Option<Port>,
+    service_ports: Vec<(ServiceId, Port)>,
     /// Web UI ports, only for kinds that have one.
-    ui_ports: Vec<(ServiceId, u16)>,
+    ui_ports: Vec<(ServiceId, Port)>,
     default_php: Option<PhpMinor>,
     loopback_ports: Option<PortRange>,
 }
 
-/// `(id, port)` pairs of a request map, validated: well-formed ids, no Apache, no duplicates.
-fn parse_ports(ports: &BTreeMap<String, u16>, what: &str) -> AppResult<Vec<(ServiceId, u16)>> {
-    let mut out: Vec<(ServiceId, u16)> = Vec::new();
+/// `(id, port)` pairs of a request map, validated: well-formed ids, no Apache, no duplicates,
+/// no port 0.
+fn parse_ports(ports: &BTreeMap<String, u16>, what: &str) -> AppResult<Vec<(ServiceId, Port)>> {
+    let mut out: Vec<(ServiceId, Port)> = Vec::new();
     for (id, port) in ports {
         let id: ServiceId = id.trim().to_ascii_lowercase().parse()?;
         if id.is_apache() {
@@ -80,7 +81,7 @@ fn parse_ports(ports: &BTreeMap<String, u16>, what: &str) -> AppResult<Vec<(Serv
         if out.iter().any(|(other, _)| other == &id) {
             return Err(validation(format!("the {what} of {id} is given twice")));
         }
-        out.push((id, *port));
+        out.push((id, Port::try_from(*port)?));
     }
     Ok(out)
 }
@@ -94,7 +95,7 @@ impl Patch {
             }
         }
         Ok(Self {
-            apache_port: r.apache_port,
+            apache_port: r.apache_port.map(Port::try_from).transpose()?,
             service_ports: parse_ports(&r.service_ports, "port")?,
             ui_ports,
             default_php: r.default_php_version.as_deref().map(|v| PhpMinor::parse(v.trim())).transpose()?,
@@ -102,8 +103,8 @@ impl Patch {
         })
     }
 
-    /// `current` with the patch applied and validated (`Settings::validate`: distinct, non-zero
-    /// ports, web UI ports included).
+    /// `current` with the patch applied and validated (`Settings::validate`: distinct ports,
+    /// web UI ports included).
     fn apply(&self, current: &Settings) -> AppResult<Settings> {
         let mut next = current.clone();
         if let Some(port) = self.apache_port {

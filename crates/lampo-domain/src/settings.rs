@@ -15,14 +15,14 @@ use crate::hostname::Tld;
 use crate::mysql::MysqlSeries;
 use crate::php::PhpMinor;
 use crate::service::{ServiceDescriptor, ServiceId, ServiceKind};
-use crate::tcp_port::PortRange;
+use crate::tcp_port::{Port, PortRange};
 
 /// One configured service instance (shared by all projects using it).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceInstanceSettings {
     pub service: ServiceId,
     /// The main port (Mailpit: SMTP).
-    pub port: u16,
+    pub port: Port,
     /// `true`: runs whenever the app runs (the default MySQL). `false`: started only while a
     /// served site needs it.
     #[serde(default)]
@@ -30,7 +30,7 @@ pub struct ServiceInstanceSettings {
     /// Second listener of kinds that have one (Mailpit's web UI). `None`: the kind's default
     /// (`ServiceDescriptor::default_ui_port`), or no second listener.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ui_port: Option<u16>,
+    pub ui_port: Option<Port>,
 }
 
 /// SMTP endpoint and web UI of the shared Mailpit, for sites that use it. Plain SMTP: no
@@ -38,8 +38,8 @@ pub struct ServiceInstanceSettings {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MailConnection {
     pub host: String,
-    pub smtp_port: u16,
-    pub web_port: u16,
+    pub smtp_port: Port,
+    pub web_port: Port,
 }
 
 impl MailConnection {
@@ -50,7 +50,7 @@ impl MailConnection {
 }
 
 impl ServiceInstanceSettings {
-    pub fn new(service: ServiceId, port: u16, always_on: bool) -> Self {
+    pub fn new(service: ServiceId, port: Port, always_on: bool) -> Self {
         Self { service, port, always_on, ui_port: None }
     }
 }
@@ -62,7 +62,7 @@ pub struct Settings {
     pub default_php: Option<PhpMinor>,
     pub tld: Tld,
     /// The web tier's shared port.
-    pub apache_port: u16,
+    pub apache_port: Port,
     /// Every other service instance with its port.
     pub services: Vec<ServiceInstanceSettings>,
     /// Range for dedicated loopback listeners (worktree environments, `LoopbackPort` addresses).
@@ -81,12 +81,12 @@ impl Default for Settings {
         Self {
             default_php: None,
             tld: Tld::default(),
-            apache_port: 80,
+            apache_port: Port::of(80),
             services: vec![
-                ServiceInstanceSettings::new(mysql_id(MysqlSeries::DEFAULT), 3306, true),
-                ServiceInstanceSettings::new(mysql_id(MysqlSeries::LEGACY_5_7), 3307, false),
-                ServiceInstanceSettings::new(ServiceId::new(ServiceKind::REDIS, None), 6379, false),
-                ServiceInstanceSettings { ui_port: Some(8025), ..ServiceInstanceSettings::new(ServiceId::new(ServiceKind::MAILPIT, None), 1025, false) },
+                ServiceInstanceSettings::new(mysql_id(MysqlSeries::DEFAULT), Port::of(3306), true),
+                ServiceInstanceSettings::new(mysql_id(MysqlSeries::LEGACY_5_7), Port::of(3307), false),
+                ServiceInstanceSettings::new(ServiceId::new(ServiceKind::REDIS, None), Port::of(6379), false),
+                ServiceInstanceSettings { ui_port: Some(Port::of(8025)), ..ServiceInstanceSettings::new(ServiceId::new(ServiceKind::MAILPIT, None), Port::of(1025), false) },
             ],
             loopback_ports: PortRange::default(),
             close_to_tray: true,
@@ -102,19 +102,19 @@ impl Default for Settings {
 struct SettingsFile {
     default_php: Option<PhpMinor>,
     tld: Tld,
-    apache_port: u16,
+    apache_port: Port,
     services: Option<Vec<ServiceInstanceSettings>>,
     loopback_ports: PortRange,
     close_to_tray: bool,
     first_run_completed: bool,
     mysql_instances: Option<Vec<LegacyMysqlInstance>>,
-    redis_port: Option<u16>,
+    redis_port: Option<Port>,
 }
 
 #[derive(Deserialize)]
 struct LegacyMysqlInstance {
     series: MysqlSeries,
-    port: u16,
+    port: Port,
     always_on: bool,
 }
 
@@ -172,15 +172,15 @@ impl TryFrom<SettingsFile> for Settings {
 /// Appends the default unversioned instances (Redis, Mailpit) a file does not list, so a kind
 /// added after the file was written is configurable like the others. A default port another
 /// instance (or Apache) already has moves up to the next free one.
-fn add_missing_builtins(services: &mut Vec<ServiceInstanceSettings>, apache_port: u16) {
+fn add_missing_builtins(services: &mut Vec<ServiceInstanceSettings>, apache_port: Port) {
     for default in Settings::default().services.into_iter().filter(|d| d.service.version().is_none()) {
         if services.iter().any(|s| s.service == default.service) {
             continue;
         }
-        let mut taken: Vec<u16> = services.iter().flat_map(|s| std::iter::once(s.port).chain(s.ui_port)).collect();
+        let mut taken: Vec<Port> = services.iter().flat_map(|s| std::iter::once(s.port).chain(s.ui_port)).collect();
         taken.push(apache_port);
-        let mut free = |from: u16| {
-            let port = (from..=u16::MAX).find(|p| !taken.contains(p)).unwrap_or(from);
+        let mut free = |from: Port| {
+            let port = from.upward().find(|p| !taken.contains(p)).unwrap_or(from);
             taken.push(port);
             port
         };
@@ -191,10 +191,10 @@ fn add_missing_builtins(services: &mut Vec<ServiceInstanceSettings>, apache_port
 }
 
 impl Settings {
-    /// Validates cross-field invariants: non-zero, distinct ports (web UI ports included);
+    /// Validates cross-field invariants: distinct ports (web UI ports included);
     /// unique instances; at least one always-on MySQL instance (the default one).
     pub fn validate(&self) -> Result<(), DomainError> {
-        let mut ports: Vec<(u16, String)> = vec![(self.apache_port, ServiceId::apache().to_string())];
+        let mut ports: Vec<(Port, String)> = vec![(self.apache_port, ServiceId::apache().to_string())];
         for s in &self.services {
             if s.service.is_apache() {
                 return Err(DomainError::InvalidSettings("Apache's port is `apache_port`".into()));
@@ -208,11 +208,8 @@ impl Settings {
             }
         }
         for (i, (port, owner)) in ports.iter().enumerate() {
-            if *port == 0 {
-                return Err(DomainError::InvalidPort(0));
-            }
             if let Some((_, first)) = ports[..i].iter().find(|(p, _)| p == port) {
-                return Err(DomainError::DuplicatePort { port: *port, first: first.clone(), second: owner.clone() });
+                return Err(DomainError::DuplicatePort { port: port.get(), first: first.clone(), second: owner.clone() });
             }
         }
         if !self.services.iter().any(|s| s.always_on && s.service.kind() == &ServiceKind::MYSQL) {
@@ -227,7 +224,7 @@ impl Settings {
     }
 
     /// The configured port of `id` (Apache: `apache_port`); `None` when it is not configured.
-    pub fn service_port(&self, id: &ServiceId) -> Option<u16> {
+    pub fn service_port(&self, id: &ServiceId) -> Option<Port> {
         match id.is_apache() {
             true => Some(self.apache_port),
             false => self.service(id).map(|s| s.port),
@@ -236,7 +233,7 @@ impl Settings {
 
     /// The service configured on `port` (`apache`, `mysql-8.4`, …), if any. Loopback site
     /// addresses must avoid these ports.
-    pub fn service_on_port(&self, port: u16) -> Option<String> {
+    pub fn service_on_port(&self, port: Port) -> Option<String> {
         if port == self.apache_port {
             return Some(ServiceId::apache().to_string());
         }
@@ -244,7 +241,7 @@ impl Settings {
     }
 
     /// The configured web UI port of `id`, if it has one set.
-    pub fn service_ui_port(&self, id: &ServiceId) -> Option<u16> {
+    pub fn service_ui_port(&self, id: &ServiceId) -> Option<Port> {
         self.service(id).and_then(|s| s.ui_port)
     }
 
@@ -255,7 +252,7 @@ impl Settings {
         MailConnection {
             host: "127.0.0.1".into(),
             smtp_port: self.service_port(&id).unwrap_or(d.default_port()),
-            web_port: self.service_ui_port(&id).or(d.default_ui_port()).unwrap_or(8025),
+            web_port: self.service_ui_port(&id).or(d.default_ui_port()).unwrap_or(Port::of(8025)),
         }
     }
 
@@ -264,7 +261,7 @@ impl Settings {
         self.services.iter().filter(|s| s.service.kind() == &ServiceKind::MYSQL).filter_map(|s| s.service.version().and_then(|v| MysqlSeries::try_from(v).ok()).map(|series| (series, s)))
     }
 
-    pub fn mysql_port(&self, series: MysqlSeries) -> Option<u16> {
+    pub fn mysql_port(&self, series: MysqlSeries) -> Option<Port> {
         self.service_port(&mysql_id(series))
     }
 
@@ -283,18 +280,16 @@ mod tests {
         let s = Settings::default();
         s.validate().unwrap();
         assert_eq!(s.default_mysql(), MysqlSeries::DEFAULT);
-        assert_eq!(s.mysql_port(MysqlSeries::LEGACY_5_7), Some(3307));
-        assert_eq!(s.service_port(&"redis".parse().unwrap()), Some(6379));
-        assert_eq!(s.service_on_port(3307).as_deref(), Some("mysql-5.7"));
+        assert_eq!(s.mysql_port(MysqlSeries::LEGACY_5_7), Some(Port::of(3307)));
+        assert_eq!(s.service_port(&"redis".parse().unwrap()), Some(Port::of(6379)));
+        assert_eq!(s.service_on_port(Port::of(3307)).as_deref(), Some("mysql-5.7"));
     }
 
     #[test]
     fn rejects_port_collisions() {
         let mut s = Settings::default();
-        s.services[2].port = 3306;
+        s.services[2].port = Port::of(3306);
         assert!(matches!(s.validate(), Err(DomainError::DuplicatePort { port: 3306, .. })));
-        let s = Settings { apache_port: 0, ..Default::default() };
-        assert!(s.validate().is_err());
     }
 
     #[test]
@@ -332,7 +327,12 @@ mod tests {
         let s: Settings = serde_json::from_str(legacy).unwrap();
         assert_eq!(
             s.services.iter().map(|i| (i.service.to_string(), i.port, i.always_on)).collect::<Vec<_>>(),
-            [("mysql-8.4".to_string(), 3310, true), ("mysql-8.0".to_string(), 3311, false), ("redis".to_string(), 6380, false), ("mailpit".to_string(), 1025, false)]
+            [
+                ("mysql-8.4".to_string(), Port::of(3310), true),
+                ("mysql-8.0".to_string(), Port::of(3311), false),
+                ("redis".to_string(), Port::of(6380), false),
+                ("mailpit".to_string(), Port::of(1025), false)
+            ]
         );
         s.validate().unwrap();
         // Saved in the new shape, read back unchanged.
@@ -344,16 +344,16 @@ mod tests {
     fn mailpit_has_an_smtp_and_a_web_ui_port() {
         let s = Settings::default();
         let mailpit: ServiceId = "mailpit".parse().unwrap();
-        assert_eq!((s.service_port(&mailpit), s.service_ui_port(&mailpit)), (Some(1025), Some(8025)));
-        assert_eq!(s.service_on_port(8025).as_deref(), Some("mailpit"));
-        assert_eq!(s.service_on_port(1025).as_deref(), Some("mailpit"));
+        assert_eq!((s.service_port(&mailpit), s.service_ui_port(&mailpit)), (Some(Port::of(1025)), Some(Port::of(8025))));
+        assert_eq!(s.service_on_port(Port::of(8025)).as_deref(), Some("mailpit"));
+        assert_eq!(s.service_on_port(Port::of(1025)).as_deref(), Some("mailpit"));
         let mail = s.mail_connection();
-        assert_eq!((mail.host.as_str(), mail.smtp_port, mail.web_url()), ("127.0.0.1", 1025, "http://127.0.0.1:8025".to_string()));
+        assert_eq!((mail.host.as_str(), mail.smtp_port, mail.web_url()), ("127.0.0.1", Port::of(1025), "http://127.0.0.1:8025".to_string()));
         let mut clash = s.clone();
-        clash.services[3].ui_port = Some(3306);
+        clash.services[3].ui_port = Some(Port::of(3306));
         assert!(matches!(clash.validate(), Err(DomainError::DuplicatePort { port: 3306, .. })), "{:?}", clash.validate());
         let mut own = s.clone();
-        own.services[3].ui_port = Some(1025);
+        own.services[3].ui_port = Some(Port::of(1025));
         assert!(own.validate().is_err(), "SMTP and UI need distinct ports");
         // Instances without a second listener do not write the field.
         let json = serde_json::to_value(&s).unwrap();
@@ -369,12 +369,12 @@ mod tests {
         let s: Settings = serde_json::from_str(before).unwrap();
         assert_eq!(s.services.len(), 3);
         let mailpit = &s.services[2];
-        assert_eq!((mailpit.service.to_string(), mailpit.port, mailpit.ui_port, mailpit.always_on), ("mailpit".to_string(), 1026, Some(8026), false));
+        assert_eq!((mailpit.service.to_string(), mailpit.port, mailpit.ui_port, mailpit.always_on), ("mailpit".to_string(), Port::of(1026), Some(Port::of(8026)), false));
         s.validate().unwrap();
         // A file that already lists Mailpit (without a UI port) keeps it as it is.
         let listed: Settings = serde_json::from_str(r#"{"services": [{"service": "mysql-8.4", "port": 3306, "always_on": true}, {"service": "mailpit", "port": 2025}]}"#).unwrap();
         let m = listed.service(&"mailpit".parse().unwrap()).unwrap();
-        assert_eq!((m.port, m.ui_port), (2025, None));
+        assert_eq!((m.port, m.ui_port), (Port::of(2025), None));
         assert_eq!(listed.services.iter().map(|s| s.service.to_string()).collect::<Vec<_>>(), ["mysql-8.4", "mailpit", "redis"]);
     }
 }

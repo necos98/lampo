@@ -18,6 +18,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lampo_domain::ports::{ChildId, EventPublisher, ProcessSupervisor};
 use lampo_domain::service::{ServiceId, ServiceLaunch, ServiceState, ServiceStatus};
+use lampo_domain::tcp_port::Port;
 use lampo_domain::{PortError, PortResult};
 use tokio::sync::watch;
 
@@ -138,10 +139,10 @@ impl ServiceHost {
             }
         }
         for port in launch.ports() {
-            if let Ok(Some(pid)) = win::tcp_listener_pid(port) {
+            if let Ok(Some(pid)) = win::tcp_listener_pid(port.get()) {
                 let owner = win::describe_process(pid);
                 self.fail(service, format!("port {port} is already in use by {owner}"));
-                return Err(PortError::PortInUse { port, owner: Some(owner) });
+                return Err(PortError::PortInUse { port: port.get(), owner: Some(owner) });
             }
         }
         let spec = driver.command(launch)?;
@@ -211,7 +212,7 @@ impl ServiceHost {
         let detail = lines.first().map_or(headline.clone(), |l| format!("{headline}: {l}"));
         self.fail(&launch.service, detail);
         if lines.iter().any(|l| driver.is_port_conflict(l)) {
-            return PortError::PortInUse { port: launch.port, owner: win::tcp_listener_pid(launch.port).ok().flatten().map(win::describe_process) };
+            return PortError::PortInUse { port: launch.port.get(), owner: win::tcp_listener_pid(launch.port.get()).ok().flatten().map(win::describe_process) };
         }
         let message = if lines.is_empty() { headline } else { format!("{headline}\n{}", lines.join("\n")) };
         PortError::process(driver.program(), message)
@@ -239,7 +240,7 @@ impl ServiceHost {
     }
 
     /// Whether the running `inst` applied the new configuration in place and is ready again.
-    async fn reloaded(&self, driver: &dyn ServiceDriver, launch: &ServiceLaunch, inst: &Instance, ports: Vec<u16>) -> bool {
+    async fn reloaded(&self, driver: &dyn ServiceDriver, launch: &ServiceLaunch, inst: &Instance, ports: Vec<Port>) -> bool {
         let (Some(child), Some(pid), Some(exited)) = (inst.child, inst.status.pid, inst.exited.clone()) else { return false };
         if inst.status.port != Some(launch.port) || !driver.reload(launch, pid).await {
             return false;

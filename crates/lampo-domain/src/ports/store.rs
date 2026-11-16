@@ -13,6 +13,7 @@ use crate::scaffold::PathState;
 use crate::settings::Settings;
 use crate::shim::ShimIndex;
 use crate::site::WorktreeSlug;
+use crate::tcp_port::Port;
 use crate::worktree::WorktreeEnvironment;
 
 pub use crate::resolution::{GitInspector, PathCanonicalizer, ProjectResolver};
@@ -27,7 +28,7 @@ pub struct UnreadableProject {
     pub reason: String,
     /// Loopback ports the file names, read leniently: they stay reserved, so a new site never
     /// takes the listener of a project the user is about to repair.
-    pub loopback_ports: BTreeSet<u16>,
+    pub loopback_ports: BTreeSet<Port>,
 }
 
 /// Every project file: the projects that load and the ones that do not.

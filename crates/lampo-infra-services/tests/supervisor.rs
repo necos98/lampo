@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use lampo_domain::ports::{CommandSpec, ProcessObserver, ProcessSupervisor};
 use lampo_domain::service::LogStream;
+use lampo_domain::tcp_port::Port;
 use lampo_infra_services::JobObjectSupervisor;
 
 mod common;
@@ -132,7 +133,7 @@ async fn leftovers_die_when_the_service_process_exits() {
 #[tokio::test(flavor = "multi_thread")]
 async fn owns_listener_recognises_the_tree_and_nobody_else() {
     let sup = JobObjectSupervisor::new();
-    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let port = Port::new(std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()).unwrap();
     // cmd → powershell: the listener is a grandchild, like mysqld under its monitor.
     let listen = format!("$l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, {port}); $l.Start(); Start-Sleep -Seconds 60");
     let child = sup.spawn(cmd(&format!("powershell.exe -NoProfile -NonInteractive -Command {listen}")), Arc::new(Recorder::default())).await.unwrap();
@@ -142,7 +143,7 @@ async fn owns_listener_recognises_the_tree_and_nobody_else() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     let foreign = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    assert!(!sup.owns_listener(child.id, foreign.local_addr().unwrap().port()), "this test's own socket is not the child's");
+    assert!(!sup.owns_listener(child.id, Port::new(foreign.local_addr().unwrap().port()).unwrap()), "this test's own socket is not the child's");
     sup.terminate(child.id, Duration::ZERO).await.unwrap();
     assert!(!sup.owns_listener(child.id, port), "a gone child owns nothing");
 }

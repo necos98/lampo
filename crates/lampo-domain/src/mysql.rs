@@ -6,6 +6,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 use crate::error::DomainError;
+use crate::tcp_port::Port;
 use crate::version::{PackageVersion, VersionSeries};
 
 /// A MySQL `<major>.<minor>` series (`8.4`, `5.7`). Each series has its own data directory and port.
@@ -164,7 +165,7 @@ impl From<DatabaseName> for String {
 pub struct DatabaseConnection {
     pub series: MysqlSeries,
     pub host: String,
-    pub port: u16,
+    pub port: Port,
     pub user: String,
     pub password: String,
     pub database: DatabaseName,
@@ -172,7 +173,7 @@ pub struct DatabaseConnection {
 
 impl DatabaseConnection {
     /// Instances are initialised with `--initialize-insecure`: user `root`, empty password.
-    pub fn local(series: MysqlSeries, port: u16, database: DatabaseName) -> Self {
+    pub fn local(series: MysqlSeries, port: Port, database: DatabaseName) -> Self {
         Self { series, host: "127.0.0.1".into(), port, user: "root".into(), password: String::new(), database }
     }
 }

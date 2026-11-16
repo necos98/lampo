@@ -16,6 +16,7 @@ use lampo_domain::ports::{EventPublisher, InstalledPackageRegistry, PortAvailabi
 use lampo_domain::project::Project;
 use lampo_domain::service::ServiceId;
 use lampo_domain::settings::Settings;
+use lampo_domain::tcp_port::Port;
 use lampo_domain::worktree::WorktreeEnvironment;
 
 use super::allocation::{LoopbackPortAllocator, SiteSnapshot};
@@ -94,7 +95,7 @@ impl SettingsWriter {
                 continue;
             }
             if let PortAvailability::InUse { owner } = self.port_probe.check(c.port)? {
-                return Err(PortError::PortInUse { port: c.port, owner }.into());
+                return Err(PortError::PortInUse { port: c.port.get(), owner }.into());
             }
         }
         Ok(())
@@ -105,7 +106,7 @@ impl SettingsWriter {
 pub(super) struct PortChange {
     pub id: ServiceId,
     pub ui: bool,
-    pub port: u16,
+    pub port: Port,
 }
 
 impl PortChange {
@@ -114,7 +115,7 @@ impl PortChange {
         format!("{}.{}", self.id, if self.ui { "ui-port" } else { "port" })
     }
 
-    pub fn previous(&self, before: &Settings, catalog: &ServiceCatalog) -> Option<u16> {
+    pub fn previous(&self, before: &Settings, catalog: &ServiceCatalog) -> Option<Port> {
         match self.ui {
             false => before.service_port(&self.id),
             true => catalog.ui_port(&self.id, before),
@@ -146,7 +147,7 @@ fn check_loopback_ports(changed: &[PortChange], projects: &[Project], worktrees:
         let project = projects.iter().find(|p| p.addresses().iter().any(|a| a.loopback() == Some(port))).map(|p| p.id.to_string());
         let site = project.or_else(|| worktrees.iter().find(|w| w.loopback_port == port).map(|w| w.site_id().to_string()));
         if let Some(site) = site {
-            return Err(DomainError::LoopbackPortTaken { port, service: format!("site `{site}`") }.into());
+            return Err(DomainError::LoopbackPortTaken { port: port.get(), service: format!("site `{site}`") }.into());
         }
     }
     Ok(())

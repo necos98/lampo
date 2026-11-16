@@ -82,7 +82,7 @@ impl DatabaseService {
         Ok(DatabaseListDto {
             mysql_version: e.series.to_string(),
             host: "127.0.0.1".into(),
-            port: e.port,
+            port: e.port.get(),
             user: e.user.clone(),
             databases,
             site_database: target.site_database.map(|d| d.to_string()),

@@ -23,6 +23,7 @@ use crate::project::{Project, ProjectEnvironment, ProjectId, ProjectRoot};
 use crate::settings::Settings;
 use crate::site::{SiteId, WorktreeSlug};
 use crate::slug::MAX_SLUG_LEN;
+use crate::tcp_port::Port;
 
 /// How a worktree environment gets its database, chosen at creation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,7 +57,7 @@ pub struct WorktreeEnvironment {
     /// Branch checked out when the environment was created (informational).
     pub branch: Option<String>,
     /// Persisted, so the URL stays stable across restarts.
-    pub loopback_port: u16,
+    pub loopback_port: Port,
     pub database: WorktreeDatabase,
     /// Set by the caller (the domain has no clock).
     pub created_at_unix_ms: u64,
@@ -98,7 +99,7 @@ impl WorktreeEnvironment {
         taken: &Occupancy<'_>,
         root: ProjectRoot,
         branch: Option<String>,
-        loopback_port: u16,
+        loopback_port: Port,
         mode: &DatabaseMode,
         created_at_unix_ms: u64,
     ) -> Result<Self, DomainError> {
@@ -235,19 +236,15 @@ fn within_database_name_limit(name: &str) -> String {
 }
 
 /// Every loopback port already assigned to a project address or a worktree environment.
-pub fn used_loopback_ports(projects: &[Project], worktrees: &[WorktreeEnvironment]) -> BTreeSet<u16> {
+pub fn used_loopback_ports(projects: &[Project], worktrees: &[WorktreeEnvironment]) -> BTreeSet<Port> {
     projects.iter().flat_map(|p| p.addresses().iter().filter_map(SiteAddress::loopback)).chain(worktrees.iter().map(|w| w.loopback_port)).collect()
 }
 
 /// Lowest port of the configured range that is not assigned and not a service port.
 /// `PortProbe` still has to confirm the OS port is free.
-pub fn allocate_loopback_port(used: &BTreeSet<u16>, settings: &Settings) -> Result<u16, DomainError> {
+pub fn allocate_loopback_port(used: &BTreeSet<Port>, settings: &Settings) -> Result<Port, DomainError> {
     let range = settings.loopback_ports;
-    range
-        .ports()
-        .map(u16::from)
-        .find(|p| !used.contains(p) && settings.service_on_port(*p).is_none())
-        .ok_or(DomainError::NoFreeLoopbackPort { start: range.start().get(), end: range.end().get() })
+    range.ports().find(|p| !used.contains(p) && settings.service_on_port(*p).is_none()).ok_or(DomainError::NoFreeLoopbackPort { start: range.start().get(), end: range.end().get() })
 }
 
 #[cfg(test)]
@@ -264,47 +261,47 @@ mod tests {
     #[test]
     fn derive_uses_branch_and_dedupes_slugs() {
         let parent = project("shop", "C:\\sites\\shop");
-        let a = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), Some("feature/login".into()), 8100, &DatabaseMode::Shared, 1).unwrap();
+        let a = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), Some("feature/login".into()), Port::of(8100), &DatabaseMode::Shared, 1).unwrap();
         assert_eq!(a.site_id().to_string(), "shop@feature-login");
         assert_eq!(a.localhost_alias().as_str(), "feature-login.shop.localhost");
         assert_eq!(a.url(), "http://127.0.0.1:8100");
         assert!(a.addresses().iter().all(|x| !x.needs_hosts_entry()));
         let taken = Occupancy { worktrees: std::slice::from_ref(&a), ..Default::default() };
-        let b = WorktreeEnvironment::derive(&parent, &taken, root("D:\\wt\\b"), Some("feature/login".into()), 8101, &DatabaseMode::Shared, 1).unwrap();
+        let b = WorktreeEnvironment::derive(&parent, &taken, root("D:\\wt\\b"), Some("feature/login".into()), Port::of(8101), &DatabaseMode::Shared, 1).unwrap();
         assert_eq!(b.slug.as_str(), "feature-login-2");
-        let c = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\no-branch"), None, 8102, &DatabaseMode::Shared, 1).unwrap();
+        let c = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\no-branch"), None, Port::of(8102), &DatabaseMode::Shared, 1).unwrap();
         assert_eq!(c.slug.as_str(), "no-branch");
     }
 
     #[test]
     fn derive_rejects_bad_folders() {
         let parent = project("shop", "C:\\sites\\shop");
-        assert!(WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("C:\\Sites\\Shop"), None, 8100, &DatabaseMode::Shared, 1).is_err());
-        let a = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), None, 8100, &DatabaseMode::Shared, 1).unwrap();
-        assert!(WorktreeEnvironment::derive(&parent, &Occupancy { worktrees: &[a], ..Default::default() }, root("d:\\WT\\a"), None, 8101, &DatabaseMode::Shared, 1).is_err());
+        assert!(WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("C:\\Sites\\Shop"), None, Port::of(8100), &DatabaseMode::Shared, 1).is_err());
+        let a = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), None, Port::of(8100), &DatabaseMode::Shared, 1).unwrap();
+        assert!(WorktreeEnvironment::derive(&parent, &Occupancy { worktrees: &[a], ..Default::default() }, root("d:\\WT\\a"), None, Port::of(8101), &DatabaseMode::Shared, 1).is_err());
     }
 
     #[test]
     fn database_modes() {
         let parent = project("my-shop", "C:\\sites\\shop");
-        let shared = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), Some("x".into()), 8100, &DatabaseMode::Shared, 1).unwrap();
+        let shared = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), Some("x".into()), Port::of(8100), &DatabaseMode::Shared, 1).unwrap();
         assert_eq!(shared.database_name(&parent).unwrap().as_str(), "my_shop");
         assert!(shared.owned_database().is_none());
 
         let mode = DatabaseMode::Clone { source: DatabaseName::new("my_shop").unwrap() };
-        let cloned = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\b"), Some("fix-1".into()), 8101, &mode, 1).unwrap();
+        let cloned = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\b"), Some("fix-1".into()), Port::of(8101), &mode, 1).unwrap();
         assert_eq!(cloned.database_name(&parent).unwrap().as_str(), "my_shop_wt_fix_1");
         let conn = cloned.database_connection(&parent, &Settings::default()).unwrap().unwrap();
-        assert_eq!((conn.port, conn.database.as_str()), (3306, "my_shop_wt_fix_1"));
+        assert_eq!((conn.port, conn.database.as_str()), (Port::of(3306), "my_shop_wt_fix_1"));
 
         let mut no_db = parent.clone();
         no_db.environment.set_mysql(None);
-        assert!(WorktreeEnvironment::derive(&no_db, &Occupancy::default(), root("D:\\wt\\c"), None, 8102, &DatabaseMode::Fresh, 1).is_err());
+        assert!(WorktreeEnvironment::derive(&no_db, &Occupancy::default(), root("D:\\wt\\c"), None, Port::of(8102), &DatabaseMode::Fresh, 1).is_err());
         let _ = MysqlSeries::DEFAULT;
     }
 
     fn fresh(parent: &Project, taken: &Occupancy<'_>, folder: &str, branch: &str) -> WorktreeEnvironment {
-        WorktreeEnvironment::derive(parent, taken, root(folder), Some(branch.into()), 8100, &DatabaseMode::Fresh, 1).unwrap()
+        WorktreeEnvironment::derive(parent, taken, root(folder), Some(branch.into()), Port::of(8100), &DatabaseMode::Fresh, 1).unwrap()
     }
 
     fn own_name(env: &WorktreeEnvironment) -> &str {
@@ -352,13 +349,13 @@ mod tests {
         let parent = project("shop", r"C:\sites\shop");
         let projects = [parent.clone(), project("login", r"D:\wt\login")];
         let taken = Occupancy { projects: &projects, ..Default::default() };
-        let err = WorktreeEnvironment::derive(&parent, &taken, root(r"d:\WT\login"), None, 8100, &DatabaseMode::Shared, 1).unwrap_err();
+        let err = WorktreeEnvironment::derive(&parent, &taken, root(r"d:\WT\login"), None, Port::of(8100), &DatabaseMode::Shared, 1).unwrap_err();
         assert_eq!(err, DomainError::DuplicateProjectRoot { root: r"D:\WT\login".into(), other: "login".into() });
 
         let other_parent = project("blog", r"C:\sites\blog");
-        let theirs = WorktreeEnvironment::derive(&other_parent, &Occupancy::default(), root(r"D:\wt\x"), None, 8100, &DatabaseMode::Shared, 1).unwrap();
+        let theirs = WorktreeEnvironment::derive(&other_parent, &Occupancy::default(), root(r"D:\wt\x"), None, Port::of(8100), &DatabaseMode::Shared, 1).unwrap();
         let taken = Occupancy { worktrees: std::slice::from_ref(&theirs), ..Default::default() };
-        assert!(matches!(WorktreeEnvironment::derive(&parent, &taken, root(r"D:\wt\x"), None, 8101, &DatabaseMode::Shared, 1), Err(DomainError::InvalidWorktree(_))));
+        assert!(matches!(WorktreeEnvironment::derive(&parent, &taken, root(r"D:\wt\x"), None, Port::of(8101), &DatabaseMode::Shared, 1), Err(DomainError::InvalidWorktree(_))));
     }
 
     #[test]
@@ -368,14 +365,14 @@ mod tests {
         blog.set_addresses(vec![SiteAddress::Localhost(Hostname::new("fix.shop.localhost").unwrap())]).unwrap();
         let projects = [parent.clone(), blog];
         let taken = Occupancy { projects: &projects, ..Default::default() };
-        let env = WorktreeEnvironment::derive(&parent, &taken, root(r"D:\wt\fix"), Some("fix".into()), 8100, &DatabaseMode::Shared, 1).unwrap();
+        let env = WorktreeEnvironment::derive(&parent, &taken, root(r"D:\wt\fix"), Some("fix".into()), Port::of(8100), &DatabaseMode::Shared, 1).unwrap();
         assert_eq!(env.localhost_alias().as_str(), "fix-2.shop.localhost");
     }
 
     #[test]
     fn stale_means_folder_gone_or_parent_gone() {
         let parent = project("shop", "C:\\sites\\shop");
-        let w = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), None, 8100, &DatabaseMode::Shared, 1).unwrap();
+        let w = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), None, Port::of(8100), &DatabaseMode::Shared, 1).unwrap();
         let projects = std::slice::from_ref(&parent);
         assert!(!w.is_stale(projects, |_| true));
         assert!(w.is_stale(projects, |r| r.as_str() != "D:\\wt\\a"));
@@ -386,17 +383,17 @@ mod tests {
     fn document_root_follows_parent_public_dir() {
         let mut parent = project("shop", "C:\\sites\\shop");
         parent.environment.public_dir = crate::project::PublicDir::new("public").unwrap();
-        let w = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), None, 8100, &DatabaseMode::Shared, 1).unwrap();
+        let w = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), None, Port::of(8100), &DatabaseMode::Shared, 1).unwrap();
         assert_eq!(w.document_root(&parent), PathBuf::from("D:\\wt\\a").join("public"));
     }
 
     #[test]
     fn port_allocation_skips_used_and_service_ports() {
         let s = Settings { loopback_ports: PortRange::new(3305, 3308).unwrap(), ..Default::default() };
-        let used: BTreeSet<u16> = [3305].into();
+        let used: BTreeSet<Port> = [Port::of(3305)].into();
         // 3306 and 3307 are MySQL ports.
-        assert_eq!(allocate_loopback_port(&used, &s).unwrap(), 3308);
-        let used: BTreeSet<u16> = [3305, 3308].into();
+        assert_eq!(allocate_loopback_port(&used, &s).unwrap(), Port::of(3308));
+        let used: BTreeSet<Port> = [Port::of(3305), Port::of(3308)].into();
         assert!(allocate_loopback_port(&used, &s).is_err());
     }
 }

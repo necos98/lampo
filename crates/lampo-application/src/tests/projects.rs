@@ -11,6 +11,7 @@ use lampo_domain::preset::PresetId;
 use lampo_domain::project::{ProjectId, ProjectRoot};
 use lampo_domain::service::ServiceKind;
 use lampo_domain::worktree::{DatabaseMode, Occupancy, WorktreeEnvironment};
+use lampo_domain::tcp_port::Port;
 
 use super::{cli, gui};
 use crate::dto::*;
@@ -120,7 +121,7 @@ async fn no_elevation_addressing_allocates_a_free_loopback_port_and_never_prompt
     let w = World::with_basics();
     w.project("shop", "C:\\sites\\shop", false);
     let parent = w.projects.get(&ProjectId::new("shop").unwrap()).unwrap().unwrap();
-    let wt = WorktreeEnvironment::derive(&parent, &Occupancy::default(), ProjectRoot::new("D:\\wt\\a").unwrap(), None, 8100, &DatabaseMode::Shared, 1).unwrap();
+    let wt = WorktreeEnvironment::derive(&parent, &Occupancy::default(), ProjectRoot::new("D:\\wt\\a").unwrap(), None, Port::of(8100), &DatabaseMode::Shared, 1).unwrap();
     w.worktrees.save(&wt).unwrap();
     w.ports.busy(8101, "node.exe");
     w.hosts_in_sync();
@@ -131,7 +132,7 @@ async fn no_elevation_addressing_allocates_a_free_loopback_port_and_never_prompt
     assert_eq!(dto.origin_preset.as_deref(), Some("generic-php"), "fallback preset");
     assert!(dto.active);
     assert_eq!(w.hosts.writes.load(Ordering::SeqCst), 0);
-    assert!(w.web.last().unwrap().vhosts.iter().any(|v| v.site.to_string() == "api" && v.loopback_port == Some(8102)));
+    assert!(w.web.last().unwrap().vhosts.iter().any(|v| v.site.to_string() == "api" && v.loopback_port == Some(Port::of(8102))));
 }
 
 #[tokio::test]
@@ -198,7 +199,7 @@ async fn activate_set_php_relink_update_and_delete() {
     assert_eq!((dto.name.as_str(), dto.database_name.as_deref(), dto.url.as_str()), ("Shop 2", Some("shop_main"), "http://shop.localhost"));
 
     let parent = w.projects.get(&ProjectId::new("shop").unwrap()).unwrap().unwrap();
-    let wt = WorktreeEnvironment::derive(&parent, &Occupancy::default(), ProjectRoot::new("D:\\wt\\a").unwrap(), None, 8100, &DatabaseMode::Shared, 1).unwrap();
+    let wt = WorktreeEnvironment::derive(&parent, &Occupancy::default(), ProjectRoot::new("D:\\wt\\a").unwrap(), None, Port::of(8100), &DatabaseMode::Shared, 1).unwrap();
     w.worktrees.save(&wt).unwrap();
     assert_eq!(queries.get("shop").unwrap().worktrees.len(), 1);
     w.delete_project_with(sync.clone()).execute("shop", &cli()).await.unwrap();
@@ -249,14 +250,14 @@ async fn import_and_relink_refuse_a_loopback_port_owned_by_a_worktree_environmen
     let w = World::with_basics();
     w.project("shop", "C:\\sites\\shop", false);
     let parent = w.projects.get(&ProjectId::new("shop").unwrap()).unwrap().unwrap();
-    let wt = WorktreeEnvironment::derive(&parent, &Occupancy::default(), ProjectRoot::new("D:\\wt\\a").unwrap(), None, 8100, &DatabaseMode::Shared, 1).unwrap();
+    let wt = WorktreeEnvironment::derive(&parent, &Occupancy::default(), ProjectRoot::new("D:\\wt\\a").unwrap(), None, Port::of(8100), &DatabaseMode::Shared, 1).unwrap();
     w.worktrees.save(&wt).unwrap();
     w.hosts_in_sync();
 
     // An export from another machine: `api` on 127.0.0.1:8100.
     let mut exported = w.project("api", "C:\\sites\\api", false);
     w.projects.delete(&exported.id).unwrap();
-    exported.set_addresses(vec![lampo_domain::address::SiteAddress::localhost("api").unwrap(), lampo_domain::address::SiteAddress::LoopbackPort(8100)]).unwrap();
+    exported.set_addresses(vec![lampo_domain::address::SiteAddress::localhost("api").unwrap(), lampo_domain::address::SiteAddress::LoopbackPort(Port::of(8100))]).unwrap();
     let transfer = Arc::new(FakeTransfer::default());
     *transfer.to_import.lock().unwrap() = Some(exported.clone());
     let import = w.import_project(transfer);
@@ -277,7 +278,7 @@ async fn import_and_relink_refuse_a_loopback_port_owned_by_a_worktree_environmen
 fn the_project_list_reports_unreadable_files() {
     let w = World::with_basics();
     w.project("shop", "C:\\sites\\shop", false);
-    w.unreadable_project("C:\\Lampo\\projects\\blog.toml", &[8101]);
+    w.unreadable_project("C:\\Lampo\\projects\\blog.toml", &[Port::of(8101)]);
     let list = w.project_queries().list().unwrap();
     assert_eq!(list.projects.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["shop"]);
     assert_eq!(
@@ -310,7 +311,7 @@ async fn address_suggestions_use_the_domain_defaults_and_the_allocator() {
     let w = World::with_basics();
     w.project("shop", r"C:\sites\shop", false);
     let parent = w.projects.get(&ProjectId::new("shop").unwrap()).unwrap().unwrap();
-    let wt = WorktreeEnvironment::derive(&parent, &Occupancy::default(), ProjectRoot::new(r"D:\wt\a").unwrap(), None, 8100, &DatabaseMode::Shared, 1).unwrap();
+    let wt = WorktreeEnvironment::derive(&parent, &Occupancy::default(), ProjectRoot::new(r"D:\wt\a").unwrap(), None, Port::of(8100), &DatabaseMode::Shared, 1).unwrap();
     w.worktrees.save(&wt).unwrap();
     w.ports.busy(8101, "node.exe");
     let s = SuggestAddresses::new(w.allocator.clone(), w.settings.clone()).execute("blog").await.unwrap();
@@ -590,7 +591,7 @@ async fn patch_renames_and_appends_addresses_keeping_the_primary_one() {
     assert_eq!(addresses_of(&dto), ["shop.test", "shop.localhost", "api.shop.localhost", "127.0.0.1:8100"]);
     assert_eq!(dto.url, "http://shop.test", "the first address stays primary");
     let vhost = w.web.last().unwrap().vhosts.into_iter().find(|v| v.site.to_string() == "shop").unwrap();
-    assert_eq!(vhost.loopback_port, Some(8100), "Apache regenerated");
+    assert_eq!(vhost.loopback_port, Some(Port::of(8100)), "Apache regenerated");
     assert!(vhost.server_names.iter().any(|h| h.as_str() == "api.shop.localhost"));
     assert_eq!(w.hosts.writes.load(Ordering::SeqCst), 0);
 

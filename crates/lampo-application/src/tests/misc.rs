@@ -15,6 +15,7 @@ use lampo_domain::project::{ProjectId, ProjectRoot};
 use lampo_domain::service::{ServiceId, ServiceState};
 use lampo_domain::worktree::{DatabaseMode, Occupancy, WorktreeEnvironment};
 use lampo_domain::PortError;
+use lampo_domain::tcp_port::Port;
 
 use super::{cli, gui};
 use crate::control::*;
@@ -27,7 +28,8 @@ use crate::use_cases::*;
 fn add_worktree(w: &World, root: &str, branch: &str, port: u16, mode: DatabaseMode) -> WorktreeEnvironment {
     let parent = w.projects.0.lock().unwrap().get(&ProjectId::new("shop").unwrap()).cloned().unwrap();
     let existing = w.worktrees.list_all().unwrap();
-    let env = WorktreeEnvironment::derive(&parent, &Occupancy { worktrees: &existing, ..Default::default() }, ProjectRoot::new(root).unwrap(), Some(branch.into()), port, &mode, 5).unwrap();
+    let env = WorktreeEnvironment::derive(&parent, &Occupancy { worktrees: &existing, ..Default::default() }, ProjectRoot::new(root).unwrap(), Some(branch.into()), Port::of(port), &mode, 5)
+        .unwrap();
     w.worktrees.save(&env).unwrap();
     w.fs.add(root);
     env
@@ -540,7 +542,7 @@ async fn control_dispatcher_routes_requests_to_use_cases() {
     let ports = SettingsPatchRequest { service_ports: [("redis".to_string(), 6380)].into(), ..Default::default() };
     let patched = ok_payload(call(&d, ControlRequest::SettingsPatch(ports), cli()).await.0);
     assert_eq!(patched["changes"][0]["setting"], "redis.port");
-    assert_eq!(w.settings.load().unwrap().service_port(&redis_id()), Some(6380));
+    assert_eq!(w.settings.load().unwrap().service_port(&redis_id()), Some(Port::of(6380)));
 
     ok_payload(call(&d, ControlRequest::Quit, cli()).await.0);
     assert!(quit.load(Ordering::SeqCst));

@@ -12,7 +12,7 @@ use lampo_domain::project::{ApacheDirectives, ProjectEnvironment, PublicDir, Tls
 use lampo_domain::service::{ServiceId, ServiceKind};
 use lampo_domain::settings::{MailConnection, ServiceInstanceSettings, Settings};
 use lampo_domain::version::{PackageVersion, VersionSeries};
-use lampo_domain::tcp_port::PortRange;
+use lampo_domain::tcp_port::{Port, PortRange};
 use lampo_domain::worktree::DatabaseMode;
 use lampo_domain::DomainError;
 
@@ -53,7 +53,7 @@ pub fn address_to_dto(a: &SiteAddress) -> SiteAddressDto {
     match a {
         SiteAddress::Hostname(h) => SiteAddressDto::Hostname { host: h.to_string() },
         SiteAddress::Localhost(h) => SiteAddressDto::Localhost { host: h.to_string() },
-        SiteAddress::LoopbackPort(p) => SiteAddressDto::LoopbackPort { port: *p },
+        SiteAddress::LoopbackPort(p) => SiteAddressDto::LoopbackPort { port: p.get() },
     }
 }
 
@@ -64,7 +64,7 @@ pub fn address_from_dto(dto: &SiteAddressDto) -> Result<SiteAddress, DomainError
             let label = host.trim().trim_end_matches('.').strip_suffix(".localhost").unwrap_or(host.trim());
             SiteAddress::localhost(label)
         }
-        SiteAddressDto::LoopbackPort { port } => SiteAddress::loopback_port(*port),
+        SiteAddressDto::LoopbackPort { port } => SiteAddress::loopback_port(Port::try_from(*port)?),
     }
 }
 
@@ -76,11 +76,18 @@ pub fn tls_to_dto(t: TlsMode) -> TlsModeDto {
 }
 
 pub fn connection_to_dto(c: &DatabaseConnection) -> DatabaseConnectionDto {
-    DatabaseConnectionDto { mysql_version: c.series.to_string(), host: c.host.clone(), port: c.port, user: c.user.clone(), password: c.password.clone(), database: c.database.to_string() }
+    DatabaseConnectionDto {
+        mysql_version: c.series.to_string(),
+        host: c.host.clone(),
+        port: c.port.get(),
+        user: c.user.clone(),
+        password: c.password.clone(),
+        database: c.database.to_string(),
+    }
 }
 
 pub fn mail_to_dto(m: &MailConnection) -> MailConnectionDto {
-    MailConnectionDto { host: m.host.clone(), smtp_port: m.smtp_port, web_url: m.web_url() }
+    MailConnectionDto { host: m.host.clone(), smtp_port: m.smtp_port.get(), web_url: m.web_url() }
 }
 
 pub fn package_id_to_dto(id: &PackageId) -> PackageIdDto {
@@ -103,11 +110,17 @@ pub fn settings_to_dto(s: &Settings, catalog: &ServiceCatalog) -> SettingsDto {
     SettingsDto {
         default_php_version: s.default_php.map(|p| p.to_string()),
         tld: s.tld.to_string(),
-        apache_port: s.apache_port,
+        apache_port: s.apache_port.get(),
         services: s
             .services
             .iter()
-            .map(|i| ServiceInstanceDto { service: i.service.to_string(), label: catalog.label(&i.service), port: i.port, always_on: i.always_on, ui_port: catalog.ui_port(&i.service, s) })
+            .map(|i| ServiceInstanceDto {
+                service: i.service.to_string(),
+                label: catalog.label(&i.service),
+                port: i.port.get(),
+                always_on: i.always_on,
+                ui_port: catalog.ui_port(&i.service, s).map(Port::get),
+            })
             .collect(),
         loopback_port_range: PortRangeDto { start: s.loopback_ports.start().get(), end: s.loopback_ports.end().get() },
         close_to_tray: s.close_to_tray,
@@ -121,7 +134,7 @@ pub fn settings_from_dto(dto: &SettingsDto, current: &Settings) -> Result<Settin
     let s = Settings {
         default_php: dto.default_php_version.as_deref().map(PhpMinor::parse).transpose()?,
         tld: Tld::new(&dto.tld)?,
-        apache_port: dto.apache_port,
+        apache_port: Port::try_from(dto.apache_port)?,
         services: service_instances_from_dto(&dto.services, &current.services)?,
         loopback_ports: PortRange::new(dto.loopback_port_range.start, dto.loopback_port_range.end)?,
         close_to_tray: dto.close_to_tray,
@@ -149,7 +162,9 @@ fn service_instances_from_dto(dtos: &[ServiceInstanceDto], current: &[ServiceIns
     current
         .iter()
         .map(|c| match edited.iter().find(|(id, _)| id == &c.service) {
-            Some((_, dto)) => Ok(ServiceInstanceSettings { service: c.service.clone(), port: dto.port, always_on: dto.always_on, ui_port: dto.ui_port }),
+            Some((_, dto)) => {
+                Ok(ServiceInstanceSettings { service: c.service.clone(), port: Port::try_from(dto.port)?, always_on: dto.always_on, ui_port: dto.ui_port.map(Port::try_from).transpose()? })
+            }
             None => Err(DomainError::InvalidSettings(format!("the service instance {} is missing: configured instances cannot be removed here", c.service))),
         })
         .collect()
