@@ -3,6 +3,7 @@
  * added later by adding another file with the same shape.
  */
 import type { CheckStatus, ErrorCode, ProgressStage, ServiceState, StepOutcome } from '../api/types.js';
+import type { SettingsSectionId, SettingsSectionKind } from '../settings/sections.js';
 
 export const it = {
 	app: {
@@ -452,6 +453,21 @@ export const it = {
 	settings: {
 		title: 'Impostazioni',
 		saved: 'Impostazioni salvate.',
+		nav: 'Sezioni delle impostazioni',
+		sections: {
+			general: 'Generale',
+			ports: 'Porte',
+			updates: 'Aggiornamenti',
+			tools: 'CLI e integrazioni',
+			presets: 'Preset',
+			doctor: 'Diagnostica',
+			about: 'Informazioni'
+		} satisfies Record<SettingsSectionId, string>,
+		/** How the changes of a section take effect: the side index groups the sections by it. */
+		kinds: {
+			saved: { title: 'Da salvare', hint: 'Le modifiche di questa sezione si applicano solo quando premi Salva.' },
+			immediate: { title: 'Effetto immediato', hint: 'Niente da salvare: ogni azione di questa sezione ha effetto subito.' }
+		} satisfies Record<SettingsSectionKind, { title: string; hint: string }>,
 		defaults: 'Predefiniti',
 		defaultPhp: 'Versione di PHP predefinita',
 		defaultPhpHelp: 'Usata fuori dai progetti (shim php).',
