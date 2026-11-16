@@ -102,6 +102,19 @@ async fn git_missing_is_a_package_missing_error() {
     assert!(s.runner.calls.lock().unwrap().is_empty());
 }
 
+#[test]
+fn parent_dir_exists_only_for_an_existing_absolute_folder() {
+    let s = Setup::new(World::with_basics());
+    s.files.file("C:\\sites\\readme.txt", "");
+    let scaffold = s.use_case();
+
+    assert!(scaffold.parent_dir_exists("C:\\sites"));
+    assert!(scaffold.parent_dir_exists("C:\\sites\\"));
+    for missing in ["D:\\nowhere", "C:\\sites\\readme.txt", "sites", "", "   "] {
+        assert!(!scaffold.parent_dir_exists(missing), "{missing:?}");
+    }
+}
+
 #[tokio::test]
 async fn destination_must_not_exist_and_parent_must() {
     let s = Setup::new(World::with_basics());

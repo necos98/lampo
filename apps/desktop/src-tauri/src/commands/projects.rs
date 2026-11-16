@@ -103,3 +103,11 @@ pub fn scaffold_project(state: State<'_, AppState>, request: ScaffoldProjectRequ
     let operation = TaskOperationDto::ScaffoldProject { request: request.clone() };
     super::tasks::spawn_task(&state, operation, move |progress, cancel| async move { scaffold.execute(request, progress.as_ref(), &cancel).await })
 }
+
+/// Whether `parent_dir` can host a new project's setup (an existing absolute folder): the form
+/// offers a remembered parent folder again only while it does.
+#[tauri::command]
+pub async fn scaffold_parent_exists(state: State<'_, AppState>, parent_dir: String) -> AppResult<bool> {
+    let scaffold = state.scaffold_project.clone();
+    run_blocking(move || Ok(scaffold.parent_dir_exists(&parent_dir))).await
+}

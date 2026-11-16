@@ -11,6 +11,7 @@ import {
 } from '../api/index.js';
 import type { Backend } from '../backend/ports.js';
 import { effectiveAddressing } from '../projects/addressing.js';
+import { DEFAULT_SCAFFOLD_CHOICES, loadScaffoldChoices, rememberScaffoldChoices, type ScaffoldChoices } from '../projects/scaffoldChoices.js';
 import type { ProjectsStore } from './projects.svelte.js';
 import type { CommandRunner } from './runner.js';
 import { scaffoldViewOf, type ScaffoldPhase, type ScaffoldSession } from './scaffoldSession.js';
@@ -81,8 +82,8 @@ export class CreateProjectFlow {
 	repoUrl = $state('');
 	branch = $state('');
 	laravelPhp = $state<string | null>(null);
-	starterKit = $state<StarterKit>('none');
-	testing = $state<TestingFramework>('pest');
+	starterKit = $state<StarterKit>(DEFAULT_SCAFFOLD_CHOICES.starterKit);
+	testing = $state<TestingFramework>(DEFAULT_SCAFFOLD_CHOICES.testing);
 	initGit = $state(false);
 	npm = $state(false);
 
@@ -229,16 +230,46 @@ export class CreateProjectFlow {
 	/**
 	 * Call when the screen is shown: takes back the setup started in an earlier visit (running,
 	 * or finished and not registered yet) with its form values, log and the step it reached.
+	 * Otherwise the form starts from the choices of the last successful creation.
 	 */
 	resume(): void {
 		this.#detach ??= this.#session.attach();
 		const request = this.#session.request;
 		const task = request ? this.#tasks.forKey(scaffoldTaskKey(request)) : null;
-		if (!request || !task) return;
+		if (!request || !task) {
+			void this.#applyRemembered(loadScaffoldChoices());
+			return;
+		}
 		this.#restore(request);
 		this.taskId = task.taskId;
 		this.#listen();
 		this.#apply(task.outcome);
+	}
+
+	/**
+	 * Preselects the remembered choices. The parent folder only while it still exists, and only
+	 * if the user has not typed one meanwhile; otherwise the form keeps its empty default.
+	 */
+	async #applyRemembered(choices: ScaffoldChoices): Promise<void> {
+		this.starterKit = choices.starterKit;
+		this.testing = choices.testing;
+		if (!choices.parentDir || !(await this.#parentDirExists(choices.parentDir))) return;
+		if (!this.parentDir.trim()) this.parentDir = choices.parentDir;
+	}
+
+	/** A failed check counts as a missing folder: a remembered choice must never cost an error. */
+	async #parentDirExists(parentDir: string): Promise<boolean> {
+		try {
+			return await this.#backend.commands.scaffoldParentExists(parentDir);
+		} catch {
+			return false;
+		}
+	}
+
+	/** Remembers the choices of a successful creation; a git clone has no starter kit nor testing. */
+	#rememberChoices(): void {
+		const parentDir = this.parentDir.trim();
+		rememberScaffoldChoices(this.source === 'laravel' ? { parentDir, starterKit: this.starterKit, testing: this.testing } : { parentDir });
 	}
 
 	/** Puts the values of a started setup back in the form. */
@@ -338,7 +369,10 @@ export class CreateProjectFlow {
 		this.creating = false;
 		if (!result.ok) return null;
 		// The scaffolded folder is now a project: a later visit starts from a clean form.
-		if (this.source !== 'existing') this.#session.registered();
+		if (this.source !== 'existing') {
+			this.#session.registered();
+			this.#rememberChoices();
+		}
 		return result.value;
 	}
 }

@@ -70,10 +70,7 @@ impl ScaffoldProject {
 
     pub async fn execute(&self, request: ScaffoldProjectRequest, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<ScaffoldProjectResultDto> {
         let (source, name) = parse(&request)?;
-        let parent = ProjectRoot::new(&request.parent_dir)?;
-        if !matches!(self.deps.files.path_state(parent.as_path()), PathState::EmptyDir | PathState::NonEmptyDir) {
-            return Err(validation(format!("the folder `{parent}` does not exist")));
-        }
+        let parent = self.existing_parent(&request.parent_dir)?;
         let destination = parent.as_path().join(name.as_str());
         let before = self.deps.files.path_state(&destination);
         scaffold::check_destination(&destination, before, matches!(source, Source::Git { .. }))?;
@@ -94,6 +91,21 @@ impl ScaffoldProject {
                 Err(e)
             }
         }
+    }
+
+    /// Whether `parent_dir` is an existing absolute folder a setup can create its project in:
+    /// what the GUI checks before offering a remembered parent folder again.
+    pub fn parent_dir_exists(&self, parent_dir: &str) -> bool {
+        self.existing_parent(parent_dir).is_ok()
+    }
+
+    /// `parent_dir` as an existing absolute folder, or `Validation`.
+    fn existing_parent(&self, parent_dir: &str) -> AppResult<ProjectRoot> {
+        let parent = ProjectRoot::new(parent_dir)?;
+        if !matches!(self.deps.files.path_state(parent.as_path()), PathState::EmptyDir | PathState::NonEmptyDir) {
+            return Err(validation(format!("the folder `{parent}` does not exist")));
+        }
+        Ok(parent)
     }
 
     fn git_exe(&self) -> AppResult<PathBuf> {

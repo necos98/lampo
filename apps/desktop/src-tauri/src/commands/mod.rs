@@ -36,6 +36,7 @@ macro_rules! lampo_command_handler {
             $crate::commands::projects::suggest_addresses,
             $crate::commands::projects::create_project,
             $crate::commands::projects::scaffold_project,
+            $crate::commands::projects::scaffold_parent_exists,
             $crate::commands::projects::update_project,
             $crate::commands::projects::delete_project,
             $crate::commands::projects::set_project_active,

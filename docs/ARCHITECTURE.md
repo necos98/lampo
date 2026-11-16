@@ -195,7 +195,9 @@ touched. It runs as a background task (`scaffold_project`) whose output lines st
 messages; cancelling kills the whole process tree (one nested Job Object per run) and a folder
 created by the run is removed on failure or cancel. Then detection and `create_project` follow
 as for an existing folder. Rules (folder names, URLs, branches, command lines) are pure functions
-in `lampo_domain::scaffold`.
+in `lampo_domain::scaffold`. The GUI form remembers (in `localStorage`) the parent folder, starter
+kit and testing framework of the last successful creation; the folder is offered again only while
+`scaffold_parent_exists` confirms it (the addressing mode always follows `default_addressing`).
 
 ```powershell
 lampo project new --git https://github.com/acme/shop.git --in D:\sites [--branch dev] [--folder shop]

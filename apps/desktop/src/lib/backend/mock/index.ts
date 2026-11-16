@@ -19,6 +19,11 @@ function fail(code: AppError['code'], message: string, details?: unknown): never
 	throw { code, message, details } satisfies AppError;
 }
 
+/** An absolute Windows folder; one whose path contains "missing" simulates a deleted folder. */
+function folderExists(path: string): boolean {
+	return /^[a-z]:\\/i.test(path.trim()) && !/missing/i.test(path);
+}
+
 function urlsFor(addresses: T.SiteAddress[]): string[] {
 	return addresses.map((a) => (a.kind === 'loopback-port' ? `http://127.0.0.1:${a.port}` : `http://${a.host}`));
 }
@@ -300,9 +305,14 @@ export function createMockBackend({ fresh }: Options): Backend {
 			}
 			return result;
 		},
+		scaffoldParentExists: async (parentDir) => {
+			await sleep(40);
+			return folderExists(parentDir);
+		},
 		scaffoldProject: async (r) => {
 			await sleep(80);
 			if (!r.parentDir.trim()) fail('validation', 'invalid new project: the parent folder is required');
+			if (!folderExists(r.parentDir)) fail('validation', `the folder \`${r.parentDir.trim()}\` does not exist`);
 			const source = r.source;
 			const folderName = r.folderName?.trim() || (source.kind === 'git-clone' ? source.url.replace(/[\\/]+$/, '').split(/[\\/:]/).pop()?.replace(/\.git$/, '') : '') || '';
 			if (!folderName) fail('validation', 'invalid new project: the folder name is empty');

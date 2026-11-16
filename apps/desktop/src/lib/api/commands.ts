@@ -21,6 +21,7 @@ export const COMMANDS = {
 	suggestAddresses: 'suggest_addresses',
 	createProject: 'create_project',
 	scaffoldProject: 'scaffold_project',
+	scaffoldParentExists: 'scaffold_parent_exists',
 	updateProject: 'update_project',
 	deleteProject: 'delete_project',
 	setProjectActive: 'set_project_active',
@@ -92,6 +93,8 @@ export const suggestAddresses = (projectId: string) => call<T.AddressSuggestions
 export const createProject = (request: T.CreateProjectRequest) => call<T.CreateProjectResult>(COMMANDS.createProject, { request });
 /** Background task: clone / Laravel Installer into `<parentDir>\<folderName>`; output lines arrive as progress messages. */
 export const scaffoldProject = (request: T.ScaffoldProjectRequest) => call<T.TaskStarted>(COMMANDS.scaffoldProject, { request });
+/** Whether `parentDir` is an existing absolute folder a setup can create its project in. */
+export const scaffoldParentExists = (parentDir: string) => call<boolean>(COMMANDS.scaffoldParentExists, { parentDir });
 export const updateProject = (request: T.UpdateProjectRequest) => call<T.Project>(COMMANDS.updateProject, { request });
 export const deleteProject = (projectId: string) => call<T.DeleteProjectResult>(COMMANDS.deleteProject, { projectId });
 export const setProjectActive = (request: T.SetProjectActiveRequest) => call<T.Project>(COMMANDS.setProjectActive, { request });
