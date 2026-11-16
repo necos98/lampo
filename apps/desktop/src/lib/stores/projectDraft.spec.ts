@@ -45,7 +45,8 @@ describe('ProjectDraft dirty state', () => {
 		['a php setting', (d: ProjectDraft) => (d.environment.phpVersion = '7.4')],
 		['an address', (d: ProjectDraft) => d.addresses.setHost(d.addresses.rows[0].id, 'other.test')],
 		['an env var', (d: ProjectDraft) => d.envVars.setValue(d.envVars.rows[0].id, 'changed')],
-		['the database name', (d: ProjectDraft) => (d.databaseName = 'other_db')]
+		['the database name', (d: ProjectDraft) => (d.databaseName = 'other_db')],
+		['the MySQL credentials', (d: ProjectDraft) => (d.mysqlCredentials = 'root')]
 	])('becomes dirty when %s changes, and clean again when it is put back', (_label, edit) => {
 		const draft = new ProjectDraft(shop());
 		const before = JSON.stringify(draft.toRequest());
@@ -143,6 +144,17 @@ describe('ProjectDraft validity and request', () => {
 		expect(request.name).toBe('Shop 2');
 		expect(request.databaseName).toBe('shop_two');
 		expect(request.environment.envVars).toEqual(draft.envVars.values);
+	});
+
+	it('toRequest() sends the MySQL credentials, so the GUI switches a project to its own account', () => {
+		const legacy = shop();
+		legacy.mysqlCredentials = 'root';
+		const draft = new ProjectDraft(legacy);
+		expect(draft.toRequest().mysqlCredentials).toBe('root');
+
+		draft.mysqlCredentials = 'project';
+		expect(draft.toRequest().mysqlCredentials).toBe('project');
+		expect(draft.isStale(legacy)).toBe(false);
 	});
 
 	it('toRequest() leaves the database name out when MySQL is not used', () => {
