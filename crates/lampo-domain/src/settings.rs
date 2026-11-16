@@ -72,6 +72,9 @@ pub struct Settings {
     pub loopback_ports: PortRange,
     /// Closing the window hides to tray (and destroys the webview) instead of quitting.
     pub close_to_tray: bool,
+    /// A running service that exits unexpectedly is started again (see
+    /// [`crate::auto_restart::AutoRestartPolicy`]). Absent in older files: on.
+    pub auto_restart_services: bool,
     pub first_run_completed: bool,
     /// Addresses a new project gets when none are chosen (CLI `project create` without
     /// `--addressing`).
@@ -96,6 +99,7 @@ impl Default for Settings {
             ],
             loopback_ports: PortRange::default(),
             close_to_tray: true,
+            auto_restart_services: true,
             first_run_completed: false,
             default_addressing: Addressing::default(),
         }
@@ -113,6 +117,7 @@ struct SettingsFile {
     services: Option<Vec<ServiceInstanceSettings>>,
     loopback_ports: PortRange,
     close_to_tray: bool,
+    auto_restart_services: bool,
     first_run_completed: bool,
     default_addressing: Addressing,
     mysql_instances: Option<Vec<LegacyMysqlInstance>>,
@@ -136,6 +141,7 @@ impl Default for SettingsFile {
             services: None,
             loopback_ports: d.loopback_ports,
             close_to_tray: d.close_to_tray,
+            auto_restart_services: d.auto_restart_services,
             first_run_completed: d.first_run_completed,
             default_addressing: d.default_addressing,
             mysql_instances: None,
@@ -171,6 +177,7 @@ impl TryFrom<SettingsFile> for Settings {
             services,
             loopback_ports: f.loopback_ports,
             close_to_tray: f.close_to_tray,
+            auto_restart_services: f.auto_restart_services,
             first_run_completed: f.first_run_completed,
             default_addressing: f.default_addressing,
         };
@@ -328,6 +335,16 @@ mod tests {
         assert_eq!(json["default_addressing"], "hosts-only");
         assert_eq!(serde_json::from_value::<Settings>(json).unwrap(), hosts_only);
         assert!(serde_json::from_str::<Settings>(r#"{"default_addressing": "everywhere"}"#).is_err());
+    }
+
+    #[test]
+    fn services_restart_automatically_unless_the_file_turns_it_off() {
+        let before: Settings = serde_json::from_str(r#"{"apache_port": 80}"#).unwrap();
+        assert!(before.auto_restart_services, "files written before the setting get it on");
+        let off: Settings = serde_json::from_str(r#"{"auto_restart_services": false}"#).unwrap();
+        assert!(!off.auto_restart_services);
+        let json = serde_json::to_value(&off).unwrap();
+        assert_eq!(serde_json::from_value::<Settings>(json).unwrap(), off);
     }
 
     #[test]

@@ -31,7 +31,8 @@ export class MockEmitter {
 			onProjectsChanged: sub<T.ProjectsChangedPayload>('projects-changed'),
 			onWorktreesChanged: sub<T.WorktreesChangedPayload>('worktrees-changed'),
 			onSettingsChanged: (h: () => void) => this.subscribe<void>('settings-changed', h),
-			onPackagesChanged: (h: () => void) => this.subscribe<void>('packages-changed', h)
+			onPackagesChanged: (h: () => void) => this.subscribe<void>('packages-changed', h),
+			onServiceAutoRestart: sub<T.ServiceAutoRestartPayload>('service-auto-restart')
 		};
 	}
 }

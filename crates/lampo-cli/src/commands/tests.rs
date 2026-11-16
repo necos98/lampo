@@ -1194,3 +1194,26 @@ fn settings_set_needs_a_change_and_valid_ports() {
     assert!(crate::cli::Cli::try_parse_from(["lampo", "settings", "set", "--redis-port", "70000"]).is_err());
     assert!(crate::cli::Cli::try_parse_from(["lampo", "settings", "set", "--default-php", "8.4"]).is_ok());
 }
+
+#[tokio::test]
+async fn settings_set_switches_the_automatic_restart() {
+    for (value, expected) in [("off", false), ("on", true)] {
+        let fake = Fake::new();
+        fake.reply(Ok(settings_patch_json()));
+        let (code, out, _) = run_cli(&fake, &["settings", "set", "--auto-restart", value]).await;
+        assert_eq!(code, 0, "{out}");
+        let r = sent_settings_patch(&fake);
+        assert_eq!(r, SettingsPatchRequest { auto_restart_services: Some(expected), ..Default::default() }, "only the switch is sent");
+    }
+    use clap::Parser;
+    assert!(crate::cli::Cli::try_parse_from(["lampo", "settings", "set", "--auto-restart", "sometimes"]).is_err());
+}
+
+#[tokio::test]
+async fn settings_get_shows_the_automatic_restart() {
+    let fake = Fake::new();
+    fake.settings.lock().unwrap()["autoRestartServices"] = json!(false);
+    let (code, out, _) = run_cli(&fake, &["settings"]).await;
+    assert_eq!(code, 0);
+    assert!(out.lines().any(|l| l.starts_with("auto-restart") && l.trim_end().ends_with("no")), "{out}");
+}

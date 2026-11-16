@@ -43,6 +43,8 @@ pub struct SettingsDto {
     /// Dedicated loopback listeners (worktree environments, loopback-port addresses).
     pub loopback_port_range: PortRangeDto,
     pub close_to_tray: bool,
+    /// A running service that exits unexpectedly is started again (up to 3 attempts, 2/4/8 s apart).
+    pub auto_restart_services: bool,
     /// Read-only from the GUI's point of view (set by the first-run wizard).
     pub first_run_completed: bool,
     /// Addresses new projects get when the creator chooses none.
@@ -84,6 +86,8 @@ pub struct SettingsPatchRequest {
     pub loopback_port_range: Option<PortRangeDto>,
     /// Addresses new projects get when the creator chooses none.
     pub default_addressing: Option<AddressingDto>,
+    /// Whether services that exit unexpectedly are started again.
+    pub auto_restart_services: Option<bool>,
 }
 
 impl SettingsPatchRequest {
@@ -93,7 +97,7 @@ impl SettingsPatchRequest {
 }
 
 /// One changed setting: `setting` is `apache.port`, `<service>.port` (`mysql-8.4.port`), `<service>.ui-port` (`mailpit.ui-port`),
-/// `default-php`, `loopback-port-range` or `default-addressing`; `from`/`to` are display values.
+/// `default-php`, `loopback-port-range`, `default-addressing` or `auto-restart`; `from`/`to` are display values.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingChangeDto {

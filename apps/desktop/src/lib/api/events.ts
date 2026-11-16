@@ -14,7 +14,8 @@ export const EVENTS = {
 	projectsChanged: 'lampo://projects-changed',
 	worktreesChanged: 'lampo://worktrees-changed',
 	settingsChanged: 'lampo://settings-changed',
-	packagesChanged: 'lampo://packages-changed'
+	packagesChanged: 'lampo://packages-changed',
+	serviceAutoRestart: 'lampo://service-auto-restart'
 } as const;
 
 export type EventName = (typeof EVENTS)[keyof typeof EVENTS];
@@ -29,6 +30,7 @@ export interface EventPayloads {
 	'lampo://worktrees-changed': T.WorktreesChangedPayload;
 	'lampo://settings-changed': null;
 	'lampo://packages-changed': null;
+	'lampo://service-auto-restart': T.ServiceAutoRestartPayload;
 }
 
 export function on<E extends EventName>(event: E, handler: (payload: EventPayloads[E]) => void): Promise<UnlistenFn> {
@@ -43,3 +45,4 @@ export const onProjectsChanged = (h: (p: T.ProjectsChangedPayload) => void) => o
 export const onWorktreesChanged = (h: (p: T.WorktreesChangedPayload) => void) => on(EVENTS.worktreesChanged, h);
 export const onSettingsChanged = (h: () => void) => on(EVENTS.settingsChanged, () => h());
 export const onPackagesChanged = (h: () => void) => on(EVENTS.packagesChanged, () => h());
+export const onServiceAutoRestart = (h: (p: T.ServiceAutoRestartPayload) => void) => on(EVENTS.serviceAutoRestart, h);

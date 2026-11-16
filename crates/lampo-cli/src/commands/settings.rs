@@ -67,6 +67,7 @@ fn patch_request(args: SettingsSetArgs) -> AppResult<SettingsPatchRequest> {
         default_php_version: args.default_php,
         loopback_port_range,
         default_addressing: args.default_addressing.map(addressing::to_dto),
+        auto_restart_services: args.auto_restart,
     })
 }
 

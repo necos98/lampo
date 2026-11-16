@@ -19,6 +19,7 @@ export type EventBus = Pick<
 	| 'onWorktreesChanged'
 	| 'onSettingsChanged'
 	| 'onPackagesChanged'
+	| 'onServiceAutoRestart'
 >;
 
 export interface FileFilter {

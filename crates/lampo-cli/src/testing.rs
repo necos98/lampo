@@ -388,7 +388,7 @@ pub fn settings_json() -> Value {
             {"service": "mysql-5.7", "label": "MySQL 5.7", "port": 3307, "alwaysOn": false},
             {"service": "redis", "label": "Redis", "port": 6379, "alwaysOn": false}
         ],
-        "loopbackPortRange": {"start": 8100, "end": 8199}, "closeToTray": true, "firstRunCompleted": true,
+        "loopbackPortRange": {"start": 8100, "end": 8199}, "closeToTray": true, "autoRestartServices": true, "firstRunCompleted": true,
         "defaultAddressing": "no-elevation"
     })
 }

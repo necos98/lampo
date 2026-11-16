@@ -282,6 +282,15 @@ a `conflict`; the postponed change is applied once the last lease is released. A
 returns its first failure, with every failure in `details.errors` (`[{code, message}]`); the
 CLI adds the `--allow-elevation` hint when one of them is `elevation-required`.
 
+A running service that exits without being asked to (not a stop, not a start that fails) is a
+crash: its runner publishes `ServiceCrashed`, and with the `auto_restart_services` setting on
+(the default; `lampo settings set --auto-restart on|off`, the GUI's settings page)
+`ServiceAutoRestart` starts it again through `ApplyEnvironment` after 2, 4 and 8 seconds, at most 3
+attempts in a row, the count starting over once the service ran a minute
+(`lampo_domain::auto_restart`). A service stopped since its crash (by the user or a sync: its
+launch is no longer recorded) is left stopped, and nothing restarts while the app shuts down.
+Every step is a `lampo://service-auto-restart` event, which the GUI shows as a notification.
+
 `lampo` never prompts and never triggers UAC unless `--allow-elevation` is given.
 
 ### `lampo` exit codes (stable)

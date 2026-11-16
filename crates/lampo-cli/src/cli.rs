@@ -761,7 +761,8 @@ pub enum ShimsCommand {
 pub enum SettingsCommand {
     /// Show the settings (read-only, works without the app). `--json`: the SettingsDto.
     Get,
-    /// Change ports, the default PHP, the loopback port range or the default addressing
+    /// Change ports, the default PHP, the loopback port range, the default addressing or the
+    /// automatic restart of crashed services
     ///
     /// Only what is named changes, in one atomic edit of the stored settings inside the app (no
     /// lost update with the GUI). Ports are checked first: 1-65535, not used by another Lampo
@@ -780,12 +781,13 @@ pub enum SettingsCommand {
     ///   lampo settings set --default-php 8.4 --json
     ///   lampo settings set --loopback-range 8100-8299
     ///   lampo settings set --default-addressing hosts-only
+    ///   lampo settings set --auto-restart off
     #[command(verbatim_doc_comment)]
     Set(SettingsSetArgs),
 }
 
 #[derive(Debug, Args)]
-#[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args(["apache_port", "mysql_port", "redis_port", "port", "ui_port", "default_php", "loopback_range", "default_addressing"])))]
+#[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args(["apache_port", "mysql_port", "redis_port", "port", "ui_port", "default_php", "loopback_range", "default_addressing", "auto_restart"])))]
 pub struct SettingsSetArgs {
     /// Apache's shared port (host-name URLs use it; loopback-port URLs keep their own port).
     #[arg(long, value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
@@ -816,6 +818,10 @@ pub struct SettingsSetArgs {
     /// passed. Existing projects keep theirs.
     #[arg(long, value_enum, value_name = "MODE")]
     pub default_addressing: Option<AddressingArg>,
+    /// Whether a running service that exits unexpectedly is started again (`on`/`off`): up to 3
+    /// attempts, 2, 4 and 8 seconds apart.
+    #[arg(long, value_name = "ON|OFF", value_parser = clap::builder::BoolishValueParser::new())]
+    pub auto_restart: Option<bool>,
 }
 
 #[cfg(test)]

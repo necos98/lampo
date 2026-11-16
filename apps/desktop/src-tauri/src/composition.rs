@@ -23,6 +23,10 @@ pub struct Built {
     pub control_handler: Arc<dyn ControlRequestHandler>,
     /// Rotates the PHP error logs while the app runs (spawned by the app setup).
     pub log_rotation: Arc<PeriodicLogRotation>,
+    /// Restarts the services that crash (spawned by the app setup with `crashes`).
+    pub auto_restart: Arc<ServiceAutoRestart>,
+    /// The crashes the runners report, for `auto_restart`.
+    pub crashes: CrashReceiver,
 }
 
 /// Folder of the running executable. The helper executables (`lampo.exe`, `lampo-shim.exe`,
@@ -38,7 +42,9 @@ fn exe_dir() -> PathBuf {
 pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let paths = store::paths::resolve_lampo_paths()?;
     let isolated_home = store::paths::home_override();
-    let events: Arc<dyn EventPublisher> = Arc::new(TauriEventPublisher::new(handle.clone()));
+    // Every event goes to the webview; the crashes of running services also to the automatic restart.
+    let (crash_relay, crashes) = CrashRelay::new(Arc::new(TauriEventPublisher::new(handle.clone())));
+    let events: Arc<dyn EventPublisher> = Arc::new(crash_relay);
     let tasks = Arc::new(TaskRegistry::new());
 
     // --- store ---
@@ -209,7 +215,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         projects: projects.clone(),
         worktrees: worktrees.clone(),
         git,
-        clock,
+        clock: clock.clone(),
         allocator: allocator.clone(),
         databases: worktree_databases.clone(),
         queries: worktree_queries.clone(),
@@ -257,6 +263,14 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         gate: shutdown.gate(),
     }));
 
+    let auto_restart = Arc::new(ServiceAutoRestart::new(ServiceAutoRestartDeps {
+        recovery: environment.clone(),
+        settings: settings.clone(),
+        events: events.clone(),
+        timer: Arc::new(services::TokioTimer),
+        clock,
+        gate: shutdown.gate(),
+    }));
     let log_rotation = Arc::new(PeriodicLogRotation::new(Arc::new(services::SizeLogRotator), Arc::new(services::TokioTimer), projects.clone(), worktrees.clone(), paths.clone()));
     let state = AppState {
         events: events.clone(),
@@ -335,7 +349,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         shutdown,
     };
 
-    Ok(Built { state, control_server, control_handler, log_rotation })
+    Ok(Built { state, control_server, control_handler, log_rotation, auto_restart, crashes })
 }
 
 /// Last-resort clean shutdown of the MySQL servers this app started, waiting up to `timeout`

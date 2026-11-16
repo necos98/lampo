@@ -142,6 +142,7 @@ pub fn settings_to_dto(s: &Settings, catalog: &ServiceCatalog) -> SettingsDto {
             .collect(),
         loopback_port_range: PortRangeDto { start: s.loopback_ports.start().get(), end: s.loopback_ports.end().get() },
         close_to_tray: s.close_to_tray,
+        auto_restart_services: s.auto_restart_services,
         first_run_completed: s.first_run_completed,
         default_addressing: addressing_to_dto(s.default_addressing),
     }
@@ -157,6 +158,7 @@ pub fn settings_from_dto(dto: &SettingsDto, current: &Settings) -> Result<Settin
         services: service_instances_from_dto(&dto.services, &current.services)?,
         loopback_ports: PortRange::new(dto.loopback_port_range.start, dto.loopback_port_range.end)?,
         close_to_tray: dto.close_to_tray,
+        auto_restart_services: dto.auto_restart_services,
         first_run_completed: current.first_run_completed,
         default_addressing: addressing_from_dto(dto.default_addressing),
     };

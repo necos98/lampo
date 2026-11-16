@@ -32,6 +32,8 @@ use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::SyncReportDto;
 use crate::error::{AppError, AppResult, ErrorCode};
 
+mod revival;
+
 /// "Make the machine match the config." Called after every mutation by the use cases that
 /// change projects, worktrees, settings or packages (dependency inversion: they do not know
 /// [`ApplyEnvironment`]).

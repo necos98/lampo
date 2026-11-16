@@ -7,6 +7,7 @@ import { goto } from '$app/navigation';
 import { backend } from '../backend/gateway.js';
 import { messages as m } from '../messages/index.js';
 import { notifier } from '../services/notifier.js';
+import { AutoRestartNotices } from './autoRestartNotices.js';
 import { DiagnosticsStore } from './diagnostics.svelte.js';
 import { ElevationStore } from './elevation.svelte.js';
 import { FirstRunStore } from './firstRun.svelte.js';
@@ -46,6 +47,13 @@ export const integrations = new IntegrationsStore(backend, runner);
 export const firstRun = new FirstRunStore(backend, runner, tasks);
 export const logSources = new LogSourcesStore(backend);
 export const updater = new UpdaterStore(backend);
+/** Each step of the automatic restart of a crashed service, announced from anywhere. */
+const autoRestartNotices = new AutoRestartNotices(
+	backend.events,
+	notifier,
+	m.services.autoRestart,
+	(service) => services.list.data?.find((s) => s.service === service)?.label ?? service
+);
 /** A new-project setup survives leaving the create screen; its end is announced from anywhere. */
 const scaffoldSession = new ScaffoldSession(tasks, () =>
 	notifier.success(m.create.readyElsewhere, { label: m.create.register, run: () => void goto(CREATE_PROJECT_ROUTE) })
@@ -67,7 +75,7 @@ interface Startable {
  * Returns a disposer that removes all listeners.
  */
 export async function startStores(): Promise<() => void> {
-	const startables: Startable[] = [elevation, tasks, projects, services, packages, worktrees, settings, firstRun, scaffoldSession];
+	const startables: Startable[] = [elevation, tasks, projects, services, packages, worktrees, settings, firstRun, scaffoldSession, autoRestartNotices];
 	// Subscribe before loading, so nothing that happens during the first load is missed.
 	const stops = await Promise.all(startables.map((s) => s.start()));
 	void firstRun.load();

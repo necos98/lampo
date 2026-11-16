@@ -146,7 +146,8 @@ pub trait StreamingCommandRunner: Send + Sync {
 /// application routes by `kind()` (open-closed: a new service kind is a new runner).
 ///
 /// Runners publish `DomainEvent::ServiceStatusChanged` / `ServiceLog` through the
-/// `EventPublisher` they receive at construction, including on unexpected exits.
+/// `EventPublisher` they receive at construction, including on unexpected exits; the exit of a
+/// running instance nobody asked to stop also publishes `DomainEvent::ServiceCrashed`.
 #[async_trait]
 pub trait ServiceRunner: Send + Sync {
     fn kind(&self) -> ServiceKind;

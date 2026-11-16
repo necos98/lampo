@@ -397,6 +397,12 @@ export const it = {
 		requiredBy: (ids: string[]) => `Richiesto da ${ids.join(', ')}`,
 		unused: 'Non richiesto da nessun progetto',
 		done: { start: 'Servizi avviati.', stop: 'Servizi fermati.', restart: 'Servizi riavviati.' },
+		autoRestart: {
+			scheduled: (label: string, attempt: number, maxAttempts: number, seconds: number) =>
+				`${label} si è chiuso inaspettatamente: nuovo avvio tra ${seconds} s (tentativo ${attempt} di ${maxAttempts}).`,
+			restarted: (label: string) => `${label} è di nuovo attivo.`,
+			gaveUp: (label: string, attempts: number) => `${label} non è ripartito dopo ${attempts} tentativi: avvialo a mano quando hai risolto il problema.`
+		},
 		conflicts: 'Conflitti di porta',
 		conflictBody: (port: number, wantedBy: string, owner: string | null) =>
 			`La porta ${port} serve a ${wantedBy} ma è occupata da ${owner ?? 'un altro programma'}.`,
@@ -524,6 +530,8 @@ export const it = {
 		behaviour: 'Comportamento',
 		closeToTray: 'Chiudi nella barra delle applicazioni',
 		closeToTrayHelp: 'Chiudendo la finestra Lampo resta attivo e i servizi continuano a funzionare.',
+		autoRestart: 'Riavvia i servizi che si chiudono da soli',
+		autoRestartHelp: 'Un servizio che si chiude inaspettatamente viene riavviato fino a 3 volte, dopo 2, 4 e 8 secondi. I servizi che fermi tu restano fermi.',
 		presets: {
 			title: 'Preset personalizzati',
 			help: 'Le configurazioni salvate dai progetti con «Salva come preset». I preset predefiniti non si possono eliminare.',

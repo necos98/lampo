@@ -57,6 +57,10 @@ pub fn run() {
             let log_rotation = built.log_rotation;
             tauri::async_runtime::spawn(async move { log_rotation.run().await });
 
+            // Services that exit unexpectedly start again (setting `auto_restart_services`).
+            let (auto_restart, crashes) = (built.auto_restart, built.crashes);
+            tauri::async_runtime::spawn(auto_restart.run(crashes));
+
             // Control pipe for the CLI (single owner of service processes).
             let (server, handler) = (built.control_server, built.control_handler);
             tauri::async_runtime::spawn(async move {

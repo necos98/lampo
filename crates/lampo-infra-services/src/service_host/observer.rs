@@ -94,8 +94,12 @@ impl ProcessObserver for ServiceObserver {
         self.board.events.publish(DomainEvent::ServiceLog { service: self.service.clone(), stream, line: line.to_string(), at_unix_ms: at });
     }
 
+    /// A stop's exit makes the instance `Stopped`; any other `Failed`. A running instance that
+    /// fails has crashed (`ServiceCrashed`, after the status); one still starting is accounted
+    /// for by its start.
     fn on_exit(&self, code: Option<i32>) {
         let last = self.recent.lock().ok().and_then(|r| r.back().cloned());
+        let mut crash = None;
         self.board.update(&self.service, |inst| {
             // An old process, or one a stop or a failed start already accounted for.
             if inst.generation != self.generation || inst.child.is_none() {
@@ -106,15 +110,21 @@ impl ProcessObserver for ServiceObserver {
             if inst.stopping {
                 inst.status.state = ServiceState::Stopped;
                 inst.status.message = None;
-            } else {
-                inst.status.state = ServiceState::Failed;
-                let code = code.map_or("killed".to_string(), |c| format!("exit code {c}"));
-                inst.status.message = Some(match last {
-                    Some(l) => format!("exited unexpectedly ({code}): {l}"),
-                    None => format!("exited unexpectedly ({code})"),
-                });
+                return;
             }
+            let was_running = inst.status.state == ServiceState::Running;
+            let code = code.map_or("killed".to_string(), |c| format!("exit code {c}"));
+            let message = match last {
+                Some(l) => format!("exited unexpectedly ({code}): {l}"),
+                None => format!("exited unexpectedly ({code})"),
+            };
+            inst.status.state = ServiceState::Failed;
+            inst.status.message = Some(message.clone());
+            crash = was_running.then_some(message);
         });
+        if let Some(message) = crash {
+            self.board.events.publish(DomainEvent::ServiceCrashed { service: self.service.clone(), message });
+        }
         let _ = self.exited.send(true);
     }
 }

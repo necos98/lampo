@@ -13,6 +13,7 @@ export class SettingsDraft {
 		services: [],
 		loopbackPortRange: { start: 8100, end: 8199 },
 		closeToTray: true,
+		autoRestartServices: true,
 		firstRunCompleted: false,
 		defaultAddressing: 'no-elevation'
 	});

@@ -109,7 +109,7 @@ fn declarations(cfg: &Config) -> Vec<(&'static str, Vec<Declaration>)> {
         section!("App": AppInfoDto),
         section!("Event payloads":
             ProgressStageDto, ProgressDto, TaskProgressPayload, TaskOutcomeDto, TaskFinishedPayload, ServiceStatusPayload,
-            LogStreamDto, ServiceLogPayload, ProjectsChangedPayload, WorktreesChangedPayload,
+            LogStreamDto, ServiceLogPayload, ProjectsChangedPayload, WorktreesChangedPayload, AutoRestartStepDto, ServiceAutoRestartPayload,
         ),
     ]
 }

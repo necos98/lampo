@@ -55,6 +55,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 		],
 		loopbackPortRange: { start: 8100, end: 8199 },
 		closeToTray: true,
+		autoRestartServices: true,
 		firstRunCompleted: !fresh,
 		defaultAddressing: 'no-elevation'
 	};

@@ -610,6 +610,7 @@ pub fn settings(s: &SettingsDto) -> String {
     }
     rows.push(vec!["loopback port range".into(), format!("{}-{}", s.loopback_port_range.start, s.loopback_port_range.end)]);
     rows.push(vec!["close to tray".into(), yes_no(s.close_to_tray).into()]);
+    rows.push(vec!["auto-restart".into(), yes_no(s.auto_restart_services).into()]);
     rows.push(vec!["default addressing".into(), addressing(s.default_addressing).into()]);
     table(&rows)
 }

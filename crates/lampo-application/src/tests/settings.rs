@@ -97,6 +97,21 @@ async fn the_default_addressing_is_saved_without_a_sync() {
 }
 
 #[tokio::test]
+async fn the_automatic_restart_is_switched_off_without_a_sync() {
+    let w = served().await;
+    assert!(w.settings_service().get().unwrap().auto_restart_services, "on by default");
+
+    let request = SettingsPatchRequest { auto_restart_services: Some(false), ..Default::default() };
+    let result = w.patch_settings().execute(request, &cli()).await.unwrap();
+    assert!(!result.settings.auto_restart_services);
+    let changes: Vec<(&str, &str, &str)> = result.changes.iter().map(|c| (c.setting.as_str(), c.from.as_str(), c.to.as_str())).collect();
+    assert_eq!(changes, [("auto-restart", "on", "off")]);
+    assert!(!w.settings.load().unwrap().auto_restart_services);
+    assert_eq!(result.sync, SyncReportDto::default(), "read when a service crashes");
+    assert!(w.all_calls().is_empty(), "{:?}", w.all_calls());
+}
+
+#[tokio::test]
 async fn unchanged_values_are_a_no_op_without_a_sync() {
     let w = served().await;
     let before = w.events.all().len();
@@ -219,6 +234,15 @@ async fn gui_save_sets_the_default_addressing() {
     let saved = w.settings_service().update(dto, &gui()).await.unwrap();
     assert_eq!(saved.default_addressing, AddressingDto::Standard);
     assert_eq!(w.settings.load().unwrap().default_addressing, Addressing::Standard);
+}
+
+#[tokio::test]
+async fn gui_save_sets_the_automatic_restart() {
+    let w = World::with_basics();
+    let mut dto = w.settings_service().get().unwrap();
+    dto.auto_restart_services = false;
+    assert!(!w.settings_service().update(dto, &gui()).await.unwrap().auto_restart_services);
+    assert!(!w.settings.load().unwrap().auto_restart_services);
 }
 
 #[tokio::test]

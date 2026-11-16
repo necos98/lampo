@@ -12,6 +12,7 @@
 pub mod agent;
 pub mod allocation;
 pub mod app_info;
+pub mod auto_restart;
 pub mod claude_code;
 pub mod database;
 pub mod diagnostics;
@@ -52,6 +53,7 @@ pub mod worktrees;
 pub use agent::{AgentContextDeps, AgentContextQuery, ToolchainQuery};
 pub use allocation::{LoopbackPortAllocator, SiteSnapshot};
 pub use app_info::AppInfoQuery;
+pub use auto_restart::{Crash, CrashReceiver, CrashRecovery, CrashRelay, Revival, ServiceAutoRestart, ServiceAutoRestartDeps};
 pub use claude_code::{ClaudeCodeSetup, ClaudeCodeSetupDeps, embedded_icon, embedded_skills};
 pub use database::DatabaseService;
 pub use diagnostics::{

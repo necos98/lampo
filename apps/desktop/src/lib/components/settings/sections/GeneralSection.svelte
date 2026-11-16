@@ -46,3 +46,8 @@
 		<Switch {...field} bind:checked={draft.value.closeToTray} />
 	{/snippet}
 </FormRow>
+<FormRow label={t.autoRestart} help={t.autoRestartHelp}>
+	{#snippet children(field)}
+		<Switch {...field} bind:checked={draft.value.autoRestartServices} />
+	{/snippet}
+</FormRow>

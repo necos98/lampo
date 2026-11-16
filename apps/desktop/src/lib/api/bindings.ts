@@ -791,6 +791,10 @@ services: Array<ServiceInstance>,
  */
 loopbackPortRange: PortRange, closeToTray: boolean, 
 /**
+ * A running service that exits unexpectedly is started again (up to 3 attempts, 2/4/8 s apart).
+ */
+autoRestartServices: boolean, 
+/**
  * Read-only from the GUI's point of view (set by the first-run wizard).
  */
 firstRunCompleted: boolean, 
@@ -943,3 +947,12 @@ export type ServiceLogPayload = { service: string, stream: LogStream, line: stri
 export type ProjectsChangedPayload = { projectIds: Array<string>, };
 
 export type WorktreesChangedPayload = { projectId: string, };
+
+/**
+ * One step of the automatic restart of a crashed service:
+ * `{ "type": "scheduled", "attempt": 1, "maxAttempts": 3, "delayMs": 2000 }`,
+ * `{ "type": "restarted", "attempt": 1 }`, `{ "type": "gave-up", "attempts": 3, "message": "..." }`.
+ */
+export type AutoRestartStep = { "type": "scheduled", attempt: number, maxAttempts: number, delayMs: number, } | { "type": "restarted", attempt: number, } | { "type": "gave-up", attempts: number, message: string, };
+
+export type ServiceAutoRestartPayload = { service: string, step: AutoRestartStep, };

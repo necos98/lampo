@@ -1,6 +1,6 @@
 //! Partial edits of the global settings (`lampo settings set`): Apache's port, service instance
-//! ports and web UI ports (Mailpit), the default PHP, the loopback port range and the default
-//! addressing of new projects.
+//! ports and web UI ports (Mailpit), the default PHP, the loopback port range, the default
+//! addressing of new projects and the automatic restart of crashed services.
 //!
 //! The patch is applied to the *stored* settings through [`SettingsWriter::modify`] (under the
 //! allocator lock, with its port and default-PHP checks), so it never reverts a concurrent edit
@@ -43,8 +43,8 @@ impl PatchSettings {
     /// dedicated loopback port already has; `PortInUse` for a new port another program listens
     /// on; `PackageMissing` for a default PHP that is not installed. Nothing is saved on error.
     /// When something changed: saves, publishes `SettingsChanged`, syncs unless only the default
-    /// addressing changed (a sync failure is returned with a message saying the settings were
-    /// saved).
+    /// addressing or the automatic restart changed (a sync failure is returned with a message
+    /// saying the settings were saved).
     pub async fn execute(&self, request: SettingsPatchRequest, ctx: &CallContext) -> AppResult<SettingsPatchResultDto> {
         if request.is_empty() {
             return Err(validation("nothing to change: give at least one setting"));
@@ -71,6 +71,7 @@ struct Patch {
     default_php: Option<PhpMinor>,
     loopback_ports: Option<PortRange>,
     default_addressing: Option<Addressing>,
+    auto_restart_services: Option<bool>,
 }
 
 /// `(id, port)` pairs of a request map, validated: well-formed ids, no Apache, no duplicates,
@@ -105,6 +106,7 @@ impl Patch {
             default_php: r.default_php_version.as_deref().map(|v| PhpMinor::parse(v.trim())).transpose()?,
             loopback_ports: r.loopback_port_range.map(|range| PortRange::new(range.start, range.end)).transpose()?,
             default_addressing: r.default_addressing.map(addressing_from_dto),
+            auto_restart_services: r.auto_restart_services,
         })
     }
 
@@ -135,15 +137,18 @@ impl Patch {
         if let Some(addressing) = self.default_addressing {
             next.default_addressing = addressing;
         }
+        if let Some(on) = self.auto_restart_services {
+            next.auto_restart_services = on;
+        }
         next.validate()?;
         Ok(next)
     }
 }
 
 /// `true` when a change needs a sync: anything but the default addressing, which only applies
-/// to projects created later.
+/// to projects created later, and the automatic restart, read when a service crashes.
 fn changes_environment(before: &Settings, after: &Settings) -> bool {
-    &Settings { default_addressing: before.default_addressing, ..after.clone() } != before
+    &Settings { default_addressing: before.default_addressing, auto_restart_services: before.auto_restart_services, ..after.clone() } != before
 }
 
 fn describe_changes(before: &Settings, after: &Settings, catalog: &ServiceCatalog) -> Vec<SettingChangeDto> {
@@ -160,7 +165,15 @@ fn describe_changes(before: &Settings, after: &Settings, catalog: &ServiceCatalo
     if before.default_addressing != after.default_addressing {
         out.push(change("default-addressing".into(), before.default_addressing.to_string(), after.default_addressing.to_string()));
     }
+    if before.auto_restart_services != after.auto_restart_services {
+        out.push(change("auto-restart".into(), on_off(before.auto_restart_services).into(), on_off(after.auto_restart_services).into()));
+    }
     out
+}
+
+/// How the CLI spells a switch (`--auto-restart off`).
+fn on_off(on: bool) -> &'static str {
+    if on { "on" } else { "off" }
 }
 
 /// What the caller still has to know or do after a port change.

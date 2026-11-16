@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::auto_restart::AutoRestartStep;
 use crate::progress::{Progress, TaskId};
 use crate::project::ProjectId;
 use crate::service::{LogStream, ServiceId, ServiceStatus};
@@ -24,6 +25,17 @@ pub enum TaskOutcome {
 pub enum DomainEvent {
     /// A service changed state (published by runners, including on unexpected exit).
     ServiceStatusChanged(ServiceStatus),
+    /// A running service exited without being asked to (published by runners right after its
+    /// `Failed` status). Not a start that failed: that is the start's own error.
+    ServiceCrashed {
+        service: ServiceId,
+        message: String,
+    },
+    /// The automatic restart of a crashed service moved on (see [`crate::auto_restart`]).
+    ServiceAutoRestart {
+        service: ServiceId,
+        step: AutoRestartStep,
+    },
     /// One line of a service's stdout/stderr. `at_unix_ms` is set by the publishing adapter.
     ServiceLog {
         service: ServiceId,

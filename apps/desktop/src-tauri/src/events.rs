@@ -18,7 +18,7 @@ impl TauriEventPublisher {
 
 impl EventPublisher for TauriEventPublisher {
     fn publish(&self, event: DomainEvent) {
-        let event: AppEvent = event.into();
+        let Some(event) = AppEvent::from_domain(event) else { return };
         // No window (tray mode) is not an error: the event is simply dropped.
         if let Err(e) = self.handle.emit(event.name(), event.payload()) {
             log::debug!("event {} not delivered: {e}", event.name());

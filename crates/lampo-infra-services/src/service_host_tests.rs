@@ -113,13 +113,16 @@ impl ServiceDriver for FakeDriver {
     }
 }
 
+/// The published statuses, and the crash messages in their own list.
 #[derive(Default)]
-struct Statuses(Mutex<Vec<ServiceStatus>>);
+struct Statuses(Mutex<Vec<ServiceStatus>>, Mutex<Vec<String>>);
 
 impl EventPublisher for Statuses {
     fn publish(&self, event: DomainEvent) {
-        if let DomainEvent::ServiceStatusChanged(status) = event {
-            self.0.lock().unwrap().push(status);
+        match event {
+            DomainEvent::ServiceStatusChanged(status) => self.0.lock().unwrap().push(status),
+            DomainEvent::ServiceCrashed { message, .. } => self.1.lock().unwrap().push(message),
+            _ => {}
         }
     }
 }
@@ -253,4 +256,42 @@ async fn an_exit_reported_after_a_stop_is_not_a_failure() {
     f.host.stop(&f.driver, &f.launch.service).await.unwrap();
     observer.on_exit(Some(0));
     assert_eq!(f.state(), ServiceState::Stopped);
+    assert!(f.crashes().is_empty());
+}
+
+impl Fixture {
+    /// The spawned process exits on its own with `code`.
+    fn exit_on_its_own(&self, code: i32) {
+        self.supervisor.alive.store(false, Ordering::SeqCst);
+        self.supervisor_observer().on_exit(Some(code));
+    }
+
+    fn crashes(&self) -> Vec<String> {
+        self.statuses.1.lock().unwrap().clone()
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_running_server_that_exits_on_its_own_has_crashed() {
+    let f = fixture(None, Some(Duration::ZERO));
+    f.host.start(&f.driver, &f.launch).await.unwrap();
+    f.exit_on_its_own(3);
+    let status = f.host.status(&f.launch.service);
+    assert_eq!((status.state, status.pid), (ServiceState::Failed, None));
+    assert_eq!(f.crashes(), ["exited unexpectedly (exit code 3)"]);
+    let statuses = f.statuses.0.lock().unwrap();
+    assert_eq!(statuses.last().unwrap().state, ServiceState::Failed, "the status is published before the crash");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_exit_during_the_start_is_the_start_error_not_a_crash() {
+    let f = fixture(None, None);
+    let exit = async {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        f.exit_on_its_own(1);
+    };
+    let (started, ()) = tokio::join!(f.host.start(&f.driver, &f.launch), exit);
+    assert!(started.unwrap_err().to_string().contains("exited during startup"));
+    assert_eq!(f.state(), ServiceState::Failed);
+    assert!(f.crashes().is_empty());
 }

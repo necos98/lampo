@@ -16,6 +16,7 @@
 
 pub mod address;
 pub mod apache_directives;
+pub mod auto_restart;
 pub mod claude_code;
 pub mod detection;
 pub mod env_var;
