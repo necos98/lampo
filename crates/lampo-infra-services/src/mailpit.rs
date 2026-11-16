@@ -15,9 +15,10 @@ use lampo_domain::ports::{CommandSpec, EventPublisher, ProcessSupervisor, Servic
 use lampo_domain::service::{ServiceId, ServiceKind, ServiceLaunch, ServiceStatus};
 use lampo_domain::tcp_port::Port;
 use lampo_domain::PortResult;
+use lampo_infra_fs::ensure_dir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::service_host::{ServiceDriver, ServiceHost, create_dir, find_executable};
+use crate::service_host::{ServiceDriver, ServiceHost, find_executable};
 
 /// The web UI port when the launch has none (Mailpit always listens on one).
 const DEFAULT_UI_PORT: Port = Port::of(8025);
@@ -108,10 +109,10 @@ impl ServiceRunner for MailpitRunner {
 
     async fn prepare(&self, launch: &ServiceLaunch) -> PortResult<()> {
         find_executable(&launch.install_dir, "mailpit.exe")?;
-        create_dir(&launch.config_dir)?;
-        create_dir(&launch.log_dir)?;
+        ensure_dir(&launch.config_dir)?;
+        ensure_dir(&launch.log_dir)?;
         let db = database_file(launch);
-        create_dir(db.parent().expect("the database file has a folder"))
+        ensure_dir(db.parent().expect("the database file has a folder"))
     }
 
     async fn start(&self, launch: &ServiceLaunch) -> PortResult<()> {

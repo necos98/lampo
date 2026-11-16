@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use lampo_domain::{PortError, PortResult};
+use lampo_infra_fs::{ensure_dir, write_atomic};
 
 use super::render::VHOSTS_DIR;
-use crate::fs_util::{ensure_dir, write_atomic};
 
 /// Name of the validation wrapper written inside the staging dir (never promoted).
 pub const VALIDATION_WRAPPER: &str = "_lampo-validate.conf";

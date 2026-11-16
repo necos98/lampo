@@ -1,8 +1,9 @@
 //! # lampo-infra-fs
 //!
 //! Filesystem primitives every infrastructure adapter that persists files shares, so that the
-//! store (`lampo-infra-store`) and the package registry (`lampo-infra-packages`) write and back
-//! up their files the same way without depending on each other, and the size-bounded log files
+//! store (`lampo-infra-store`), the packages (`lampo-infra-packages`), the web tier
+//! (`lampo-infra-web`) and the services (`lampo-infra-services`) create directories, write and
+//! back up their files the same way without depending on each other, and the size-bounded log files
 //! ([`log_rotation`]) the service and web adapters write and the log reader follows.
 
 use std::io::Write;
@@ -56,6 +57,11 @@ pub fn write_atomic(path: &Path, contents: &[u8]) -> PortResult<()> {
     }
 }
 
+/// Creates `dir` and its missing parents (`create_dir_all` with a port error naming it).
+pub fn ensure_dir(dir: &Path) -> PortResult<()> {
+    std::fs::create_dir_all(dir).map_err(|e| PortError::io(format!("creating {}", dir.display()), e))
+}
+
 /// Where a backup of the unreadable `path` goes: `<name>.corrupt-<unix ms>` next to it.
 pub fn corrupt_backup_path(path: &Path) -> PathBuf {
     let file_name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -75,6 +81,19 @@ mod tests {
         write_atomic(&file, b"two").unwrap();
         assert_eq!(std::fs::read(&file).unwrap(), b"two");
         assert_eq!(std::fs::read_dir(file.parent().unwrap()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn ensure_dir_creates_nested_dirs_and_names_the_dir_it_cannot_create() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("a").join("b");
+        ensure_dir(&nested).unwrap();
+        ensure_dir(&nested).unwrap();
+        assert!(nested.is_dir());
+        let blocked = dir.path().join("file");
+        std::fs::write(&blocked, b"x").unwrap();
+        let message = ensure_dir(&blocked.join("sub")).unwrap_err().to_string();
+        assert!(message.contains("creating") && message.contains("sub"), "{message}");
     }
 
     #[test]

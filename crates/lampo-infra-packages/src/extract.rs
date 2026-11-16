@@ -21,6 +21,7 @@ use async_trait::async_trait;
 use lampo_domain::ports::{ArchiveExtractor, ProgressSink, SlotReplacement};
 use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
 use lampo_domain::{PortError, PortResult};
+use lampo_infra_fs::ensure_dir;
 
 use crate::entry_name::{collision_key, safe_relative_path};
 use crate::slot::{self, place_file_blocking, prepare_staging, replace_dir};
@@ -122,11 +123,11 @@ fn extract_into(archive: &Path, staging: &Path, strip_prefix: Option<&str>, limi
         let target = staging.join(&relative);
         debug_assert!(target.starts_with(staging));
         if is_dir {
-            fs::create_dir_all(&target).map_err(|e| PortError::io(format!("creating {}", target.display()), e))?;
+            ensure_dir(&target)?;
             continue;
         }
         if let Some(dir) = target.parent() {
-            fs::create_dir_all(dir).map_err(|e| PortError::io(format!("creating {}", dir.display()), e))?;
+            ensure_dir(dir)?;
         }
         let mut entry = zip.by_index(index).map_err(|e| bad(e.to_string()))?;
         let io = |e: std::io::Error| PortError::io(format!("extracting {}", relative.display()), e);

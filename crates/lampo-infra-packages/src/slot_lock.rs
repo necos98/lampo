@@ -16,6 +16,7 @@ use lampo_domain::paths::LampoPaths;
 use lampo_domain::ports::{PackageSlotLock, SlotGuard};
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::{PortError, PortResult};
+use lampo_infra_fs::ensure_dir;
 use tokio::sync::OwnedMutexGuard;
 
 use crate::file_lock::FileLock;
@@ -63,7 +64,7 @@ impl FsPackageSlotLock {
 
 fn try_hold(local: Arc<tokio::sync::Mutex<()>>, packages_dir: &Path, lock_file: &Path) -> PortResult<Option<HeldSlot>> {
     let Ok(local) = local.try_lock_owned() else { return Ok(None) };
-    std::fs::create_dir_all(packages_dir).map_err(|e| PortError::io(format!("creating {}", packages_dir.display()), e))?;
+    ensure_dir(packages_dir)?;
     let file = FileLock::try_acquire(lock_file).map_err(|e| PortError::io(format!("locking {}", lock_file.display()), e))?;
     Ok(file.map(|file| HeldSlot { _file: file, _local: local }))
 }

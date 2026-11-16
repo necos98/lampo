@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use lampo_domain::ports::SlotReplacement;
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::{PortError, PortResult};
+use lampo_infra_fs::ensure_dir;
 
 use crate::entry_name::safe_file_name;
 use crate::leftovers::{self, Leftover};
@@ -39,10 +40,10 @@ pub fn place_file_blocking(file: &Path, destination: &Path, file_name: &str, can
 /// empty staging directory next to it.
 pub(crate) fn prepare_staging(destination: &Path) -> PortResult<PathBuf> {
     let parent = destination.parent().filter(|p| !p.as_os_str().is_empty()).ok_or_else(|| PortError::io("installing", format!("{} has no parent directory", destination.display())))?;
-    fs::create_dir_all(parent).map_err(|e| PortError::io(format!("creating {}", parent.display()), e))?;
+    ensure_dir(parent)?;
     leftovers::repair(destination);
     let staging = leftovers::sibling(destination, Leftover::Staging);
-    fs::create_dir_all(&staging).map_err(|e| PortError::io(format!("creating {}", staging.display()), e))?;
+    ensure_dir(&staging)?;
     Ok(staging)
 }
 

@@ -18,7 +18,6 @@ pub mod apache;
 pub mod hosts;
 pub mod php_ini;
 
-mod fs_util;
 mod site_layout;
 #[cfg(test)]
 mod test_snapshot;

@@ -20,6 +20,7 @@ use lampo_domain::ports::{ChildId, EventPublisher, ProcessSupervisor};
 use lampo_domain::service::{ServiceId, ServiceLaunch, ServiceState, ServiceStatus};
 use lampo_domain::tcp_port::Port;
 use lampo_domain::{PortError, PortResult};
+use lampo_infra_fs::ensure_dir;
 use tokio::sync::watch;
 
 pub use driver::ServiceDriver;
@@ -61,10 +62,6 @@ pub(crate) fn write_if_changed(path: &Path, content: &str) -> PortResult<()> {
         return Ok(());
     }
     lampo_infra_fs::write_atomic(path, content.as_bytes())
-}
-
-pub(crate) fn create_dir(dir: &Path) -> PortResult<()> {
-    std::fs::create_dir_all(dir).map_err(|e| PortError::io(format!("creating {}", dir.display()), e))
 }
 
 /// Finds `exe` in a package: `<dir>\bin`, `<dir>`, or the same under a single top-level folder
@@ -148,7 +145,7 @@ impl ServiceHost {
         let spec = driver.command(launch)?;
         let ports = driver.ready_ports(launch)?;
         let marker = driver.start_marker(launch);
-        create_dir(&launch.log_dir)?;
+        ensure_dir(&launch.log_dir)?;
         let log = RotatingLog::open(&launch.log_dir.join(OUTPUT_LOG))?;
 
         let mut generation = 0;

@@ -5,6 +5,7 @@ use lampo_domain::ports::{AgentPluginFiles, FileSystemInspector, FolderProbe, Sc
 use lampo_domain::scaffold::PathState;
 use lampo_domain::shim::FolderState;
 use lampo_domain::{PortError, PortResult};
+use lampo_infra_fs::{ensure_dir, write_atomic};
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct LocalFileSystem;
@@ -79,14 +80,12 @@ impl ScaffoldFiles for LocalFileSystem {
     }
 
     fn create_dir_all(&self, path: &Path) -> PortResult<()> {
-        std::fs::create_dir_all(path).map_err(|e| PortError::io(format!("creating {}", path.display()), e))
+        ensure_dir(path)
     }
 
+    /// Atomic: an interrupted scaffold never leaves a half-written file behind.
     fn write_file(&self, path: &Path, contents: &str) -> PortResult<()> {
-        if let Some(parent) = path.parent() {
-            self.create_dir_all(parent)?;
-        }
-        std::fs::write(path, contents).map_err(|e| PortError::io(format!("writing {}", path.display()), e))
+        write_atomic(path, contents.as_bytes())
     }
 
     /// Blocks briefly while retrying (only used on the failure path of a scaffold).
@@ -132,15 +131,14 @@ impl AgentPluginFiles for LocalFileSystem {
         Ok(entries.flatten().filter_map(|e| e.file_name().into_string().ok()).collect())
     }
 
+    /// Atomic: an agent reading its plugin while it is updated sees the old or the new file.
     fn write_text(&self, path: &Path, contents: &str) -> PortResult<()> {
-        self.write_file(path, contents)
+        write_atomic(path, contents.as_bytes())
     }
 
+    /// Atomic, like [`Self::write_text`].
     fn write_bytes(&self, path: &Path, bytes: &[u8]) -> PortResult<()> {
-        if let Some(parent) = path.parent() {
-            self.create_dir_all(parent)?;
-        }
-        std::fs::write(path, bytes).map_err(|e| PortError::io(format!("writing {}", path.display()), e))
+        write_atomic(path, bytes)
     }
 
     fn remove(&self, path: &Path) -> PortResult<()> {
@@ -211,5 +209,29 @@ mod tests {
         fs.remove(&root.join("missing")).unwrap();
         assert!(fs.list_dir(&root).unwrap().is_empty());
         assert!(fs.exists(&root) && !fs.exists(&root.join("skills")));
+    }
+
+    /// Every write replaces the whole file (creating its folders) and leaves no temp file next
+    /// to it: a listing of the plugin or of a scaffolded project only shows the real files.
+    #[test]
+    fn writes_replace_files_and_leave_no_temp_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fs = LocalFileSystem;
+        let dir = tmp.path().join("plugin").join("hooks");
+        let text = dir.join("hooks.json");
+        let bytes = dir.join("icon.png");
+        let scaffold = dir.join("README.md");
+        fs.write_text(&text, "a longer first version").unwrap();
+        fs.write_text(&text, "v2").unwrap();
+        fs.write_bytes(&bytes, &[0, 1, 2]).unwrap();
+        fs.write_bytes(&bytes, &[3]).unwrap();
+        fs.write_file(&scaffold, "# one").unwrap();
+        fs.write_file(&scaffold, "# two").unwrap();
+        assert_eq!(std::fs::read_to_string(&text).unwrap(), "v2");
+        assert_eq!(std::fs::read(&bytes).unwrap(), [3]);
+        assert_eq!(std::fs::read_to_string(&scaffold).unwrap(), "# two");
+        let mut names = fs.list_dir(&dir).unwrap();
+        names.sort();
+        assert_eq!(names, ["README.md", "hooks.json", "icon.png"]);
     }
 }

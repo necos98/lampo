@@ -5,12 +5,12 @@ use async_trait::async_trait;
 use lampo_domain::ports::{CommandRunner, WebServerConfigurator};
 use lampo_domain::web::WebServerConfig;
 use lampo_domain::{PortError, PortResult};
+use lampo_infra_fs::ensure_dir;
 
 use super::render::{ApacheConfigRenderer, MAIN_CONF, RenderOptions, VHOSTS_DIR, validation_wrapper};
 use super::staging::{ConfigTree, VALIDATION_WRAPPER};
 use super::syntax::apache_path;
 use super::validation::{HttpdValidator, rejection_report};
-use crate::fs_util::ensure_dir;
 
 /// Renders into `<config_dir>.staging`, runs `httpd.exe -t` against the staged tree, and on
 /// success swaps the staging dir in (keeping `<config_dir>.previous`). Composes the pure

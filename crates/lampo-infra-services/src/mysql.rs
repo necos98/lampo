@@ -19,11 +19,13 @@ use lampo_domain::ports::{CommandRunner, CommandSpec, EventPublisher, ProcessSup
 use lampo_domain::service::{ServiceId, ServiceKind, ServiceLaunch, ServiceStatus};
 use lampo_domain::tcp_port::Port;
 use lampo_domain::{PortError, PortResult};
+use lampo_infra_fs::ensure_dir;
 use tokio::io::AsyncReadExt;
 use windows_sys::Win32::System::Threading::{EVENT_MODIFY_STATE, OpenEventW, SetEvent};
 
+use crate::config_path::config_file_path;
 use crate::rotating_log::rotate_closed_log;
-use crate::service_host::{ServiceDriver, ServiceHost, create_dir, find_executable, write_if_changed};
+use crate::service_host::{ServiceDriver, ServiceHost, find_executable, write_if_changed};
 use crate::win::{owned, raw, wide};
 
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
@@ -37,12 +39,6 @@ const STOP_GRACE: Duration = Duration::from_secs(60);
 
 fn series_of(service: &ServiceId) -> MysqlSeries {
     service.version().and_then(|v| MysqlSeries::try_from(v).ok()).unwrap_or(MysqlSeries::DEFAULT)
-}
-
-/// Option-file paths: forward slashes (backslashes are escape characters in option files) and
-/// double quotes (spaces).
-fn ini_path(p: &Path) -> String {
-    format!("\"{}\"", p.display().to_string().replace('\\', "/"))
 }
 
 fn data_dir_of(launch: &ServiceLaunch) -> PathBuf {
@@ -242,11 +238,11 @@ impl MysqlRunner {
              # innodb_doublewrite stays ON on purpose: OFF saves ~30 MB but a torn page after a\n\
              # power loss would corrupt a table beyond repair.\n\
              log_error_verbosity=2\n",
-            basedir = ini_path(&basedir),
-            datadir = ini_path(&datadir),
+            basedir = config_file_path(&basedir),
+            datadir = config_file_path(&datadir),
             port = launch.port,
-            log = ini_path(&error_log(launch)),
-            pid = ini_path(&datadir.join("mysqld.pid")),
+            log = config_file_path(&error_log(launch)),
+            pid = config_file_path(&datadir.join("mysqld.pid")),
         );
         if series.is_legacy() {
             ini.push_str(
@@ -309,10 +305,10 @@ impl ServiceRunner for MysqlRunner {
             return Err(PortError::invalid_data(format!("{} launch", launch.service), "a MySQL instance needs a data directory"));
         };
         find_executable(&launch.install_dir, "mysqld.exe")?;
-        create_dir(&launch.config_dir)?;
-        create_dir(&launch.log_dir)?;
+        ensure_dir(&launch.config_dir)?;
+        ensure_dir(&launch.log_dir)?;
         if let Some(parent) = data_dir.parent() {
-            create_dir(parent)?;
+            ensure_dir(parent)?;
         }
         rotate_closed_log(&error_log(launch));
         write_if_changed(&my_ini(launch), &self.render_my_ini(launch))?;

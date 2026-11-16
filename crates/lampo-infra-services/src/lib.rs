@@ -23,7 +23,7 @@
 //!
 //! Internal modules: `process` (process creation inside the job, IOCP stdio pipes),
 //! `dump_input` (a piped command's input file, decoded and rewritten on the way),
-//! `service_host` (behind [`ServiceHost`]),
+//! `service_host` (behind [`ServiceHost`]), `config_path` (paths inside `my.ini` and `redis.conf`),
 //! `rotating_log` (captured service output, rotated by size while it is written),
 //! `startup_deadline` (when a slow but progressing start gives up), `last_resort` (synchronous
 //! clean MySQL shutdown when the app goes away without the graceful stop),
@@ -34,6 +34,7 @@ compile_error!("lampo-infra-services targets Windows only");
 
 pub mod claude_code;
 pub mod compression;
+mod config_path;
 pub mod control_pipe;
 pub mod database;
 mod dump_input;

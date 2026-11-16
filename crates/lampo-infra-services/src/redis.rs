@@ -13,14 +13,11 @@ use lampo_domain::ports::{CommandSpec, EventPublisher, ProcessSupervisor, Servic
 use lampo_domain::service::{ServiceId, ServiceKind, ServiceLaunch, ServiceStatus};
 use lampo_domain::tcp_port::Port;
 use lampo_domain::PortResult;
+use lampo_infra_fs::ensure_dir;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::service_host::{ServiceDriver, ServiceHost, create_dir, find_executable, write_if_changed};
-
-/// Directives every Windows build accepts; quoted forward-slash paths work for all of them.
-fn conf_path(p: &Path) -> String {
-    format!("\"{}\"", p.display().to_string().replace('\\', "/"))
-}
+use crate::config_path::config_file_path;
+use crate::service_host::{ServiceDriver, ServiceHost, find_executable, write_if_changed};
 
 /// Microsoft-lineage ports (MSOpenTech, tporadowski) ship `redis.windows.conf` and emulate
 /// `fork()` with a memory-mapped heap file sized by `maxheap` (default: all physical RAM).
@@ -107,10 +104,10 @@ impl RedisRunner {
              maxmemory 256mb\n\
              maxmemory-policy noeviction\n",
             port = launch.port,
-            dir = conf_path(&dir),
+            dir = config_file_path(&dir),
         );
         if microsoft_port {
-            conf.push_str(&format!("# Windows port: keep the fork-emulation heap file small and out of C:\\ root.\nmaxheap 512mb\nheapdir {}\n", conf_path(&dir)));
+            conf.push_str(&format!("# Windows port: keep the fork-emulation heap file small and out of C:\\ root.\nmaxheap 512mb\nheapdir {}\n", config_file_path(&dir)));
         }
         conf
     }
@@ -124,10 +121,10 @@ impl ServiceRunner for RedisRunner {
 
     async fn prepare(&self, launch: &ServiceLaunch) -> PortResult<()> {
         let exe = find_executable(&launch.install_dir, "redis-server.exe")?;
-        create_dir(&launch.config_dir)?;
-        create_dir(&launch.log_dir)?;
+        ensure_dir(&launch.config_dir)?;
+        ensure_dir(&launch.log_dir)?;
         let dir = launch.data_dir.clone().unwrap_or_else(|| launch.config_dir.join("data"));
-        create_dir(&dir)?;
+        ensure_dir(&dir)?;
         let conf = self.render_redis_conf(launch, is_microsoft_port(&exe));
         write_if_changed(&launch.config_dir.join("redis.conf"), &conf)
     }

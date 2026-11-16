@@ -16,10 +16,10 @@ use lampo_domain::ports::PhpIniWriter;
 use lampo_domain::web::{ExtensionLoad, PhpIniSpec};
 use lampo_domain::PortResult;
 use lampo_infra_fs::log_rotation::{MAX_LOG_BYTES, rotate_if_large};
+use lampo_infra_fs::{ensure_dir, write_atomic};
 
 use self::syntax::{ini_path, ini_value};
 use self::xdebug::XdebugGeneration;
-use crate::fs_util::{ensure_dir, write_atomic};
 use crate::site_layout;
 
 /// The template shipped in every PHP Windows zip.

@@ -4,11 +4,11 @@ use async_trait::async_trait;
 use lampo_domain::PortResult;
 use lampo_domain::ports::{EventPublisher, ProcessSupervisor, ServiceRunner};
 use lampo_domain::service::{ServiceId, ServiceKind, ServiceLaunch, ServiceStatus};
+use lampo_infra_fs::ensure_dir;
 use lampo_infra_services::ServiceHost;
 
 use super::driver::{ApacheDriver, check_installation};
 use super::signal::{HttpdSignals, NamedEventSignals};
-use crate::fs_util::ensure_dir;
 
 /// Runs `httpd.exe -f <config_dir>\httpd.conf` in the foreground under the supervisor (no
 /// Windows service), on the shared [`ServiceHost`] sequence with an [`ApacheDriver`]. Stop and

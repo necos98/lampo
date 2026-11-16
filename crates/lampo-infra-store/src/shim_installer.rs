@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use lampo_domain::ports::ShimInstaller;
 use lampo_domain::shim::tools;
 use lampo_domain::{PortError, PortResult};
+use lampo_infra_fs::ensure_dir;
 
 /// Copies `lampo-shim.exe` once per tool name (`lampo_domain::shim::tools::all()`), e.g.
 /// `php.exe`, `composer.exe`, `mysql.exe`, `mysqldump.exe`, `redis-cli.exe`, and optionally
@@ -104,7 +105,7 @@ impl ExeShimInstaller {
         if !self.shim_executable.is_file() {
             return Err(PortError::not_found("shim executable", self.shim_executable.display().to_string()));
         }
-        std::fs::create_dir_all(shim_dir).map_err(|e| PortError::io(format!("creating {}", shim_dir.display()), e))?;
+        ensure_dir(shim_dir)?;
         let mut changed = false;
         for (source, target) in self.copies(shim_dir) {
             if !same_content(source, &target) {
