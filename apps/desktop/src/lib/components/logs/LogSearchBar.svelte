@@ -4,7 +4,6 @@
 
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
-	import { LOG_SEARCH_INPUT_ID } from '#lib/logs/search.js';
 	import { messages as m } from '#lib/messages/index.js';
 	import type { LogSearch } from '#lib/stores/logSearch.svelte.js';
 
@@ -24,7 +23,7 @@
 
 <div class="flex items-center gap-1">
 	<Input
-		id={LOG_SEARCH_INPUT_ID}
+		data-find
 		type="search"
 		class="h-8 w-48"
 		placeholder={t.search}

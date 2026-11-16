@@ -1,6 +1,3 @@
-/** `id` of the log search field, so a shortcut can focus it. */
-export const LOG_SEARCH_INPUT_ID = 'log-search';
-
 /** A run of a line's text, marked when it matches the search. */
 export interface TextSegment {
 	text: string;

@@ -4,11 +4,13 @@
 	import { ModeWatcher } from 'mode-watcher';
 	import { onMount } from 'svelte';
 
-	import { goto } from '$app/navigation';
+	import { afterNavigate, goto } from '$app/navigation';
 	import { page } from '$app/state';
 
 	import favicon from '#lib/assets/favicon.svg';
+	import CommandPalette from '#lib/components/layout/CommandPalette.svelte';
 	import ElevationBanner from '#lib/components/layout/ElevationBanner.svelte';
+	import ShortcutHelp from '#lib/components/layout/ShortcutHelp.svelte';
 	import Sidebar from '#lib/components/layout/Sidebar.svelte';
 	import UnsavedChangesGuard from '#lib/components/layout/UnsavedChangesGuard.svelte';
 	import { Toaster } from '#lib/components/ui/sonner/index.js';
@@ -25,6 +27,25 @@
 
 	const inWizard = $derived(page.url.pathname.startsWith('/first-run'));
 
+	let paletteOpen = $state(false);
+	let helpOpen = $state(false);
+
+	function showHelp(): void {
+		paletteOpen = false;
+		helpOpen = true;
+	}
+
+	/** The palette acts on projects and services: not available before the first run is done. */
+	function togglePalette(): void {
+		if (!inWizard) paletteOpen = !paletteOpen;
+	}
+
+	// A shortcut can navigate with a dialog open (Ctrl+N, Alt+1..5): the new page starts clean.
+	afterNavigate(() => {
+		paletteOpen = false;
+		helpOpen = false;
+	});
+
 	onMount(() => {
 		let disposeStores: (() => void) | undefined;
 		let disposed = false;
@@ -33,7 +54,7 @@
 			if (disposed) dispose();
 			else disposeStores = dispose;
 		});
-		const disposeShortcuts = installShortcuts({ navigate: (href) => void goto(href), save: () => void unsavedChanges.saveAll() });
+		const disposeShortcuts = installShortcuts({ navigate: (href) => void goto(href), save: () => void unsavedChanges.saveAll(), togglePalette, showHelp });
 		// The tray ("Controlla aggiornamenti") asks a live window to open a route.
 		const onNavigate = (e: Event) => {
 			const href = (e as CustomEvent<unknown>).detail;
@@ -63,6 +84,8 @@
 <ModeWatcher />
 <Toaster position="bottom-right" />
 <UnsavedChangesGuard />
+<CommandPalette bind:open={paletteOpen} onhelp={showHelp} />
+<ShortcutHelp bind:open={helpOpen} />
 
 <!-- One provider for every tooltip: once one is open, moving to the next icon shows its tooltip at once. -->
 <Tooltip.Provider delayDuration={TOOLTIP_DELAY_MS}>

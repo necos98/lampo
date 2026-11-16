@@ -3,6 +3,8 @@
  * added later by adding another file with the same shape.
  */
 import type { Addressing, CheckStatus, ErrorCode, ProgressStage, ServiceState, StepOutcome } from '../api/types.js';
+import type { PaletteGroup } from '../palette/commands.js';
+import type { NavId, ShortcutHelpId } from '../services/navigation.js';
 import type { SettingsSectionId, SettingsSectionKind } from '../settings/sections.js';
 
 export const it = {
@@ -76,7 +78,41 @@ export const it = {
 		diagnostics: 'Diagnostica'
 	},
 	shortcuts: {
-		hint: 'Alt+1…5 per cambiare sezione, / per filtrare'
+		title: 'Scorciatoie da tastiera',
+		description: 'Valgono in tutta l’app; quelle con un solo tasto non agiscono mentre scrivi in un campo.',
+		help: {
+			palette: 'Apri la palette dei comandi',
+			newProject: 'Nuovo progetto',
+			save: 'Salva le modifiche della pagina',
+			sections: 'Vai a una sezione (in ordine di barra laterale)',
+			find: 'Cerca nel log (pagina Log)',
+			filter: 'Filtra la lista della pagina',
+			leave: 'Esci dal filtro o chiudi la finestra di dialogo',
+			help: 'Mostra questo aiuto'
+		} satisfies Record<ShortcutHelpId, string>
+	},
+	palette: {
+		title: 'Palette dei comandi',
+		description: 'Scrivi per cercare un comando; frecce per scegliere, Invio per eseguirlo, Esc per chiudere.',
+		placeholder: 'Cerca un comando, un progetto o un servizio…',
+		empty: 'Nessun comando corrisponde.',
+		groups: { general: 'Generale', projects: 'Progetti', services: 'Servizi' } satisfies Record<PaletteGroup, string>,
+		newProject: 'Nuovo progetto',
+		goTo: {
+			projects: 'Vai a Progetti',
+			services: 'Vai a Servizi',
+			packages: 'Vai a Pacchetti',
+			logs: 'Vai a Log',
+			settings: 'Apri le impostazioni'
+		} satisfies Record<NavId, string>,
+		showHelp: 'Mostra le scorciatoie da tastiera',
+		openProject: (name: string) => `Apri il progetto ${name}`,
+		activateProject: (name: string) => `Attiva ${name} (servito da Apache)`,
+		deactivateProject: (name: string) => `Disattiva ${name}`,
+		startAll: 'Avvia tutti i servizi',
+		stopAll: 'Ferma tutti i servizi',
+		startService: (label: string) => `Avvia ${label}`,
+		stopService: (label: string) => `Ferma ${label}`
 	},
 	elevation: {
 		title: 'Serve il permesso di amministratore',
