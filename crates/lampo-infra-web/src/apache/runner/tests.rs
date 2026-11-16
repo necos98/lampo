@@ -162,7 +162,10 @@ async fn unexpected_exit_is_published_as_failed() {
     assert!(status.message.unwrap().contains("boom"));
     let events = f.events.0.lock().unwrap();
     assert!(events.iter().any(|e| matches!(e, DomainEvent::ServiceLog { line, .. } if line == "AH00000: boom")));
-    assert!(matches!(events.last(), Some(DomainEvent::ServiceStatusChanged(s)) if s.state == ServiceState::Failed));
+    // The failed status, then the crash (the automatic restart reacts to it).
+    let [.., failed, crashed] = events.as_slice() else { panic!("{events:?}") };
+    assert!(matches!(failed, DomainEvent::ServiceStatusChanged(s) if s.state == ServiceState::Failed), "{failed:?}");
+    assert!(matches!(crashed, DomainEvent::ServiceCrashed { service, message } if service.is_apache() && message.contains("boom")), "{crashed:?}");
 }
 
 #[tokio::test]
