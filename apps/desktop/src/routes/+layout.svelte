@@ -12,12 +12,16 @@
 	import Sidebar from '#lib/components/layout/Sidebar.svelte';
 	import UnsavedChangesGuard from '#lib/components/layout/UnsavedChangesGuard.svelte';
 	import { Toaster } from '#lib/components/ui/sonner/index.js';
+	import * as Tooltip from '#lib/components/ui/tooltip/index.js';
 	import { installShortcuts } from '#lib/services/navigation.js';
 	import { firstRun, startStores, unsavedChanges, updater } from '#lib/stores/index.js';
 
 	import type { LayoutProps } from './$types';
 
 	let { children }: LayoutProps = $props();
+
+	/** Icons show their tooltip after a short pause, not on every pass of the pointer. */
+	const TOOLTIP_DELAY_MS = 400;
 
 	const inWizard = $derived(page.url.pathname.startsWith('/first-run'));
 
@@ -60,16 +64,19 @@
 <Toaster position="bottom-right" />
 <UnsavedChangesGuard />
 
-{#if inWizard}
-	<div class="h-screen overflow-y-auto">{@render children()}</div>
-{:else}
-	<div class="flex h-screen overflow-hidden">
-		<Sidebar />
-		<div class="flex min-w-0 flex-1 flex-col">
-			<ElevationBanner />
-			<main class="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-				{@render children()}
-			</main>
+<!-- One provider for every tooltip: once one is open, moving to the next icon shows its tooltip at once. -->
+<Tooltip.Provider delayDuration={TOOLTIP_DELAY_MS}>
+	{#if inWizard}
+		<div class="h-screen overflow-y-auto">{@render children()}</div>
+	{:else}
+		<div class="flex h-screen overflow-hidden">
+			<Sidebar />
+			<div class="flex min-w-0 flex-1 flex-col">
+				<ElevationBanner />
+				<main class="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+					{@render children()}
+				</main>
+			</div>
 		</div>
-	</div>
-{/if}
+	{/if}
+</Tooltip.Provider>

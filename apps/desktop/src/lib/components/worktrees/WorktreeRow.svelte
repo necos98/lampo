@@ -9,6 +9,7 @@
 	import { formatDateTime } from '#lib/services/format.js';
 	import { worktrees } from '#lib/stores/index.js';
 
+	import CopyButton from '../common/CopyButton.svelte';
 	import ExternalLink from '../common/ExternalLink.svelte';
 
 	let { worktree, onremove }: { worktree: WorktreeEnvironment; onremove: (w: WorktreeEnvironment) => void } = $props();
@@ -25,7 +26,10 @@
 		<p class="truncate text-xs text-muted-foreground" title={formatDateTime(worktree.createdAtUnixMs)}>{worktree.site}</p>
 	</div>
 	<div class="min-w-0">
-		<ExternalLink href={worktree.url}>{worktree.url.replace(/^https?:\/\//, '')}</ExternalLink>
+		<div class="flex min-w-0 items-center gap-1">
+			<ExternalLink href={worktree.url} class="truncate">{worktree.url.replace(/^https?:\/\//, '')}</ExternalLink>
+			<CopyButton value={worktree.url} label="{m.projects.copyUrl} {worktree.site}" />
+		</div>
 		<p class="truncate font-mono text-xs text-muted-foreground" title={worktree.root}>{worktree.root}</p>
 	</div>
 	<Badge variant="secondary" title={t.modes[worktree.databaseMode.mode]}>{t.modeShort[worktree.databaseMode.mode]}</Badge>

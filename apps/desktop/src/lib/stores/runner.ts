@@ -36,13 +36,17 @@ export class CommandRunner {
 			return { ok: true, value };
 		} catch (e) {
 			const error = toAppError(e);
-			if (error.code === 'elevation-required') {
-				this.#onElevationRequired();
-				this.#notifier.info(m.elevation.savedPending);
-			} else if (error.code !== 'cancelled' && !opts.quiet) {
+			if (error.code === 'elevation-required') this.elevationRequired();
+			else if (error.code !== 'cancelled' && !opts.quiet) {
 				this.#notifier.error(opts.errors?.[error.code] ?? describeError(error));
 			}
 			return { ok: false, error };
 		}
+	}
+
+	/** A change was saved but waits for the hosts file: hands it to the elevation flow and says so. */
+	elevationRequired(): void {
+		this.#onElevationRequired();
+		this.#notifier.info(m.elevation.savedPending);
 	}
 }

@@ -5,19 +5,26 @@
 	import AsyncBoundary from '#lib/components/common/AsyncBoundary.svelte';
 	import PageHeader from '#lib/components/common/PageHeader.svelte';
 	import ImportProjectDialog from '#lib/components/projects/ImportProjectDialog.svelte';
+	import ProjectListToolbar from '#lib/components/projects/ProjectListToolbar.svelte';
 	import ProjectRow from '#lib/components/projects/ProjectRow.svelte';
 	import UnreadableProjectsNotice from '#lib/components/projects/UnreadableProjectsNotice.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
-	import { Input } from '#lib/components/ui/input/index.js';
 	import { messages as m } from '#lib/messages/index.js';
 	import { filterProjects } from '#lib/projects/projectFilter.js';
+	import { filterByStatus, loadProjectView, saveProjectView, sortProjects } from '#lib/projects/projectView.js';
 	import { projects } from '#lib/stores/index.js';
 
 	let filter = $state('');
 	let importing = $state(false);
+	let view = $state(loadProjectView());
+
+	$effect(() => {
+		// Best effort: without storage the page still works, it just forgets the view on reload.
+		saveProjectView(view);
+	});
 
 	const all = $derived(projects.all);
-	const visible = $derived(filterProjects(all, filter));
+	const visible = $derived(sortProjects(filterByStatus(filterProjects(all, filter), view.status), view.sort));
 </script>
 
 <PageHeader title={m.projects.title} subtitle={projects.list.data ? m.projects.subtitle(all.length) : undefined}>
@@ -32,7 +39,7 @@
 {/if}
 
 {#if all.length > 0}
-	<Input data-filter class="mb-3 h-8 max-w-xs" placeholder={m.common.search} bind:value={filter} aria-label={m.common.search} />
+	<ProjectListToolbar bind:query={filter} bind:view />
 {/if}
 
 <AsyncBoundary status={projects.list.status} error={projects.list.error} onretry={projects.load} empty={all.length === 0} emptyMessage={m.projects.empty}>

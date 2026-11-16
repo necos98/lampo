@@ -1,13 +1,11 @@
 <script lang="ts">
-	import Check from '@lucide/svelte/icons/check';
-	import Copy from '@lucide/svelte/icons/copy';
 	import Eye from '@lucide/svelte/icons/eye';
 	import EyeOff from '@lucide/svelte/icons/eye-off';
 
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { messages as m } from '#lib/messages/index.js';
-	import { notifier } from '#lib/services/notifier.js';
-	import { copyText } from '#lib/services/platform.js';
+
+	import CopyButton from './CopyButton.svelte';
 
 	interface Props {
 		label: string;
@@ -18,14 +16,6 @@
 
 	let { label, value, secret = false }: Props = $props();
 	let revealed = $state(false);
-	let copied = $state(false);
-
-	async function copy() {
-		if (await copyText(value)) {
-			copied = true;
-			setTimeout(() => (copied = false), 1200);
-		} else notifier.error(m.common.copyFailed);
-	}
 
 	const shown = $derived(value === '' ? m.common.emptyPassword : secret && !revealed ? '••••••••' : value);
 </script>
@@ -38,7 +28,5 @@
 			{#if revealed}<EyeOff />{:else}<Eye />{/if}
 		</Button>
 	{/if}
-	<Button variant="ghost" size="icon-xs" onclick={copy} aria-label="{m.common.copy} {label}">
-		{#if copied}<Check />{:else}<Copy />{/if}
-	</Button>
+	<CopyButton {value} label="{m.common.copy} {label}" />
 </div>

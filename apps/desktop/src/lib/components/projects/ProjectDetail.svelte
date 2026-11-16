@@ -11,6 +11,7 @@
 
 	import type { AppError, Project } from '#lib/api/index.js';
 	import ConfirmDialog from '#lib/components/common/ConfirmDialog.svelte';
+	import CopyButton from '#lib/components/common/CopyButton.svelte';
 	import ExternalChangeNotice from '#lib/components/common/ExternalChangeNotice.svelte';
 	import ExternalLink from '#lib/components/common/ExternalLink.svelte';
 	import PageHeader from '#lib/components/common/PageHeader.svelte';
@@ -20,6 +21,7 @@
 	import * as Tabs from '#lib/components/ui/tabs/index.js';
 	import { messages as m } from '#lib/messages/index.js';
 	import { envVarRefusal } from '#lib/projects/envVarRefusal.js';
+	import { projectLogsHref } from '#lib/projects/links.js';
 	import { refusedDirectivesReason } from '#lib/services/errors.js';
 	import { projects, unsavedChanges } from '#lib/stores/index.js';
 	import { ProjectDraft } from '#lib/stores/projectDraft.svelte.js';
@@ -103,11 +105,12 @@
 >
 	{#snippet meta()}
 		<ExternalLink href={project.url}>{project.url.replace(/^https?:\/\//, '')}</ExternalLink>
+		<CopyButton value={project.url} label={t.copyUrl} />
 	{/snippet}
 	{#snippet actions()}
 		<Button variant="ghost" size="sm" disabled={!project.folderExists} onclick={() => projects.openTerminal(project.id)}><SquareTerminal />{t.openTerminal}</Button>
 		<Button variant="ghost" size="sm" title={t.openInVsCodeHelp} disabled={!project.folderExists} onclick={() => projects.openInVsCode(project.id)}><Code />{t.openInVsCode}</Button>
-		<Button variant="ghost" size="sm" href="/logs?source=error:{project.id}"><ScrollText />{m.nav.logs}</Button>
+		<Button variant="ghost" size="sm" href={projectLogsHref(project.id)}><ScrollText />{m.nav.logs}</Button>
 		<Button variant="ghost" size="sm" onclick={() => (exportOpen = true)}><FileUp />{t.export}</Button>
 		<Button variant="ghost" size="sm" onclick={() => (presetOpen = true)}><BookmarkPlus />{t.saveAsPreset}</Button>
 		<label class="flex items-center gap-2 text-sm" title={t.servedHelp}>

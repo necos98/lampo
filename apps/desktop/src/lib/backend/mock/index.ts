@@ -97,6 +97,12 @@ export function createMockBackend({ fresh }: Options): Backend {
 	const attachWorktrees = (p: T.Project): T.Project => ({ ...p, mail: mailOf(p), worktrees: worktrees.filter((w) => w.projectId === p.id) });
 
 	const find = (id: string) => projects.find((p) => p.id === id) ?? fail('not-found', `project ${id}`);
+	/** Like the app's `OpenProjectIn`: Explorer, the terminal and VS Code need the folder to exist. */
+	const openIn = async (id: string) => {
+		await sleep(150);
+		const project = find(id);
+		if (!project.folderExists) fail('validation', `the project folder does not exist: ${project.root}`, { folder: project.root });
+	};
 	const replace = (next: T.Project) => {
 		projects = projects.map((p) => (p.id === next.id ? next : p));
 		return attachWorktrees(clone(next));
@@ -382,15 +388,9 @@ export function createMockBackend({ fresh }: Options): Backend {
 			await sleep(250);
 			find(projectId);
 		},
-		openTerminal: async (projectId) => {
-			find(projectId);
-		},
-		openProjectFolder: async (projectId) => {
-			find(projectId);
-		},
-		openInVsCode: async (projectId) => {
-			find(projectId);
-		},
+		openTerminal: openIn,
+		openProjectFolder: openIn,
+		openInVsCode: openIn,
 		importProject: async ({ file, root }) => {
 			await sleep(400);
 			const name = file.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, '') ?? 'importato';

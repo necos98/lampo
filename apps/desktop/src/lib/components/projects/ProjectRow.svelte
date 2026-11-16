@@ -9,13 +9,14 @@
 
 	import ExternalLink from '../common/ExternalLink.svelte';
 	import StatusDot from '../common/StatusDot.svelte';
+	import ProjectQuickActions from './ProjectQuickActions.svelte';
 
 	let { project }: { project: Project } = $props();
 	const tone = $derived(!project.folderExists ? 'warn' : project.active ? 'ok' : 'idle');
 	const stateLabel = $derived(!project.folderExists ? m.projects.folderMissing : project.active ? m.projects.active : m.projects.inactive);
 </script>
 
-<li class="relative grid grid-cols-[auto_minmax(0,1.4fr)_minmax(0,1.2fr)_5rem_5rem_auto] items-center gap-x-4 rounded-md border bg-card px-3 py-2.5 transition-colors focus-within:ring-2 focus-within:ring-ring/50 hover:bg-muted/50">
+<li class="group relative grid grid-cols-[auto_minmax(0,1.4fr)_minmax(0,1.2fr)_5rem_5rem_auto_auto] items-center gap-x-4 rounded-md border bg-card px-3 py-2.5 transition-colors focus-within:ring-2 focus-within:ring-ring/50 hover:bg-muted/50">
 	<StatusDot {tone} label={stateLabel} />
 	<div class="min-w-0">
 		<a href="/projects/{project.id}" class="block truncate font-medium outline-none after:absolute after:inset-0 after:content-['']">{project.name}</a>
@@ -31,6 +32,8 @@
 	<span class="text-xs text-muted-foreground">
 		{project.database ? `MySQL ${project.database.mysqlVersion}` : ''}
 	</span>
+	<!-- Always in the tab order; shown on hover or when a control of the row has focus. -->
+	<ProjectQuickActions {project} class="relative z-10 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100" />
 	<label class="relative z-10 flex items-center gap-2 text-xs text-muted-foreground" title={m.projects.servedHelp}>
 		{m.projects.served}
 		<Switch

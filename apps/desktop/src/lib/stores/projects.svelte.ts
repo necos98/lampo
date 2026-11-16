@@ -11,8 +11,9 @@ import type {
 } from '../api/index.js';
 import type { Backend } from '../backend/ports.js';
 import { messages as m } from '../messages/index.js';
+import { bulkActivationTargets, setEachActive, type BulkActivation } from '../projects/bulkActivation.js';
 import { Resource } from './resource.svelte.js';
-import type { CommandRunner } from './runner.js';
+import type { CommandRunner, Outcome } from './runner.js';
 
 const EVENT_COALESCE_MS = 150;
 
@@ -20,6 +21,8 @@ export class ProjectsStore {
 	readonly list: Resource<ProjectList>;
 	/** Projects whose active toggle is being applied. */
 	toggling = $state<Record<string, boolean>>({});
+	/** «Attiva tutti» / «Disattiva tutti» is being applied. */
+	bulkToggling = $state(false);
 
 	readonly #backend: Backend;
 	readonly #runner: CommandRunner;
@@ -58,12 +61,57 @@ export class ProjectsStore {
 
 	async setActive(id: string, active: boolean) {
 		this.toggling[id] = true;
-		this.list.patch((list) => ({ ...list, projects: list.projects.map((p) => (p.id === id ? { ...p, active } : p)) }));
+		this.#patchActive(id, active);
 		const result = await this.#runner.run(() => this.#backend.commands.setProjectActive({ projectId: id, active }));
 		delete this.toggling[id];
 		// On failure (or a pending elevation) the backend state is the truth.
 		if (!result.ok) await this.list.load();
 		return result;
+	}
+
+	/** How many projects «Attiva tutti» (`true`) or «Disattiva tutti» would change. */
+	bulkTargetCount(active: boolean): number {
+		return this.#bulkTargets(active).length;
+	}
+
+	/** A project whose own switch is still being applied is left to that change. */
+	#bulkTargets(active: boolean): string[] {
+		return bulkActivationTargets(this.all.filter((p) => !this.toggling[p.id]), active);
+	}
+
+	/**
+	 * Serves (or stops) every project not already in that state, one at a time. Projects the backend
+	 * refuses are named in a warning and keep their state; the list is then reloaded from the backend.
+	 */
+	async setAllActive(active: boolean): Promise<Outcome<BulkActivation> | null> {
+		if (this.bulkToggling) return null;
+		const ids = this.#bulkTargets(active);
+		if (ids.length === 0) return null;
+		this.bulkToggling = true;
+		for (const id of ids) this.toggling[id] = true;
+		const result = await this.#runner.run(
+			() =>
+				setEachActive(ids, async (id) => {
+					try {
+						await this.#backend.commands.setProjectActive({ projectId: id, active });
+						this.#patchActive(id, active);
+					} finally {
+						delete this.toggling[id];
+					}
+				}),
+			{
+				success: (r) => (active ? m.projects.bulkActivated(r.changed.length) : m.projects.bulkDeactivated(r.changed.length)),
+				warning: (r) => (r.failed.length ? m.projects.bulkFailed(r.failed.map((f) => this.get(f.id)?.name ?? f.id).join(', ')) : null)
+			}
+		);
+		this.bulkToggling = false;
+		if (result.ok && result.value.elevationPending) this.#runner.elevationRequired();
+		await this.list.load();
+		return result;
+	}
+
+	#patchActive(id: string, active: boolean) {
+		this.list.patch((list) => ({ ...list, projects: list.projects.map((p) => (p.id === id ? { ...p, active } : p)) }));
 	}
 
 	/** The project is created even when its database is not: that is a warning, not a failure. */
