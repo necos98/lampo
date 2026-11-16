@@ -1,7 +1,6 @@
 import type { Backend } from '../backend/ports.js';
 import { messages as m } from '../messages/index.js';
-import { describeError } from '../services/errors.js';
-import type { Notifier } from '../services/notifier.js';
+import type { CommandRunner } from './runner.js';
 
 /**
  * Pending hosts-file change that needs administrator rights. The backend never prompts on its
@@ -13,11 +12,11 @@ export class ElevationStore {
 	applying = $state(false);
 
 	readonly #backend: Backend;
-	readonly #notifier: Notifier;
+	readonly #runner: CommandRunner;
 
-	constructor(backend: Backend, notifier: Notifier) {
+	constructor(backend: Backend, runner: CommandRunner) {
 		this.#backend = backend;
-		this.#notifier = notifier;
+		this.#runner = runner;
 	}
 
 	#timer: ReturnType<typeof setTimeout> | undefined;
@@ -53,14 +52,8 @@ export class ElevationStore {
 	async apply(): Promise<void> {
 		if (this.applying) return;
 		this.applying = true;
-		try {
-			await this.#backend.commands.applyEnvironment();
-			this.pending = false;
-			this.#notifier.success(m.elevation.applied);
-		} catch (e) {
-			this.#notifier.error(describeError(e));
-		} finally {
-			this.applying = false;
-		}
+		const result = await this.#runner.run(() => this.#backend.commands.applyEnvironment(), { success: m.elevation.applied, retry: () => this.apply() });
+		this.applying = false;
+		if (result.ok) this.pending = false;
 	}
 }

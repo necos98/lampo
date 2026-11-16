@@ -36,7 +36,9 @@ export class ServicesStore {
 		const cmd = this.#backend.commands;
 		const call = action === 'start' ? cmd.startServices : action === 'stop' ? cmd.stopServices : cmd.restartServices;
 		const result = await this.#runner.run(() => call({ services }), {
-			success: services.length ? undefined : m.services.done[action]
+			success: services.length ? undefined : m.services.done[action],
+			retry: () => this.act(action, services),
+			serviceLogs: () => this.#failedAmong(names)
 		});
 		for (const n of names) delete this.busy[n];
 		for (const n of names) {
@@ -44,6 +46,12 @@ export class ServicesStore {
 			else if (services.length) this.failures[n] = result.error;
 		}
 		await this.list.load();
+	}
+
+	/** The service whose log explains a failed action: the only one acted on, else the first that failed. */
+	#failedAmong(names: string[]): string | null {
+		if (names.length === 1) return names[0];
+		return (this.list.data ?? []).find((s) => s.state === 'failed' && names.includes(s.service))?.service ?? null;
 	}
 
 	async start(): Promise<() => void> {

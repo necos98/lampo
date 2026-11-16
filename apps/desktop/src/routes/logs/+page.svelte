@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Trash2 from '@lucide/svelte/icons/trash-2';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 
 	import { page } from '$app/state';
 
@@ -17,6 +17,7 @@
 	import { Label } from '#lib/components/ui/label/index.js';
 	import { pickInitialSource, readLastSource, rememberLastSource } from '#lib/logs/lastSource.js';
 	import { isLevelFilter, LEVEL_FILTERS } from '#lib/logs/level.js';
+	import { serviceLogSource } from '#lib/logs/serviceSource.js';
 	import { messages as m } from '#lib/messages/index.js';
 	import { createLogSearch, createLogSession, logSources } from '#lib/stores/index.js';
 
@@ -36,13 +37,27 @@
 		if (isLevelFilter(value)) session.levelFilter = value;
 	}
 
+	const request = $derived({ source: page.url.searchParams.get('source'), service: page.url.searchParams.get('service') });
+	/** Only the latest request opens its log, however the source lists arrive. */
+	let requestGeneration = 0;
+
 	onMount(() => {
 		session.setHidden(document.hidden);
-		void logSources.load().then(() => {
-			const pick = pickInitialSource(logSources.list.data ?? [], page.url.searchParams.get('source'), readLastSource());
-			if (pick) show(pick);
-		});
 		return () => session.close();
+	});
+
+	// Also when already on this page: a toast's «Vedi log» only changes the query.
+	$effect(() => {
+		const wanted = request;
+		const generation = ++requestGeneration;
+		untrack(() => {
+			void logSources.load().then(() => {
+				if (generation !== requestGeneration) return;
+				const all = logSources.list.data ?? [];
+				const pick = pickInitialSource(all, wanted.source ?? serviceLogSource(all, wanted.service), readLastSource());
+				if (pick) show(pick);
+			});
+		});
 	});
 
 	const sources = $derived(logSources.list.data ?? []);

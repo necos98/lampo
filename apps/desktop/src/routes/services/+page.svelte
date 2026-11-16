@@ -3,24 +3,38 @@
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import ShieldQuestion from '@lucide/svelte/icons/shield-question';
 	import Square from '@lucide/svelte/icons/square';
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
+
+	import { page } from '$app/state';
 
 	import AsyncBoundary from '#lib/components/common/AsyncBoundary.svelte';
 	import PageHeader from '#lib/components/common/PageHeader.svelte';
 	import ServiceRow from '#lib/components/services/ServiceRow.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { messages as m } from '#lib/messages/index.js';
+	import { conflictPortParam } from '#lib/services/links.js';
 	import { diagnostics, services } from '#lib/stores/index.js';
 
 	const t = m.services;
 	const list = $derived(services.list.data ?? []);
 	const conflicts = $derived(diagnostics.doctor.data?.portConflicts ?? []);
 	const anyBusy = $derived(Object.keys(services.busy).length > 0);
+	/** The port of the conflict a toast's «Vedi conflitto» points at. */
+	const highlighted = $derived(conflictPortParam(page.url.searchParams.get('conflict')));
 
 	onMount(() => {
 		void services.load();
-		void diagnostics.ensureDoctor();
+		if (highlighted === null) void diagnostics.ensureDoctor();
 	});
+
+	// A conflict just reported may postdate the last report: check the ports again.
+	$effect(() => {
+		if (highlighted !== null) untrack(() => void diagnostics.runDoctor());
+	});
+
+	function reveal(element: HTMLElement) {
+		element.scrollIntoView({ block: 'nearest' });
+	}
 </script>
 
 <PageHeader title={t.title} subtitle={t.subtitle}>
@@ -51,7 +65,14 @@
 	{:else}
 		<ul class="flex flex-col gap-1.5">
 			{#each conflicts as c (c.port)}
-				<li class="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm">{t.conflictBody(c.port, c.wantedBy, c.owner)}</li>
+				{@const current = c.port === highlighted}
+				<li
+					class="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm {current ? 'ring-2 ring-amber-500' : ''}"
+					aria-current={current ? 'true' : undefined}
+					{@attach current ? reveal : undefined}
+				>
+					{t.conflictBody(c.port, c.wantedBy, c.owner)}
+				</li>
 			{/each}
 		</ul>
 	{/if}

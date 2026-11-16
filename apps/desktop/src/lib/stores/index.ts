@@ -35,8 +35,8 @@ const CREATE_PROJECT_ROUTE = '/projects/new';
 
 export const simulated = backend.simulated;
 
-export const elevation = new ElevationStore(backend, notifier);
-const runner = new CommandRunner(notifier, () => elevation.flag());
+const runner = new CommandRunner(notifier, () => elevation.flag(), (href) => void goto(href));
+export const elevation = new ElevationStore(backend, runner);
 
 export const tasks = new TasksStore(backend);
 export const projects = new ProjectsStore(backend, runner);
@@ -73,7 +73,7 @@ export const createLogSearch = (session: LogSession) =>
 		() => session.visible,
 		() => session.unfollow()
 	);
-export const createProjectFlow = () => new CreateProjectFlow(backend, projects, tasks, scaffoldSession, () => settings.value.data?.defaultAddressing);
+export const createProjectFlow = () => new CreateProjectFlow(backend, projects, runner, tasks, scaffoldSession, () => settings.value.data?.defaultAddressing);
 
 interface Startable {
 	start(): Promise<() => void>;

@@ -36,7 +36,7 @@ export class LogFileActions {
 				filters: [{ name: m.logs.exportFilter, extensions: [EXPORT_EXTENSION] }]
 			});
 		} catch (e) {
-			this.#notifier.error(m.common.actionFailed, e instanceof Error ? e.message : String(e));
+			this.#notifier.error(m.common.actionFailed, { description: e instanceof Error ? e.message : String(e) });
 			return;
 		}
 		if (!file) return;

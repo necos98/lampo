@@ -59,10 +59,10 @@ export class ProjectsStore {
 		return this.all.find((p) => p.id === id) ?? null;
 	}
 
-	async setActive(id: string, active: boolean) {
+	async setActive(id: string, active: boolean): Promise<Outcome<Project>> {
 		this.toggling[id] = true;
 		this.#patchActive(id, active);
-		const result = await this.#runner.run(() => this.#backend.commands.setProjectActive({ projectId: id, active }));
+		const result = await this.#runner.run(() => this.#backend.commands.setProjectActive({ projectId: id, active }), { retry: () => this.setActive(id, active) });
 		delete this.toggling[id];
 		// On failure (or a pending elevation) the backend state is the truth.
 		if (!result.ok) await this.list.load();

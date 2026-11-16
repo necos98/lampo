@@ -18,7 +18,7 @@ async function started() {
 		success: (message) => void shown.push(`success: ${message}`),
 		info: (message) => void shown.push(`info: ${message}`),
 		warning: (message) => void shown.push(`warning: ${message}`),
-		error: (message, description) => void shown.push(`error: ${message} (${description})`)
+		error: (message, notice) => void shown.push(`error: ${message} (${notice?.description})`)
 	};
 	let handler: ((p: ServiceAutoRestartPayload) => void) | null = null;
 	const events = {

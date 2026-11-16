@@ -27,10 +27,10 @@ function parseExternalUrl(url: string): URL | null {
 export function openExternal(url: string): void {
 	const parsed = parseExternalUrl(url);
 	if (!parsed) {
-		notifier.error(m.common.openLinkFailed, m.common.unsupportedLink);
+		notifier.error(m.common.openLinkFailed, { description: m.common.unsupportedLink });
 		return;
 	}
-	void backend.platform.openExternal(parsed.href).catch((err: unknown) => notifier.error(m.common.openLinkFailed, err instanceof Error ? err.message : String(err)));
+	void backend.platform.openExternal(parsed.href).catch((err: unknown) => notifier.error(m.common.openLinkFailed, { description: err instanceof Error ? err.message : String(err) }));
 }
 
 export const pickFolder = (options?: PickOptions) => backend.platform.pickFolder(options);

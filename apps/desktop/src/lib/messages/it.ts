@@ -17,6 +17,8 @@ export const it = {
 	},
 	common: {
 		retry: 'Riprova',
+		/** The buttons of an error toast. */
+		errorActions: { retry: 'Riprova', viewLogs: 'Vedi log', viewConflict: 'Vedi conflitto' },
 		cancel: 'Annulla',
 		confirm: 'Conferma',
 		save: 'Salva',

@@ -47,7 +47,7 @@ export class AutoRestartNotices {
 				this.#notifier.success(t.restarted(label));
 				break;
 			case 'gave-up':
-				this.#notifier.error(t.gaveUp(label, step.attempts), step.message);
+				this.#notifier.error(t.gaveUp(label, step.attempts), { description: step.message });
 				break;
 		}
 	}

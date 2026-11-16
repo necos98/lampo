@@ -12,6 +12,7 @@ import {
 import type { Backend } from '../backend/ports.js';
 import { effectiveAddressing } from '../projects/addressing.js';
 import type { ProjectsStore } from './projects.svelte.js';
+import type { CommandRunner } from './runner.js';
 import { scaffoldViewOf, type ScaffoldPhase, type ScaffoldSession } from './scaffoldSession.js';
 import { scaffoldTaskKey, type TaskState, type TasksStore } from './tasks.svelte.js';
 
@@ -94,6 +95,7 @@ export class CreateProjectFlow {
 
 	readonly #backend: Backend;
 	readonly #projects: ProjectsStore;
+	readonly #runner: CommandRunner;
 	readonly #tasks: TasksStore;
 	readonly #session: ScaffoldSession;
 	readonly #defaultAddressing: () => Addressing | undefined;
@@ -106,9 +108,17 @@ export class CreateProjectFlow {
 	#detach: (() => void) | null = null;
 
 	/** `defaultAddressing` reads the `default_addressing` setting (`undefined` while not loaded). */
-	constructor(backend: Backend, projects: ProjectsStore, tasks: TasksStore, session: ScaffoldSession, defaultAddressing: () => Addressing | undefined) {
+	constructor(
+		backend: Backend,
+		projects: ProjectsStore,
+		runner: CommandRunner,
+		tasks: TasksStore,
+		session: ScaffoldSession,
+		defaultAddressing: () => Addressing | undefined
+	) {
 		this.#backend = backend;
 		this.#projects = projects;
+		this.#runner = runner;
 		this.#tasks = tasks;
 		this.#session = session;
 		this.#defaultAddressing = defaultAddressing;
@@ -192,18 +202,18 @@ export class CreateProjectFlow {
 		this.scaffoldError = null;
 		this.cancelled = false;
 		this.#listen();
-		try {
-			const { taskId } = await this.#backend.commands.scaffoldProject(request);
-			this.taskId = taskId;
-			this.phase = 'running';
-			this.#session.began(request, taskId);
-			this.#tasks.track(taskId, { kind: 'scaffold', key: scaffoldTaskKey(request) });
-		} catch (e) {
-			this.scaffoldError = toAppError(e);
+		const result = await this.#runner.run(() => this.#backend.commands.scaffoldProject(request), { retry: () => this.startScaffold() });
+		this.starting = false;
+		if (!result.ok) {
+			this.scaffoldError = result.error;
 			this.phase = 'form';
-		} finally {
-			this.starting = false;
+			return;
 		}
+		const { taskId } = result.value;
+		this.taskId = taskId;
+		this.phase = 'running';
+		this.#session.began(request, taskId);
+		this.#tasks.track(taskId, { kind: 'scaffold', key: scaffoldTaskKey(request) });
 	}
 
 	async cancelScaffold(): Promise<void> {
