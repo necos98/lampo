@@ -2,12 +2,14 @@ use lampo_application::dto::*;
 use lampo_application::{AppResult, CallContext};
 use tauri::State;
 
+use super::blocking::run_blocking;
 use super::tasks::spawn_task;
 use crate::state::AppState;
 
 #[tauri::command]
-pub fn list_worktrees(state: State<'_, AppState>, project_id: Option<String>) -> AppResult<Vec<WorktreeEnvironmentDto>> {
-    state.worktree_queries.list(project_id.as_deref())
+pub async fn list_worktrees(state: State<'_, AppState>, project_id: Option<String>) -> AppResult<Vec<WorktreeEnvironmentDto>> {
+    let worktrees = state.worktree_queries.clone();
+    run_blocking(move || worktrees.list(project_id.as_deref())).await
 }
 
 /// Background task (cloning a database can take a while); on success

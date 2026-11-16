@@ -2,6 +2,7 @@ use lampo_application::dto::*;
 use lampo_application::{AppResult, CallContext};
 use tauri::State;
 
+use super::blocking::run_blocking;
 use super::tasks::spawn_task;
 use crate::state::AppState;
 
@@ -11,8 +12,9 @@ pub async fn list_catalog(state: State<'_, AppState>, kind: Option<String>) -> A
 }
 
 #[tauri::command]
-pub fn list_installed_packages(state: State<'_, AppState>) -> AppResult<Vec<InstalledPackageDto>> {
-    state.package_catalog.list_installed()
+pub async fn list_installed_packages(state: State<'_, AppState>) -> AppResult<Vec<InstalledPackageDto>> {
+    let catalog = state.package_catalog.clone();
+    run_blocking(move || catalog.list_installed()).await
 }
 
 #[tauri::command]
@@ -30,8 +32,9 @@ pub fn install_package(state: State<'_, AppState>, request: InstallPackageReques
 
 /// Extensions the installed PHP `php_version` (`"8.3"`) can load.
 #[tauri::command]
-pub fn list_php_extensions(state: State<'_, AppState>, php_version: String) -> AppResult<Vec<PhpExtensionDto>> {
-    state.php_extensions.list(&php_version)
+pub async fn list_php_extensions(state: State<'_, AppState>, php_version: String) -> AppResult<Vec<PhpExtensionDto>> {
+    let extensions = state.php_extensions.clone();
+    run_blocking(move || extensions.list(&php_version)).await
 }
 
 /// Background task (services restart, then thousands of files are deleted); listen to
@@ -44,8 +47,9 @@ pub fn uninstall_package(state: State<'_, AppState>, id: PackageIdDto) -> TaskSt
 }
 
 #[tauri::command]
-pub fn first_run_status(state: State<'_, AppState>) -> AppResult<FirstRunStatusDto> {
-    state.first_run.status()
+pub async fn first_run_status(state: State<'_, AppState>) -> AppResult<FirstRunStatusDto> {
+    let first_run = state.first_run.clone();
+    run_blocking(move || first_run.status()).await
 }
 
 /// Background task (first-run wizard downloads).

@@ -8,6 +8,7 @@
 //! `lampo://task-progress` / `lampo://task-finished`; `cancel_task` cancels them.
 
 pub mod app;
+mod blocking;
 pub mod diagnostics;
 mod external_apps;
 pub mod integrations;

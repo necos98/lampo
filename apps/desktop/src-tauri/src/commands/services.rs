@@ -3,11 +3,13 @@ use lampo_application::use_cases::EnvironmentSync;
 use lampo_application::{AppResult, CallContext};
 use tauri::State;
 
+use super::blocking::run_blocking;
 use crate::state::AppState;
 
 #[tauri::command]
-pub fn list_services(state: State<'_, AppState>) -> AppResult<Vec<ServiceStatusDto>> {
-    state.service_queries.list()
+pub async fn list_services(state: State<'_, AppState>) -> AppResult<Vec<ServiceStatusDto>> {
+    let services = state.service_queries.clone();
+    run_blocking(move || services.list()).await
 }
 
 #[tauri::command]

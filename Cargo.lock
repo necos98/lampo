@@ -2149,6 +2149,7 @@ dependencies = [
 name = "lampo-desktop"
 version = "0.1.2"
 dependencies = [
+ "futures-util",
  "lampo-application",
  "lampo-domain",
  "lampo-infra-packages",

@@ -1,22 +1,26 @@
 use lampo_application::dto::*;
-use lampo_application::{AppResult, CallContext};
+use lampo_application::{AppError, AppResult, CallContext};
 use tauri::State;
 
+use super::blocking::run_blocking;
 use crate::state::AppState;
 
 #[tauri::command]
-pub fn list_projects(state: State<'_, AppState>) -> AppResult<ProjectListDto> {
-    state.project_queries.list()
+pub async fn list_projects(state: State<'_, AppState>) -> AppResult<ProjectListDto> {
+    let projects = state.project_queries.clone();
+    run_blocking(move || projects.list()).await
 }
 
 #[tauri::command]
-pub fn get_project(state: State<'_, AppState>, project_id: String) -> AppResult<ProjectDto> {
-    state.project_queries.get(&project_id)
+pub async fn get_project(state: State<'_, AppState>, project_id: String) -> AppResult<ProjectDto> {
+    let projects = state.project_queries.clone();
+    run_blocking(move || projects.get(&project_id)).await
 }
 
 #[tauri::command]
-pub fn detect_project(state: State<'_, AppState>, folder: String) -> AppResult<DetectionDto> {
-    state.detect_project.execute(&folder)
+pub async fn detect_project(state: State<'_, AppState>, folder: String) -> AppResult<DetectionDto> {
+    let detect = state.detect_project.clone();
+    run_blocking(move || detect.execute(&folder)).await
 }
 
 #[tauri::command]
@@ -52,38 +56,47 @@ pub async fn relink_project(state: State<'_, AppState>, request: RelinkProjectRe
 /// Opens a PowerShell console in the project folder with the project's toolchain on PATH
 /// (`lampo -p <id> exec -- powershell`; `lampo.exe` sits next to the app executable).
 #[tauri::command]
-pub fn open_terminal(state: State<'_, AppState>, project_id: String) -> AppResult<()> {
+pub async fn open_terminal(state: State<'_, AppState>, project_id: String) -> AppResult<()> {
+    let projects = state.project_queries.clone();
+    run_blocking(move || {
+        let project = projects.get(&project_id)?;
+        spawn_terminal(&project)
+    })
+    .await
+}
+
+fn spawn_terminal(project: &ProjectDto) -> AppResult<()> {
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
 
-    let project = state.project_queries.get(&project_id)?;
-    let lampo = std::env::current_exe().map_err(|e| lampo_application::AppError::internal(e.to_string()))?.with_file_name("lampo.exe");
+    let lampo = std::env::current_exe().map_err(|e| AppError::internal(e.to_string()))?.with_file_name("lampo.exe");
     std::process::Command::new(lampo)
         .args(["-p", &project.id, "exec", "--", "powershell.exe", "-NoLogo", "-NoExit"])
         .current_dir(&project.root)
         .creation_flags(CREATE_NEW_CONSOLE)
         .spawn()
-        .map_err(|e| lampo_application::AppError::internal(format!("impossibile aprire il terminale: {e}")))?;
+        .map_err(|e| AppError::internal(format!("impossibile aprire il terminale: {e}")))?;
     Ok(())
 }
 
 /// Opens the project folder in Windows Explorer.
 #[tauri::command]
-pub fn open_project_folder(state: State<'_, AppState>, project_id: String) -> AppResult<()> {
-    let project = state.project_queries.get(&project_id)?;
-    super::external_apps::open_folder(&project.root)
+pub async fn open_project_folder(state: State<'_, AppState>, project_id: String) -> AppResult<()> {
+    let projects = state.project_queries.clone();
+    run_blocking(move || super::external_apps::open_folder(&projects.get(&project_id)?.root)).await
 }
 
 /// Opens the project folder in Visual Studio Code.
 #[tauri::command]
-pub fn open_in_vscode(state: State<'_, AppState>, project_id: String) -> AppResult<()> {
-    let project = state.project_queries.get(&project_id)?;
-    super::external_apps::open_in_vscode(&project.root)
+pub async fn open_in_vscode(state: State<'_, AppState>, project_id: String) -> AppResult<()> {
+    let projects = state.project_queries.clone();
+    run_blocking(move || super::external_apps::open_in_vscode(&projects.get(&project_id)?.root)).await
 }
 
 #[tauri::command]
-pub fn export_project(state: State<'_, AppState>, request: ExportProjectRequest) -> AppResult<()> {
-    state.export_project.execute(request)
+pub async fn export_project(state: State<'_, AppState>, request: ExportProjectRequest) -> AppResult<()> {
+    let export = state.export_project.clone();
+    run_blocking(move || export.execute(request)).await
 }
 
 #[tauri::command]
