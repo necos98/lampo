@@ -11,7 +11,8 @@ import { MockLogs } from './logs.js';
 import { connection, mysqlOf, packageKey, seedCatalog, seedPresets, seedProjects, seedWorktrees, seriesOf } from './seed.js';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-const clone = <V>(v: V): V => structuredClone(v);
+// JSON round trip like Tauri IPC: `structuredClone` rejects the `$state` proxies the UI passes as arguments.
+const clone = <V>(v: V): V => (v === undefined ? v : (JSON.parse(JSON.stringify(v)) as V));
 
 function fail(code: AppError['code'], message: string, details?: unknown): never {
 	throw { code, message, details } satisfies AppError;

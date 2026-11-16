@@ -1,11 +1,11 @@
-import type { CatalogEntry, InstalledPackage, PackageId, TaskOutcome, UpdateAvailable } from '../api/index.js';
+import type { CatalogEntry, InstalledPackage, PackageId, TaskOutcome, TaskStarted, UpdateAvailable } from '../api/index.js';
 import type { Backend } from '../backend/ports.js';
 import { messages as m } from '../messages/index.js';
 import { buildRows, installTaskKey, uninstallTaskKey, type PackageRow } from '../packages/grouping.js';
 import { describeError } from '../services/errors.js';
 import type { Notifier } from '../services/notifier.js';
 import { Resource } from './resource.svelte.js';
-import type { CommandRunner } from './runner.js';
+import type { CommandRunner, Outcome } from './runner.js';
 import type { TasksStore } from './tasks.svelte.js';
 
 export interface PhpOption {
@@ -76,25 +76,44 @@ export class PackagesStore {
 
 	taskKey = installTaskKey;
 
+	/** Task keys whose start command is in flight: the task is not tracked yet, but a second click must not start another. */
+	#starting = $state<Record<string, true>>({});
+
+	/** True from the click that starts the install until its task finishes. */
 	isInstalling(row: Pick<PackageRow, 'kind' | 'series' | 'phpVersion'>): boolean {
-		return this.#tasks.isRunning(installTaskKey(row.kind, row.series, row.phpVersion));
+		return this.#isBusy(installTaskKey(row.kind, row.series, row.phpVersion));
 	}
 
-	async install(row: Pick<PackageRow, 'kind' | 'series' | 'phpVersion'>) {
-		const result = await this.#runner.run(() => this.#backend.commands.installPackage({ kind: row.kind, series: row.series, phpVersion: row.phpVersion }));
-		if (result.ok) this.#tasks.track(result.value.taskId, { kind: 'install', key: installTaskKey(row.kind, row.series, row.phpVersion) });
-		return result;
+	/** `null` when an install of the same package is already starting or running. */
+	install(row: Pick<PackageRow, 'kind' | 'series' | 'phpVersion'>) {
+		const key = installTaskKey(row.kind, row.series, row.phpVersion);
+		return this.#startTask('install', key, () => this.#backend.commands.installPackage({ kind: row.kind, series: row.series, phpVersion: row.phpVersion }));
 	}
 
+	/** True from the confirmed click until the uninstall task finishes. */
 	isUninstalling(id: PackageId): boolean {
-		return this.#tasks.isRunning(uninstallTaskKey(id));
+		return this.#isBusy(uninstallTaskKey(id));
 	}
 
-	/** Starts the uninstall task; its outcome is announced when it finishes (see `start`). */
-	async uninstall(id: PackageId) {
-		const result = await this.#runner.run(() => this.#backend.commands.uninstallPackage(id));
-		if (result.ok) this.#tasks.track(result.value.taskId, { kind: 'uninstall', key: uninstallTaskKey(id) });
-		return result;
+	/** Starts the uninstall task; its outcome is announced when it finishes (see `start`). `null` if already under way. */
+	uninstall(id: PackageId) {
+		return this.#startTask('uninstall', uninstallTaskKey(id), () => this.#backend.commands.uninstallPackage(id));
+	}
+
+	#isBusy(key: string): boolean {
+		return key in this.#starting || this.#tasks.isRunning(key);
+	}
+
+	async #startTask(kind: 'install' | 'uninstall', key: string, op: () => Promise<TaskStarted>): Promise<Outcome<TaskStarted> | null> {
+		if (this.#isBusy(key)) return null;
+		this.#starting[key] = true;
+		try {
+			const result = await this.#runner.run(op);
+			if (result.ok) this.#tasks.track(result.value.taskId, { kind, key });
+			return result;
+		} finally {
+			delete this.#starting[key];
+		}
 	}
 
 	#announceUninstall(outcome: TaskOutcome | null): void {

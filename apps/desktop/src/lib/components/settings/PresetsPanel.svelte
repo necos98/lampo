@@ -23,10 +23,8 @@
 		confirmOpen = true;
 	}
 
-	async function remove() {
-		if (target) await presets.remove(target.id);
-		target = null;
-	}
+	// `target` stays set: the dialog keeps showing its name while it closes or reports a failure.
+	const remove = () => (target ? presets.remove(target.id) : null);
 </script>
 
 <h2 class="text-sm font-medium">{t.title}</h2>

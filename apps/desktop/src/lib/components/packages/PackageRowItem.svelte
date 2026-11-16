@@ -21,7 +21,9 @@
 	const kindLabel = $derived(t.kinds[row.kind] ?? row.kind);
 	const title = $derived(row.phpVersion ? `${kindLabel} ${row.series}` : `${kindLabel} ${row.series}`);
 	const task = $derived(tasks.forKey(packages.taskKey(row.kind, row.series, row.phpVersion)));
+	/** A tracked task with progress to show; `installing` also covers the moment before it is tracked. */
 	const running = $derived(task !== null && task.outcome === null);
+	const installing = $derived(packages.isInstalling(row));
 	const failed = $derived(task?.outcome?.status === 'failed' ? task.outcome.error : null);
 	const vcMissing = $derived(row.latest.vcRuntime !== null && row.latest.vcRuntimeInstalled === false);
 	const usedBy = $derived(row.installed?.usedBy ?? []);
@@ -50,7 +52,7 @@
 		</div>
 		<div>{#if row.installed}<Badge variant="secondary">{t.installed}</Badge>{/if}</div>
 		<div class="flex items-center justify-end gap-1.5">
-			{#if running}
+			{#if installing}
 				<span class="text-xs text-muted-foreground">{t.installing}</span>
 			{:else}
 				{#if uninstalling}
@@ -69,11 +71,11 @@
 	</div>
 	{#if running && task}
 		<div class="mt-2"><TaskProgress progress={task.progress} oncancel={() => tasks.cancel(task.taskId)} /></div>
-	{:else if failed}
+	{:else if failed && !installing}
 		<p class="mt-2 text-xs text-destructive" role="alert">{t.failed} {describeError(failed)}</p>
 	{/if}
 </li>
 
 {#if row.installed}
-	<ConfirmDialog bind:open={confirming} title={t.uninstallTitle} body={t.uninstallBody(`${title} (${row.installed.id.version})`)} confirmLabel={t.uninstall} destructive onconfirm={() => void packages.uninstall(row.installed!.id)} />
+	<ConfirmDialog bind:open={confirming} title={t.uninstallTitle} body={t.uninstallBody(`${title} (${row.installed.id.version})`)} confirmLabel={t.uninstall} destructive onconfirm={() => packages.uninstall(row.installed!.id)} />
 {/if}

@@ -33,6 +33,8 @@
 	const taskKey = $derived(value ? packages.taskKey('php', value, null) : '');
 	const task = $derived(taskKey ? tasks.forKey(taskKey) : null);
 	const installing = $derived(task !== null && task.outcome === null);
+	/** Also true before the task is tracked: blocks a second click. */
+	const busy = $derived(value !== null && packages.isInstalling({ kind: 'php', series: value, phpVersion: null }));
 	const failure = $derived(task?.outcome?.status === 'failed' ? task.outcome.error : null);
 </script>
 
@@ -43,7 +45,7 @@
 				onchange?.(value);
 			}} />
 		{#if missing && value && !installing}
-			<Button size="sm" variant="secondary" onclick={() => packages.install({ kind: 'php', series: value!, phpVersion: null })}>
+			<Button size="sm" variant="secondary" disabled={busy} onclick={() => packages.install({ kind: 'php', series: value!, phpVersion: null })}>
 				<Download />{m.projects.php.installNow}
 			</Button>
 		{/if}

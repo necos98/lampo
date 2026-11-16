@@ -66,6 +66,7 @@
 	async function remove() {
 		const result = await projects.remove(project.id);
 		if (result.ok) await goto('/projects');
+		return result;
 	}
 
 </script>

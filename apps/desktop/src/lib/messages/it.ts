@@ -37,6 +37,7 @@ export const it = {
 		hide: 'Nascondi',
 		search: 'Filtra…',
 		loadFailed: 'Impossibile caricare i dati.',
+		actionFailed: 'Operazione non riuscita.',
 		unknownError: 'errore sconosciuto',
 		details: 'Dettagli',
 		open: 'Apri',

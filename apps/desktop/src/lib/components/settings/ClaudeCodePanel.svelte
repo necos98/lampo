@@ -87,8 +87,5 @@
 	body={t.confirmRemove.body}
 	confirmLabel={t.confirmRemove.confirm}
 	destructive
-	onconfirm={() => {
-		confirmRemove = false;
-		void integrations.uninstallClaudeCode();
-	}}
+	onconfirm={integrations.uninstallClaudeCode}
 />

@@ -43,9 +43,7 @@
 		removeOpen = true;
 	}
 
-	async function confirmRemove() {
-		if (removing) await worktrees.remove(removing.site, dropDatabase);
-	}
+	const confirmRemove = () => (removing ? worktrees.remove(removing.site, dropDatabase) : null);
 
 	async function askPrune() {
 		const preview = await worktrees.preview(projectId);
@@ -97,4 +95,4 @@
 	{/if}
 </ConfirmDialog>
 
-<ConfirmDialog bind:open={pruneOpen} title={t.pruneTitle} body="{t.pruneBody} {pruneList.join(', ')}" confirmLabel={t.prune} destructive onconfirm={() => void worktrees.prune(projectId, false)} />
+<ConfirmDialog bind:open={pruneOpen} title={t.pruneTitle} body="{t.pruneBody} {pruneList.join(', ')}" confirmLabel={t.prune} destructive onconfirm={() => worktrees.prune(projectId, false)} />
