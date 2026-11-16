@@ -10,16 +10,14 @@
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { messages as m } from '#lib/messages/index.js';
+	import { filterProjects } from '#lib/projects/projectFilter.js';
 	import { projects } from '#lib/stores/index.js';
 
 	let filter = $state('');
 	let importing = $state(false);
 
 	const all = $derived(projects.all);
-	const visible = $derived.by(() => {
-		const needle = filter.trim().toLowerCase();
-		return needle ? all.filter((p) => [p.name, p.id, p.root, p.url].some((v) => v.toLowerCase().includes(needle))) : all;
-	});
+	const visible = $derived(filterProjects(all, filter));
 </script>
 
 <PageHeader title={m.projects.title} subtitle={projects.list.data ? m.projects.subtitle(all.length) : undefined}>
@@ -33,7 +31,7 @@
 	<UnreadableProjectsNotice unreadable={projects.unreadable} />
 {/if}
 
-{#if all.length > 3}
+{#if all.length > 0}
 	<Input data-filter class="mb-3 h-8 max-w-xs" placeholder={m.common.search} bind:value={filter} aria-label={m.common.search} />
 {/if}
 

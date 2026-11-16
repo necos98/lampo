@@ -322,6 +322,7 @@ export const it = {
 		cloneSource: 'Database da copiare',
 		creating: 'Creazione in corso…',
 		createFailed: 'Creazione non riuscita.',
+		dismissCreation: (path: string) => `Chiudi l’esito della creazione in ${path}`,
 		createdAt: 'Creato il'
 	},
 	services: {

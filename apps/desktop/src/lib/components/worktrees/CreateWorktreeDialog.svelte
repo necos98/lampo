@@ -11,11 +11,9 @@
 	interface Props {
 		open: boolean;
 		projectId: string;
-		/** Receives the folder once the task started, so the panel can follow it. */
-		onstarted: (path: string) => void;
 	}
 
-	let { open = $bindable(), projectId, onstarted }: Props = $props();
+	let { open = $bindable(), projectId }: Props = $props();
 	const t = m.worktrees;
 
 	let path = $state('');
@@ -35,7 +33,6 @@
 		const result = await worktrees.create(projectId, folder, database);
 		busy = false;
 		if (result.ok) {
-			onstarted(folder);
 			open = false;
 			path = '';
 		}

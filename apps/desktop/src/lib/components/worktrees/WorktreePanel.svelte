@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Plus from '@lucide/svelte/icons/plus';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
+	import X from '@lucide/svelte/icons/x';
 
 	import type { WorktreeEnvironment } from '#lib/api/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
@@ -10,7 +11,6 @@
 	import { describeError } from '#lib/services/errors.js';
 	import { notifier } from '#lib/services/notifier.js';
 	import { tasks, worktrees } from '#lib/stores/index.js';
-	import { worktreeTaskKey } from '#lib/stores/worktrees.svelte.js';
 
 	import AsyncBoundary from '../common/AsyncBoundary.svelte';
 	import ConfirmDialog from '../common/ConfirmDialog.svelte';
@@ -25,11 +25,7 @@
 	const staleCount = $derived(items.filter((w) => w.stale).length);
 
 	let creating = $state(false);
-	/** Folders whose creation task this panel is following. */
-	let followed = $state<string[]>([]);
-	const running = $derived(
-		followed.map((path) => ({ path, task: tasks.forKey(worktreeTaskKey(path)) })).filter((x) => x.task && x.task.outcome?.status !== 'succeeded')
-	);
+	const running = $derived(worktrees.creations(projectId));
 
 	let removing = $state<WorktreeEnvironment | null>(null);
 	let removeOpen = $state(false);
@@ -68,13 +64,18 @@
 	<ul class="flex flex-col gap-1.5">
 		{#each running as { path, task } (path)}
 			<li class="rounded-md border border-dashed px-3 py-2">
-				<p class="mb-1 truncate font-mono text-xs">{path}</p>
-				{#if task?.outcome?.status === 'failed'}
+				<div class="mb-1 flex items-center justify-between gap-2">
+					<p class="truncate font-mono text-xs">{path}</p>
+					{#if task.outcome}
+						<Button variant="ghost" size="icon-xs" onclick={() => worktrees.dismissCreation(projectId, path)} aria-label={t.dismissCreation(path)} title={m.common.close}><X /></Button>
+					{/if}
+				</div>
+				{#if task.outcome?.status === 'failed'}
 					<p class="text-sm text-destructive">{t.createFailed} {describeError(task.outcome.error)}</p>
-				{:else if task?.outcome?.status === 'cancelled'}
+				{:else if task.outcome?.status === 'cancelled'}
 					<p class="text-sm text-muted-foreground">{m.errors.cancelled}</p>
 				{:else}
-					<TaskProgress progress={task?.progress ?? null} oncancel={task ? () => tasks.cancel(task.taskId) : undefined} />
+					<TaskProgress progress={task.progress} oncancel={() => tasks.cancel(task.taskId)} />
 				{/if}
 			</li>
 		{/each}
@@ -84,7 +85,7 @@
 	</ul>
 </AsyncBoundary>
 
-<CreateWorktreeDialog bind:open={creating} {projectId} onstarted={(path) => (followed = [...followed, path])} />
+<CreateWorktreeDialog bind:open={creating} {projectId} />
 
 <ConfirmDialog bind:open={removeOpen} title={t.removeTitle} body={removing ? t.removeBody(removing.site) : ''} confirmLabel={t.remove} destructive onconfirm={confirmRemove}>
 	{#if removing?.database && removing.databaseMode.mode !== 'shared'}
