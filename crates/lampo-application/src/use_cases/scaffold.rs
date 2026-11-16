@@ -18,7 +18,7 @@ use lampo_domain::site::SiteId;
 use lampo_domain::web::PhpIniSpec;
 
 use super::generation::{base_ini, bundled};
-use super::support::{composer_phar_for, installed_php_minors, package_missing, php_package, validation};
+use super::support::{composer_phar_for, installed_php_minors, package_missing, package_part_missing, php_package, validation};
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
 
@@ -133,7 +133,7 @@ impl ScaffoldProject {
             return Err(validation(format!("the Laravel Installer needs PHP {} or later (PHP {php} was chosen)", PhpMinor::LARAVEL_INSTALLER_MIN)));
         }
         let package = php_package(&installed, php).ok_or_else(|| package_missing(format!("PHP {php}")))?;
-        let php_exe = package.entry(EntryRole::Cli).ok_or_else(|| package_missing(format!("the PHP {php} command line")))?.to_path_buf();
+        let php_exe = package.entry(EntryRole::Cli).ok_or_else(|| package_part_missing(format!("PHP {php}"), "command line"))?.to_path_buf();
         let php_dir = package.install_dir.clone();
         let phar = composer_phar_for(&installed, php).ok_or_else(|| package_missing("Composer"))?;
         let git_dir = match self.git_exe() {

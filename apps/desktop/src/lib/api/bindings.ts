@@ -16,8 +16,11 @@ export type AppError = { code: ErrorCode,
  */
 message: string, 
 /**
- * Structured extras: `{ output }` (a string, the program's output) for `config-rejected`
- * and a failed `process-failed` step, `{ port, owner }` for `port-in-use`.
+ * Structured extras the GUI puts into its own text: `{ output }` (a string, the program's
+ * output) for `config-rejected` and a failed `process-failed` step, plus `excludedSites` when
+ * some sites were left out; `{ port, owner }` for `port-in-use`; `{ entity, id }` for
+ * `not-found`; `{ package, php? }`, `{ tool }` or `{ redistributable }` for
+ * `package-missing`; `{ package, usedBy }` for a package still in use (`conflict`).
  */
 details?: unknown, };
 

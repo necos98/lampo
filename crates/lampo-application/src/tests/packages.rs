@@ -218,7 +218,9 @@ async fn a_missing_vc_runtime_is_reported_before_downloading() {
     k.vc.0.lock().unwrap().clear();
     let err = k.install().execute(request("php", Some("8.4.2"), None), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::PackageMissing);
-    assert_eq!(err.details.unwrap()["downloadUrl"], "https://aka.ms/vs/17/release/vc_redist.x64.exe");
+    let details = err.details.unwrap();
+    assert_eq!(details["downloadUrl"], "https://aka.ms/vs/17/release/vc_redist.x64.exe");
+    assert_eq!(details["package"], "php-8.4.2", "the GUI names the package that needs the runtime");
     assert!(k.downloader.downloads.lock().unwrap().is_empty());
 }
 
@@ -372,7 +374,8 @@ fn php_extensions_come_from_the_installed_build_of_that_minor() {
     assert_eq!(list, [PhpExtensionDto { name: "intl".into(), zend: false }, PhpExtensionDto { name: "opcache".into(), zend: true }]);
     let php83 = w.installed.list().unwrap().into_iter().find(|p| p.id.kind == PackageKind::PHP && p.id.series().to_string() == "8.3").unwrap();
     assert_eq!(scanner.0.lock().unwrap()[0], php83.install_dir);
-    assert_eq!(query.list("5.6").unwrap_err().code, ErrorCode::PackageMissing);
+    let missing = query.list("5.6").unwrap_err();
+    assert_eq!((missing.code, missing.details), (ErrorCode::PackageMissing, Some(serde_json::json!({ "package": "PHP 5.6" }))));
     assert_eq!(query.list("nope").unwrap_err().code, ErrorCode::Validation);
 }
 
@@ -463,6 +466,7 @@ async fn uninstall_by_kind_version_and_php_picks_exactly_one_build() {
     // In use: Conflict with who uses it and what to change; the build stays.
     let err = uninstall.execute_matching(uninstall_request("php", Some("8.3.14"), None, None), &gui()).await.unwrap_err();
     assert_eq!((err.code, err.details.clone().unwrap()["usedBy"].clone()), (ErrorCode::Conflict, serde_json::json!(["shop"])));
+    assert_eq!(err.details.clone().unwrap()["package"], "php-8.3.14", "the GUI names the package in use");
     assert!(err.message.contains("in use by shop") && err.message.contains("lampo project set-php"), "{}", err.message);
     assert!(w.installed.has(&PackageKind::PHP, "8.3.14"));
     assert_eq!(uninstall.execute_matching(uninstall_request("php", None, Some("8.4"), None), &gui()).await.unwrap_err().code, ErrorCode::Conflict, "the default PHP");

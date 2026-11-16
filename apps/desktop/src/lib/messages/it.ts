@@ -284,7 +284,6 @@ export const it = {
 		cancelledNotice: 'Operazione annullata: la cartella parziale è stata rimossa.',
 		done: (path: string) => `Cartella pronta: ${path}. Controlla i dati e crea il progetto.`,
 		edit: 'Modifica',
-		gitMissing: 'Git non trovato: installalo da git-scm.com e riprova.',
 		readyElsewhere: 'Cartella pronta: registra progetto',
 		register: 'Registra'
 	},
@@ -606,9 +605,31 @@ export const it = {
 	tray: {
 		minimized: 'Lampo continua a funzionare nella barra delle applicazioni.'
 	},
+	/** Error texts built from `details`; `errors` holds the generic one of each code. */
 	errorDetails: {
 		portInUse: (port: number, owner: string | null) =>
-			owner ? `La porta ${port} è già in uso da ${owner}.` : `La porta ${port} è già in uso da un altro programma.`
+			owner ? `La porta ${port} è già in uso da ${owner}.` : `La porta ${port} è già in uso da un altro programma.`,
+		/** `details.entity` (English, from the backend) → subject of `notFound`. */
+		entities: {
+			project: 'Il progetto',
+			'worktree environment': "L'ambiente worktree",
+			site: 'Il sito',
+			package: 'Il pacchetto',
+			preset: 'Il preset',
+			database: 'Il database'
+		},
+		notFound: (entity: string, id: string) => `${entity} «${id}» non esiste.`,
+		packageMissing: (pkg: string) => `${pkg} non è installato: installalo dalla pagina Pacchetti.`,
+		addonMissing: (addon: string, php: string) => `${addon} per PHP ${php} non è installato: installalo dalla pagina Pacchetti.`,
+		runtimeMissing: (pkg: string, redistributable: string) => `${pkg} richiede ${redistributable}, che non è installato.`,
+		/** `details.tool` → text. */
+		toolMissing: {
+			git: 'Git non trovato: installalo da git-scm.com e riprova.',
+			vscode: 'Visual Studio Code non trovato: installalo o aggiungi «code» al PATH.'
+		},
+		packageInUse: (pkg: string, usedBy: string) => `${pkg} è in uso da ${usedBy}.`,
+		sitesNotServed: (sites: string) => `Apache ha rifiutato la configurazione di ${sites}: questi siti non sono serviti, gli altri sì.`,
+		folderMissing: (folder: string) => `La cartella del progetto non esiste: ${folder}`
 	},
 	errors: {
 		validation: 'Dati non validi.',

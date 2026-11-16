@@ -19,16 +19,18 @@ where
     match joined {
         Ok(Ok(result)) => result,
         Ok(Err(payload)) => Err(panic_error(payload.as_ref())),
-        Err(e) => Err(AppError::internal(format!("operazione interrotta: {e}"))),
+        Err(e) => Err(AppError::internal(format!("operation interrupted: {e}"))),
     }
 }
+
+const UNEXPECTED_INTERNAL_ERROR: &str = "unexpected internal error";
 
 /// The error reported for a panic, with its message when the payload carries one.
 pub fn panic_error(payload: &(dyn Any + Send)) -> AppError {
     let detail = payload.downcast_ref::<&str>().copied().or_else(|| payload.downcast_ref::<String>().map(String::as_str));
     match detail {
-        Some(message) => AppError::internal(format!("errore interno imprevisto: {message}")),
-        None => AppError::internal("errore interno imprevisto"),
+        Some(message) => AppError::internal(format!("{UNEXPECTED_INTERNAL_ERROR}: {message}")),
+        None => AppError::internal(UNEXPECTED_INTERNAL_ERROR),
     }
 }
 
@@ -61,6 +63,6 @@ mod tests {
     #[test]
     fn panic_error_reads_string_payloads_and_tolerates_others() {
         assert!(panic_error(&String::from("formattato 7")).message.contains("formattato 7"));
-        assert_eq!(panic_error(&7_u8).message, "errore interno imprevisto");
+        assert_eq!(panic_error(&7_u8).message, UNEXPECTED_INTERNAL_ERROR);
     }
 }

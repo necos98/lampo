@@ -20,7 +20,7 @@ use lampo_domain::worktree::WorktreeEnvironment;
 
 use super::allocation::{LoopbackPortAllocator, SiteSnapshot};
 use super::service_catalog::ServiceCatalog;
-use super::support::php_package;
+use super::support::{package_details, php_package};
 use crate::error::{AppError, AppResult, ErrorCode};
 
 /// What every settings-mutating use case needs. The composition roots share the allocator with
@@ -81,7 +81,8 @@ impl SettingsWriter {
         let Some(php) = after.default_php.filter(|php| Some(*php) != before.default_php) else { return Ok(()) };
         match php_package(&self.installed.list()?, php) {
             Some(_) => Ok(()),
-            None => Err(AppError::new(ErrorCode::PackageMissing, format!("PHP {php} is not installed: run `lampo package install php {php}` first"))),
+            None => Err(AppError::new(ErrorCode::PackageMissing, format!("PHP {php} is not installed: run `lampo package install php {php}` first"))
+                .with_details(package_details(&format!("PHP {php}")))),
         }
     }
 

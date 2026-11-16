@@ -128,7 +128,7 @@ fn exe_beside_script(script: &Path) -> Option<PathBuf> {
 fn ensure_cmd_safe(folder: &Path) -> PortResult<()> {
     if folder.as_os_str().to_string_lossy().contains(CMD_EXPANSION_CHAR) {
         return Err(PortError::Unsupported(format!(
-            "impossibile aprire in Visual Studio Code una cartella con `{CMD_EXPANSION_CHAR}` nel percorso tramite `code.cmd`: installa VS Code nel percorso standard o rinomina la cartella ({})",
+            "Visual Studio Code cannot open a folder with `{CMD_EXPANSION_CHAR}` in its path through `code.cmd`: install VS Code in its standard location or rename the folder ({})",
             folder.display()
         )));
     }

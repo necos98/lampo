@@ -1,19 +1,11 @@
 import { toAppError, type AppError } from '../api/index.js';
 import { messages as m } from '../messages/index.js';
+import { isReportedError, localizeError } from './localizeError.js';
 
-interface PortDetails {
-	port?: number;
-	owner?: string | null;
-}
-
-/** Italian, user-facing text for an error; details enrich the generic message when known. */
+/** Italian, user-facing text for an error; details enrich the generic message when known, and
+ *  the English message stands in for a code this GUI has no text for. */
 export function describeError(value: unknown): string {
-	const err = toAppError(value);
-	if (err.code === 'port-in-use') {
-		const d = (err.details ?? {}) as PortDetails;
-		if (d.port !== undefined) return m.errorDetails.portInUse(d.port, d.owner ?? null);
-	}
-	return m.errors[err.code];
+	return localizeError(isReportedError(value) ? value : toAppError(value), m);
 }
 
 /** Raw program output attached to an error (`details.output`: `httpd -t` for `config-rejected`,

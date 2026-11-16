@@ -52,8 +52,21 @@ pub(crate) fn load_site(projects: &dyn ProjectRepository, worktrees: &dyn Worktr
     Ok((site, project, worktree))
 }
 
-pub(crate) fn package_missing(what: impl std::fmt::Display) -> AppError {
-    AppError::new(ErrorCode::PackageMissing, format!("{what} is not installed"))
+/// `package` (e.g. `PHP 8.3`) is not installed; `details.package` names it for the GUI.
+pub(crate) fn package_missing(package: impl std::fmt::Display) -> AppError {
+    let package = package.to_string();
+    AppError::new(ErrorCode::PackageMissing, format!("{package} is not installed")).with_details(package_details(&package))
+}
+
+/// `part` of an installed `package` (e.g. its command line) is missing.
+pub(crate) fn package_part_missing(package: impl std::fmt::Display, part: &str) -> AppError {
+    let package = package.to_string();
+    AppError::new(ErrorCode::PackageMissing, format!("{package} is installed without its {part}")).with_details(package_details(&package))
+}
+
+/// `details` naming the package an error is about (`details.package`).
+pub(crate) fn package_details(package: &str) -> serde_json::Value {
+    serde_json::json!({ "package": package })
 }
 
 pub(crate) fn validation(message: impl Into<String>) -> AppError {
@@ -229,7 +242,7 @@ pub(crate) fn mysql_endpoint(installed: &dyn InstalledPackageRegistry, settings:
     let port = settings.mysql_port(series).ok_or_else(|| DomainError::UnknownMysqlSeries(series.to_string()))?;
     let packages = installed.list()?;
     let package = newest_of(&packages, &PackageKind::MYSQL, Some(series.as_series()), None).ok_or_else(|| package_missing(format!("MySQL {series}")))?;
-    let client_dir = package.entry(EntryRole::ClientDir).ok_or_else(|| package_missing(format!("the MySQL {series} clients")))?.to_path_buf();
+    let client_dir = package.entry(EntryRole::ClientDir).ok_or_else(|| package_part_missing(format!("MySQL {series}"), "clients"))?.to_path_buf();
     Ok(MysqlEndpoint { series, client_dir, port, user: "root".into() })
 }
 

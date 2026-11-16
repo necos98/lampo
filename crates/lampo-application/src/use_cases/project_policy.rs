@@ -124,4 +124,5 @@ fn addon_missing(kind: &PackageKind, php: PhpMinor) -> AppError {
         ErrorCode::PackageMissing,
         format!("{kind} for PHP {php} is not installed: run `lampo package install {kind} --php {php}` first (add-ons are PHP-pinned packages, see `lampo package list --kind {kind}`)"),
     )
+    .with_details(serde_json::json!({ "package": kind.to_string(), "php": php.to_string() }))
 }

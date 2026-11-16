@@ -324,6 +324,7 @@ impl InstallPackage {
         }
         let redist = runtime.redistributable();
         Err(AppError::new(ErrorCode::PackageMissing, format!("{} needs the {redist} runtime, which is not installed", entry.id)).with_details(serde_json::json!({
+            "package": entry.id.to_string(),
             "redistributable": redist.to_string(),
             "downloadUrl": redist.download_url(),
             "runtime": runtime.to_string(),

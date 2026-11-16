@@ -79,12 +79,7 @@
 	const folderMessages = { empty: t.folderEmpty, invalid: t.folderInvalid, 'laravel-name': t.laravelNameInvalid } as const;
 	// Only once something was typed: an untouched form shows no error.
 	const folderMessage = $derived(flow.folderProblem && (flow.folderName.trim() || flow.parentDir.trim()) ? folderMessages[flow.folderProblem] : null);
-	const scaffoldErrorText = $derived.by(() => {
-		const e = flow.scaffoldError;
-		if (!e) return null;
-		if (e.code === 'package-missing' && (e.details as { tool?: string } | undefined)?.tool === 'git') return t.gitMissing;
-		return describeError(e);
-	});
+	const scaffoldErrorText = $derived(flow.scaffoldError ? describeError(flow.scaffoldError) : null);
 
 	// Log box: follow the output while it streams.
 	let logBox = $state<HTMLPreElement | null>(null);

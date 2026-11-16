@@ -52,8 +52,11 @@ pub struct AppError {
     pub code: ErrorCode,
     /// English, developer-facing: front-ends show their own text for `code`.
     pub message: String,
-    /// Structured extras: `{ output }` (a string, the program's output) for `config-rejected`
-    /// and a failed `process-failed` step, `{ port, owner }` for `port-in-use`.
+    /// Structured extras the GUI puts into its own text: `{ output }` (a string, the program's
+    /// output) for `config-rejected` and a failed `process-failed` step, plus `excludedSites` when
+    /// some sites were left out; `{ port, owner }` for `port-in-use`; `{ entity, id }` for
+    /// `not-found`; `{ package, php? }`, `{ tool }` or `{ redistributable }` for
+    /// `package-missing`; `{ package, usedBy }` for a package still in use (`conflict`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[cfg_attr(test, ts(type = "unknown"))]
     pub details: Option<serde_json::Value>,
@@ -71,8 +74,10 @@ impl AppError {
         self
     }
 
+    /// `details` carry `entity` (English, e.g. `project`) and `id` for the GUI's text.
     pub fn not_found(entity: &str, id: impl std::fmt::Display) -> Self {
-        Self::new(ErrorCode::NotFound, format!("{entity} `{id}` not found"))
+        let id = id.to_string();
+        Self::new(ErrorCode::NotFound, format!("{entity} `{id}` not found")).with_details(serde_json::json!({ "entity": entity, "id": id }))
     }
 
     pub fn internal(message: impl Into<String>) -> Self {
@@ -113,7 +118,7 @@ impl From<PortError> for AppError {
         match e {
             PortError::Domain(d) => d.into(),
             PortError::NotFound { entity: "app", .. } => Self::new(ErrorCode::AppUnavailable, message),
-            PortError::NotFound { .. } => Self::new(ErrorCode::NotFound, message),
+            PortError::NotFound { entity, id } => Self::not_found(entity, id),
             PortError::AlreadyExists { .. } => Self::new(ErrorCode::Conflict, message),
             PortError::Io { .. } => Self::new(ErrorCode::Io, message),
             PortError::Network(_) => Self::new(ErrorCode::Network, message),
@@ -149,6 +154,14 @@ mod tests {
         assert_eq!(e.code, ErrorCode::Conflict);
         let e: AppError = PortError::not_found("app", "pipe").into();
         assert_eq!(e.code, ErrorCode::AppUnavailable);
+    }
+
+    #[test]
+    fn not_found_names_the_entity_and_the_id_for_front_ends() {
+        let e: AppError = PortError::not_found("site", "shop.feature").into();
+        assert_eq!(e.code, ErrorCode::NotFound);
+        assert_eq!(e.message, "site `shop.feature` not found");
+        assert_eq!(e.details, Some(serde_json::json!({ "entity": "site", "id": "shop.feature" })));
     }
 
     #[test]

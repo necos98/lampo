@@ -54,6 +54,7 @@ async fn the_gui_update_refuses_what_the_cli_patch_refuses() {
     let err = gui_update(&w, sync.clone(), "shop", |r| r.environment.addons = vec!["xdebug".into()]).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::PackageMissing);
     assert!(err.message.contains("lampo package install xdebug --php 8.3"), "{}", err.message);
+    assert_eq!(err.details, Some(serde_json::json!({ "package": "xdebug", "php": "8.3" })), "the GUI names the add-on and its PHP");
     // PHP 8.3 ships no `intll`.
     let err = gui_update(&w, sync.clone(), "shop", |r| r.environment.extensions = vec!["intll".into()]).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::Validation);

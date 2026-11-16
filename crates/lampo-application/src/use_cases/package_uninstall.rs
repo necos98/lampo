@@ -86,7 +86,7 @@ impl UninstallPackage {
         if blocking.is_empty() {
             return Ok(());
         }
-        Err(AppError::new(ErrorCode::Conflict, format!("{id} is in use by {}", blocking.join(", "))).with_details(serde_json::json!({ "usedBy": blocking })))
+        Err(AppError::new(ErrorCode::Conflict, format!("{id} is in use by {}", blocking.join(", "))).with_details(serde_json::json!({ "package": id.to_string(), "usedBy": blocking })))
     }
 
     /// `lampo package uninstall`: the one installed build matching `request` (exact version,

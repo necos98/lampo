@@ -88,7 +88,8 @@ fn a_missing_folder_is_refused_before_explorer_and_vscode() {
     for app in [ExternalApp::Folder, ExternalApp::VsCode] {
         let err = open.execute("shop", app).unwrap_err();
         assert_eq!(err.code, ErrorCode::Validation);
-        assert_eq!(err.message, format!("la cartella del progetto non esiste: {ROOT}"));
+        assert_eq!(err.message, format!("the project folder does not exist: {ROOT}"));
+        assert_eq!(err.details.unwrap()["folder"], ROOT, "the GUI names the folder");
     }
     assert!(launcher.launches().is_empty());
 }
@@ -114,19 +115,20 @@ fn vscode_not_installed_is_package_missing() {
     let err = open(&w, &launcher).execute("shop", ExternalApp::VsCode).unwrap_err();
 
     assert_eq!(err.code, ErrorCode::PackageMissing);
-    assert_eq!(err.message, "Visual Studio Code non trovato: installalo o aggiungi `code` al PATH");
+    assert_eq!(err.message, "Visual Studio Code not found: install it or add `code` to PATH");
+    assert_eq!(err.details.unwrap()["tool"], "vscode", "the GUI recognises VS Code");
 }
 
 #[test]
 fn a_folder_vscode_cannot_open_is_a_validation_error_with_the_launcher_reason() {
     let w = World::new();
     w.project("shop", ROOT, true);
-    let launcher = Arc::new(FakeExternalApps::failing(PortError::Unsupported("rinomina la cartella".into())));
+    let launcher = Arc::new(FakeExternalApps::failing(PortError::Unsupported("rename the folder".into())));
 
     let err = open(&w, &launcher).execute("shop", ExternalApp::VsCode).unwrap_err();
 
     assert_eq!(err.code, ErrorCode::Validation);
-    assert_eq!(err.message, "rinomina la cartella");
+    assert_eq!(err.message, "rename the folder");
 }
 
 #[test]
@@ -134,15 +136,15 @@ fn a_failed_start_names_what_could_not_be_opened() {
     let w = World::new();
     w.project("shop", ROOT, true);
     let cases = [
-        (ExternalApp::Terminal, "impossibile aprire il terminale: access denied"),
-        (ExternalApp::Folder, "impossibile aprire la cartella: access denied"),
-        (ExternalApp::VsCode, "impossibile avviare Visual Studio Code: access denied"),
+        (ExternalApp::Terminal, "could not open the terminal: access denied"),
+        (ExternalApp::Folder, "could not open the folder: access denied"),
+        (ExternalApp::VsCode, "could not start Visual Studio Code: access denied"),
     ];
 
     for (app, expected) in cases {
         let launcher = Arc::new(FakeExternalApps::failing(PortError::process("program.exe", "access denied")));
         let err = open(&w, &launcher).execute("shop", app).unwrap_err();
-        assert_eq!(err.code, ErrorCode::Internal, "{app:?}");
+        assert_eq!(err.code, ErrorCode::ProcessFailed, "{app:?}");
         assert_eq!(err.message, expected);
     }
 }
