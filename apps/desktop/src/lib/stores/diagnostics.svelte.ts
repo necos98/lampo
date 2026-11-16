@@ -4,12 +4,15 @@ import { messages as m } from '../messages/index.js';
 import { Resource } from './resource.svelte.js';
 import type { CommandRunner } from './runner.js';
 
+export type ShimAction = 'install' | 'uninstall';
+
 /** Doctor report and CLI shim status. */
 export class DiagnosticsStore {
 	readonly doctor: Resource<DoctorReport>;
 	readonly shims: Resource<ShimStatus>;
 	readonly info: Resource<AppInfo>;
-	installingShims = $state(false);
+	/** The shim action in progress, if any. */
+	shimsBusy = $state<ShimAction | null>(null);
 
 	readonly #backend: Backend;
 	readonly #runner: CommandRunner;
@@ -27,10 +30,13 @@ export class DiagnosticsStore {
 	/** Views needing the report only once share one run (the user re-runs it explicitly). */
 	ensureDoctor = () => this.doctor.ensure();
 
-	async installShims() {
-		this.installingShims = true;
-		const result = await this.#runner.run(() => this.#backend.commands.installShims(), { success: m.settings.shims.installed });
-		this.installingShims = false;
+	installShims = () => this.#shimAction('install', () => this.#backend.commands.installShims(), m.settings.shims.installed);
+	uninstallShims = () => this.#shimAction('uninstall', () => this.#backend.commands.uninstallShims(), m.settings.shims.removed);
+
+	async #shimAction(kind: ShimAction, op: () => Promise<ShimStatus>, success: string) {
+		this.shimsBusy = kind;
+		const result = await this.#runner.run(op, { success });
+		this.shimsBusy = null;
 		if (result.ok) {
 			this.shims.set(result.value);
 			// PATH and shadowing findings changed.

@@ -7,10 +7,13 @@
 	import { diagnostics } from '#lib/stores/index.js';
 
 	import AsyncBoundary from '../common/AsyncBoundary.svelte';
+	import ConfirmDialog from '../common/ConfirmDialog.svelte';
 	import CopyField from '../common/CopyField.svelte';
 
 	const t = m.settings.shims;
 	const shims = $derived(diagnostics.shims.data);
+	const busy = $derived(diagnostics.shimsBusy !== null);
+	let confirmRemove = $state(false);
 
 	onMount(() => void diagnostics.loadShims());
 </script>
@@ -22,9 +25,16 @@
 		<div class="flex flex-wrap items-center gap-2">
 			<Badge variant={shims.installed ? 'secondary' : 'outline'}>{shims.installed ? t.state.installed : t.state.missing}</Badge>
 			<Badge variant={shims.onPath ? 'secondary' : 'outline'}>{shims.onPath ? t.state.onPath : t.state.notOnPath}</Badge>
-			<Button class="ml-auto" size="sm" variant="outline" disabled={diagnostics.installingShims} onclick={() => diagnostics.installShims()}>
-				{diagnostics.installingShims ? t.installing : t.install}
-			</Button>
+			<div class="ml-auto flex gap-2">
+				{#if shims.installed || shims.onPath}
+					<Button size="sm" variant="outline" disabled={busy} onclick={() => (confirmRemove = true)}>
+						{diagnostics.shimsBusy === 'uninstall' ? t.removing : t.uninstall}
+					</Button>
+				{/if}
+				<Button size="sm" variant="outline" disabled={busy} onclick={() => diagnostics.installShims()}>
+					{diagnostics.shimsBusy === 'install' ? t.installing : t.install}
+				</Button>
+			</div>
 		</div>
 		<div class="mt-2"><CopyField label={t.folder} value={shims.shimDir} /></div>
 		{#if shims.shadowed.length}
@@ -37,3 +47,12 @@
 		{/if}
 	{/if}
 </AsyncBoundary>
+
+<ConfirmDialog
+	bind:open={confirmRemove}
+	title={t.confirmRemove.title}
+	body={t.confirmRemove.body}
+	confirmLabel={t.confirmRemove.confirm}
+	destructive
+	onconfirm={diagnostics.uninstallShims}
+/>

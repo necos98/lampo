@@ -693,6 +693,11 @@ export function createMockBackend({ fresh }: Options): Backend {
 			shims = { ...shims, installed: true, onPath: true, shadowed: [] };
 			return clone(shims);
 		},
+		uninstallShims: async () => {
+			await sleep(400);
+			shims = { ...shims, installed: false, onPath: false };
+			return clone(shims);
+		},
 		claudeCodeStatus: async () => {
 			await sleep(400);
 			return clone(claudeCode);

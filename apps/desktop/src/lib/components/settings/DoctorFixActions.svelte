@@ -21,7 +21,7 @@
 	let pruneOpen = $state(false);
 
 	const busy: Record<FixCommand, boolean> = $derived({
-		'install-shims': diagnostics.installingShims,
+		'install-shims': diagnostics.shimsBusy !== null,
 		'apply-hosts': elevation.applying,
 		'start-services': report.servicesDown.some((s) => services.busy[s]),
 		// The confirmation dialog shows its own progress.

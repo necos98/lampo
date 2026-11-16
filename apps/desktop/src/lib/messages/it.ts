@@ -611,6 +611,14 @@ export const it = {
 			state: { installed: 'Installati', missing: 'Non installati', onPath: 'Nel PATH', notOnPath: 'Non nel PATH' },
 			install: 'Installa nel PATH',
 			installing: 'Installazione…',
+			removed: 'Strumenti rimossi dal PATH.',
+			uninstall: 'Rimuovi dal PATH',
+			removing: 'Rimozione…',
+			confirmRemove: {
+				title: 'Rimuovere gli strumenti da riga di comando?',
+				body: 'Lampo toglie la cartella dal PATH ed elimina php, composer, mysql, mysqldump, redis-cli e la copia della CLI lampo. App, progetti e dati restano; puoi reinstallarli quando vuoi.',
+				confirm: 'Rimuovi'
+			},
 			folder: 'Cartella',
 			shadowed: 'Oscurati da altri programmi',
 			shadowedBy: (tool: string, by: string) => `${tool} è oscurato da ${by}`

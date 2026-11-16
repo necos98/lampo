@@ -1,6 +1,7 @@
 //! End-to-end tests of the real `lampo exec`, with a Lampo home holding only a shim index whose
 //! global default serves every folder, and the `examples/argecho` test tool as the child.
 
+use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, Read};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -111,4 +112,34 @@ fn json_flag_after_exec_belongs_to_the_child() {
     assert_eq!(out.status.code(), Some(3));
     assert_eq!(String::from_utf8_lossy(&out.stdout), "", "no JSON document on stdout");
     assert!(String::from_utf8_lossy(&out.stderr).contains("`lampo-test-no-such-tool` not found"), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// `lampo shims uninstall` takes away the shims, not the shim index the CLI resolves the site
+/// with: `lampo exec` keeps working afterwards (as does "Apri terminale", `lampo -p <site> exec`).
+#[test]
+fn shims_uninstall_keeps_lampo_exec_working() {
+    let home = home();
+    let bin = home.path().join("data").join("bin");
+    for copy in ["php.exe", "composer.exe", "lampo.exe"] {
+        std::fs::write(bin.join(copy), b"copy").unwrap();
+    }
+    let lampo = |args: &[&OsStr]| {
+        Command::new(env!("CARGO_BIN_EXE_lampo"))
+            .args(args)
+            .current_dir(home.path())
+            .env("LAMPO_HOME", home.path())
+            .env_remove("LAMPO_PROJECT")
+            .env_remove("LAMPO_PROJECT_ROOT")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    };
+    let out = lampo(&["shims".as_ref(), "uninstall".as_ref()]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(!bin.join("php.exe").exists() && !bin.join("lampo.exe").exists(), "the copies are gone");
+
+    let out = lampo(&["exec".as_ref(), "--".as_ref(), argecho().as_os_str(), "ok".as_ref()]);
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+    let echoed: Vec<String> = serde_json::from_str(String::from_utf8_lossy(&out.stdout).trim()).unwrap();
+    assert_eq!(echoed, ["ok"]);
 }

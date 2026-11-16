@@ -100,8 +100,9 @@ pub trait ShimInstaller: Send + Sync {
     /// when nothing is installed at all (the user never installed the shims). Returns whether a
     /// file changed.
     fn refresh(&self, shim_dir: &Path) -> PortResult<bool>;
-    /// Deletes `shim_dir` with every copy in it (and the shim index). Idempotent: a missing
-    /// folder is not an error.
+    /// Deletes the copies in `shim_dir`, then the folder if nothing else is left. The shim index
+    /// next to them stays: the CLI resolves the site with it. Idempotent: nothing to delete is not
+    /// an error.
     fn uninstall(&self, shim_dir: &Path) -> PortResult<()>;
 }
 

@@ -56,6 +56,30 @@ impl ExeShimInstaller {
         }
         copies
     }
+
+    /// Every file a copy may occupy, the CLI one included even when its executable is missing.
+    fn copy_targets(&self, shim_dir: &Path) -> Vec<PathBuf> {
+        let mut targets = self.shim_targets(shim_dir);
+        targets.extend(self.cli_copy(shim_dir).map(|(_, target)| target));
+        targets
+    }
+}
+
+/// Start of the extension of a copy renamed away by [`place_copy`]; the process id follows.
+const MOVED_ASIDE_EXTENSION_PREFIX: &str = "old-";
+
+fn moved_aside_path(target: &Path) -> PathBuf {
+    target.with_extension(format!("{MOVED_ASIDE_EXTENSION_PREFIX}{}", std::process::id()))
+}
+
+/// Whether `file_name` is a copy that [`place_copy`] renamed away (`php.old-1234`) from one of
+/// `targets`.
+fn is_moved_aside(file_name: &str, targets: &[PathBuf]) -> bool {
+    let Some((stem, extension)) = file_name.rsplit_once('.') else {
+        return false;
+    };
+    let is_aside_extension = extension.strip_prefix(MOVED_ASIDE_EXTENSION_PREFIX).is_some_and(|pid| !pid.is_empty() && pid.bytes().all(|b| b.is_ascii_digit()));
+    is_aside_extension && targets.iter().filter_map(|t| t.file_stem()).any(|target_stem| target_stem.eq_ignore_ascii_case(stem))
 }
 
 /// Places `source` at `target` without ever leaving a partial `target`. A running shim cannot be
@@ -69,7 +93,7 @@ fn place_copy(source: &Path, target: &Path) -> PortResult<()> {
         Ok(_) => return Ok(()),
         Err(e) => e.file,
     };
-    let aside = target.with_extension(format!("old-{}", std::process::id()));
+    let aside = moved_aside_path(target);
     std::fs::rename(target, &aside).map_err(|e| PortError::io(context(), format!("{e} (is the shim running?)")))?;
     match tmp.persist(target) {
         Ok(_) => {
@@ -83,12 +107,54 @@ fn place_copy(source: &Path, target: &Path) -> PortResult<()> {
     }
 }
 
-/// Why deleting `shim_dir` most likely failed: `lampo` typed in a terminal is the copy in the shim
-/// dir, which cannot delete itself; otherwise another shim or CLI copy is still running.
+/// Why deleting a copy in `shim_dir` most likely failed: `lampo` typed in a terminal is the copy
+/// in the shim dir, which cannot delete itself; otherwise another shim or CLI copy is running.
 fn locked_copy_hint(shim_dir: &Path) -> &'static str {
     let canonical_dir = |dir: &Path| std::fs::canonicalize(dir).ok();
     let running_inside = std::env::current_exe().ok().and_then(|exe| exe.parent().and_then(canonical_dir)).is_some_and(|exe_dir| Some(exe_dir) == canonical_dir(shim_dir));
     if running_inside { "this lampo is the copy in that folder: run the lampo.exe in the Lampo install folder instead" } else { "is a shim or the lampo copy in it running?" }
+}
+
+/// Deletes one copy; a missing one is already uninstalled. A running copy cannot be deleted on
+/// Windows, so that failure names the likely cause.
+fn remove_copy(target: &Path) -> PortResult<()> {
+    match std::fs::remove_file(target) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => {
+            let hint = locked_copy_hint(target.parent().unwrap_or(Path::new(".")));
+            Err(PortError::io(format!("deleting {}", target.display()), format!("{e} ({hint})")))
+        }
+    }
+}
+
+/// Best effort, like in [`place_copy`]: a copy moved aside while it ran may be running still, and
+/// it is harmless once its folder is off the PATH.
+fn remove_copies_moved_aside(shim_dir: &Path, targets: &[PathBuf]) {
+    let entries = match std::fs::read_dir(shim_dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+        Err(e) => {
+            tracing::warn!("listing {}: {e}", shim_dir.display());
+            return;
+        }
+    };
+    for entry in entries.flatten() {
+        if entry.file_name().to_str().is_some_and(|name| is_moved_aside(name, targets))
+            && let Err(e) = std::fs::remove_file(entry.path())
+        {
+            tracing::debug!("{} left in place: {e}", entry.path().display());
+        }
+    }
+}
+
+/// Removes `dir` when nothing else is left in it (the shim index usually is); missing is fine.
+fn remove_dir_if_empty(dir: &Path) -> PortResult<()> {
+    match std::fs::remove_dir(dir) {
+        Ok(()) => Ok(()),
+        Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty) => Ok(()),
+        Err(e) => Err(PortError::io(format!("deleting {}", dir.display()), e)),
+    }
 }
 
 fn same_content(a: &Path, b: &Path) -> bool {
@@ -134,14 +200,21 @@ impl ShimInstaller for ExeShimInstaller {
         self.sync_copies(shim_dir)
     }
 
-    /// The whole folder goes, the shim index included: it only exists for the shims. A copy that
-    /// is running cannot be deleted on Windows, so that failure names the likely cause.
+    /// Deletes the copies only: the shim index next to them is the app's (the CLI resolves the
+    /// site with it) and stays, like any file Lampo did not put there. The folder goes once empty.
     fn uninstall(&self, shim_dir: &Path) -> PortResult<()> {
-        match std::fs::remove_dir_all(shim_dir) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(PortError::io(format!("deleting {}", shim_dir.display()), format!("{e} ({})", locked_copy_hint(shim_dir)))),
+        let targets = self.copy_targets(shim_dir);
+        let mut first_error = None;
+        for target in &targets {
+            if let Err(e) = remove_copy(target) {
+                first_error.get_or_insert(e);
+            }
         }
+        remove_copies_moved_aside(shim_dir, &targets);
+        if let Some(e) = first_error {
+            return Err(e);
+        }
+        remove_dir_if_empty(shim_dir)
     }
 
     /// True when every copy exists and has the size of its executable (so an app update that
@@ -271,16 +344,45 @@ mod tests {
     }
 
     #[test]
-    fn uninstall_deletes_the_folder_and_is_idempotent() {
+    fn uninstall_deletes_the_copies_and_the_emptied_folder_and_is_idempotent() {
         let (d, exe, bin) = setup();
         let (installer, cli) = with_cli(&exe, d.path());
         installer.install(&bin).unwrap();
-        std::fs::write(bin.join("shim-index.json"), b"{}").unwrap();
         installer.uninstall(&bin).unwrap();
         assert!(!bin.exists());
         assert!(!installer.is_installed(&bin).unwrap());
         installer.uninstall(&bin).unwrap();
         assert!(exe.is_file() && cli.is_file(), "the shipped executables are never touched");
+    }
+
+    /// The CLI resolves the site through the shim index (`lampo exec`, `lampo env`, "Apri
+    /// terminale"): it belongs to the app, not to the shims, and survives `shims uninstall`.
+    #[test]
+    fn uninstall_keeps_the_shim_index_and_unknown_files() {
+        let (d, exe, bin) = setup();
+        let (installer, _cli) = with_cli(&exe, d.path());
+        installer.install(&bin).unwrap();
+        std::fs::write(bin.join("shim-index.json"), b"{}").unwrap();
+        std::fs::write(bin.join("php.old-42"), b"shim-v0").unwrap(); // moved aside by a refresh
+        std::fs::write(bin.join("lampo.old-7"), b"cli-v0").unwrap();
+        std::fs::write(bin.join("notes.txt"), b"mine").unwrap();
+        installer.uninstall(&bin).unwrap();
+        let mut left: Vec<_> = std::fs::read_dir(&bin).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        left.sort();
+        assert_eq!(left, ["notes.txt", "shim-index.json"]);
+        assert_eq!(std::fs::read(bin.join("shim-index.json")).unwrap(), b"{}");
+    }
+
+    #[test]
+    fn only_copies_moved_aside_by_a_refresh_count_as_leftovers() {
+        let targets = [PathBuf::from(r"C:\bin\php.exe"), PathBuf::from(r"C:\bin\lampo.exe")];
+        assert_eq!(moved_aside_path(&targets[0]).extension().unwrap().to_str().unwrap(), format!("old-{}", std::process::id()));
+        for leftover in ["php.old-1234", "PHP.old-1", "lampo.old-99"] {
+            assert!(is_moved_aside(leftover, &targets), "{leftover}");
+        }
+        for other in ["php.exe", "php.old-", "php.old-12a", "phpx.old-1", "shim-index.json", "old-1", "composer.old-1"] {
+            assert!(!is_moved_aside(other, &targets), "{other}");
+        }
     }
 
     #[test]

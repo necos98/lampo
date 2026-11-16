@@ -67,6 +67,7 @@ export const COMMANDS = {
 	hostsInSync: 'hosts_in_sync',
 	shimStatus: 'shim_status',
 	installShims: 'install_shims',
+	uninstallShims: 'uninstall_shims',
 	claudeCodeStatus: 'claude_code_status',
 	installClaudeCode: 'install_claude_code',
 	uninstallClaudeCode: 'uninstall_claude_code'
@@ -163,6 +164,7 @@ export const runDoctor = () => call<T.DoctorReport>(COMMANDS.runDoctor);
 export const hostsInSync = () => call<boolean>(COMMANDS.hostsInSync);
 export const shimStatus = () => call<T.ShimStatus>(COMMANDS.shimStatus);
 export const installShims = () => call<T.ShimStatus>(COMMANDS.installShims);
+export const uninstallShims = () => call<T.ShimStatus>(COMMANDS.uninstallShims);
 
 // Integrations
 export const claudeCodeStatus = () => call<T.ClaudeCodeStatus>(COMMANDS.claudeCodeStatus);

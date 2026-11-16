@@ -770,8 +770,9 @@ pub enum ShimsCommand {
     /// Install the shims and a copy of `lampo`, and add their folder to the user PATH (no
     /// elevation needed).
     Install,
-    /// Remove the shim folder from the user PATH and delete it (shims, the `lampo` copy, the shim
-    /// index). The app and its own `lampo.exe` are untouched; `shims install` puts them back.
+    /// Remove the shim folder from the user PATH and delete the shims and the `lampo` copy in it
+    /// (the shim index stays). The app and its own `lampo.exe` are untouched; `shims install` puts
+    /// them back.
     Uninstall,
 }
 

@@ -30,3 +30,11 @@ pub async fn install_shims(state: State<'_, AppState>) -> AppResult<ShimStatusDt
     let shims = state.shims.clone();
     run_blocking(move || shims.install()).await
 }
+
+/// Takes the shim folder off the user PATH (broadcast as for [`install_shims`]) and deletes the
+/// shims and the CLI copy; the shim index stays.
+#[tauri::command]
+pub async fn uninstall_shims(state: State<'_, AppState>) -> AppResult<ShimStatusDto> {
+    let shims = state.shims.clone();
+    run_blocking(move || shims.uninstall()).await
+}
