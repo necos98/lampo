@@ -1,26 +1,89 @@
-//! Launching external desktop apps (Explorer, VS Code) on a project folder.
+//! Launching external desktop apps (PowerShell, Explorer, VS Code) on a project folder.
 //!
-//! These are ordinary child processes of the app: the app process itself is not in the services
-//! Job Object (services are created *inside* the job via `PROC_THREAD_ATTRIBUTE_JOB_LIST`, see
-//! `lampo_infra_services::process`), so nothing started here is killed when Lampo quits.
+//! These are ordinary child processes of the caller: the desktop app process itself is not in
+//! the services Job Object (services are created *inside* the job via
+//! `PROC_THREAD_ATTRIBUTE_JOB_LIST`, see the `process` module), so nothing started here is killed
+//! when Lampo quits.
 
 use std::ffi::OsStr;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use lampo_application::{AppError, AppResult, ErrorCode};
+use lampo_domain::ports::ExternalAppLauncher;
+use lampo_domain::project::ProjectId;
+use lampo_domain::{PortError, PortResult};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+const EXPLORER_EXE: &str = "explorer.exe";
+const CMD_EXE: &str = "cmd.exe";
+const POWERSHELL_EXE: &str = "powershell.exe";
+const LAMPO_EXE: &str = "lampo.exe";
 const VSCODE_DIR: &str = "Microsoft VS Code";
 const VSCODE_EXE: &str = "Code.exe";
 const VSCODE_CMD: &str = "code.cmd";
+const VSCODE_ENTITY: &str = "Visual Studio Code";
 /// `cmd.exe` expands `%VAR%` even inside quotes, so such a folder cannot be passed through it safely.
 const CMD_EXPANSION_CHAR: char = '%';
 
+/// [`ExternalAppLauncher`] for Windows: Explorer, VS Code (`Code.exe`, or `code.cmd` from PATH)
+/// and a PowerShell console through `lampo exec`.
+pub struct WindowsExternalAppLauncher;
+
+impl ExternalAppLauncher for WindowsExternalAppLauncher {
+    /// Explorer exits with 1 even on success, so it is not waited on.
+    fn open_folder(&self, folder: &Path) -> PortResult<()> {
+        Command::new(EXPLORER_EXE).arg(folder).spawn().map_err(|e| PortError::process(EXPLORER_EXE, e))?;
+        Ok(())
+    }
+
+    fn open_in_vscode(&self, folder: &Path) -> PortResult<()> {
+        let local_app_data = std::env::var_os("LOCALAPPDATA");
+        let program_files = std::env::var_os("ProgramFiles");
+        let program_files_x86 = std::env::var_os("ProgramFiles(x86)");
+        let path = std::env::var_os("PATH");
+        let search =
+            VsCodeSearch { local_app_data: local_app_data.as_deref(), program_files: program_files.as_deref(), program_files_x86: program_files_x86.as_deref(), path: path.as_deref() };
+        let Some(vscode) = locate_vscode(search, Path::is_file) else {
+            return Err(PortError::not_found(VSCODE_ENTITY, VSCODE_CMD));
+        };
+        let mut command = match &vscode {
+            VsCode::Exe(exe) => {
+                let mut c = Command::new(exe);
+                c.arg(folder);
+                c
+            }
+            VsCode::Cmd(script) => {
+                ensure_cmd_safe(folder)?;
+                // `cmd /s /c ""<script>" "<folder>""`: with /s cmd strips exactly the outer quote pair,
+                // so both paths keep their own quotes (and may contain spaces). Windows paths cannot
+                // contain `"`; `%` is refused above and `/v:off` keeps `!` literal.
+                let mut c = Command::new(CMD_EXE);
+                c.args(["/d", "/v:off", "/s", "/c"]).raw_arg(format!("\"\"{}\" \"{}\"\"", script.display(), folder.display()));
+                c
+            }
+        };
+        command.current_dir(folder).creation_flags(CREATE_NO_WINDOW).spawn().map_err(|e| PortError::process(VSCODE_ENTITY, e))?;
+        Ok(())
+    }
+
+    /// `lampo.exe` sits next to the caller's executable (the desktop app or the CLI itself).
+    fn open_terminal(&self, project: &ProjectId, folder: &Path) -> PortResult<()> {
+        let lampo = std::env::current_exe().map_err(|e| PortError::io("locating the lampo CLI", e))?.with_file_name(LAMPO_EXE);
+        Command::new(lampo)
+            .args(["-p", project.as_str(), "exec", "--", POWERSHELL_EXE, "-NoLogo", "-NoExit"])
+            .current_dir(folder)
+            .creation_flags(CREATE_NEW_CONSOLE)
+            .spawn()
+            .map_err(|e| PortError::process(LAMPO_EXE, e))?;
+        Ok(())
+    }
+}
+
 /// How VS Code can be started.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum VsCode {
+enum VsCode {
     /// `Code.exe` from a standard install location: started directly.
     Exe(PathBuf),
     /// `code.cmd` found on PATH with no `Code.exe` beside it: started through `cmd.exe`.
@@ -29,17 +92,17 @@ pub enum VsCode {
 
 /// Where to look for VS Code; the values of the corresponding environment variables.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct VsCodeSearch<'a> {
-    pub local_app_data: Option<&'a OsStr>,
-    pub program_files: Option<&'a OsStr>,
-    pub program_files_x86: Option<&'a OsStr>,
-    pub path: Option<&'a OsStr>,
+struct VsCodeSearch<'a> {
+    local_app_data: Option<&'a OsStr>,
+    program_files: Option<&'a OsStr>,
+    program_files_x86: Option<&'a OsStr>,
+    path: Option<&'a OsStr>,
 }
 
 /// Finds VS Code: user install, machine install (64-bit, then 32-bit), then `code.cmd` on PATH,
 /// preferring the `Code.exe` of that install (`<install>\bin\code.cmd` → `<install>\Code.exe`).
 /// `is_file` is injected so the search order can be tested without touching the disk.
-pub fn locate_vscode(search: VsCodeSearch<'_>, is_file: impl Fn(&Path) -> bool) -> Option<VsCode> {
+fn locate_vscode(search: VsCodeSearch<'_>, is_file: impl Fn(&Path) -> bool) -> Option<VsCode> {
     let installs = [
         search.local_app_data.map(|d| Path::new(d).join("Programs").join(VSCODE_DIR).join(VSCODE_EXE)),
         search.program_files.map(|d| Path::new(d).join(VSCODE_DIR).join(VSCODE_EXE)),
@@ -62,58 +125,14 @@ fn exe_beside_script(script: &Path) -> Option<PathBuf> {
 }
 
 /// Refuses a folder that `cmd.exe` would rewrite: `%VAR%` expands even between quotes.
-fn ensure_cmd_safe(folder: &str) -> AppResult<()> {
-    if folder.contains(CMD_EXPANSION_CHAR) {
-        return Err(AppError::new(
-            ErrorCode::Validation,
-            format!(
-                "impossibile aprire in Visual Studio Code una cartella con `{CMD_EXPANSION_CHAR}` nel percorso tramite `code.cmd`: installa VS Code nel percorso standard o rinomina la cartella ({folder})"
-            ),
-        ));
+fn ensure_cmd_safe(folder: &Path) -> PortResult<()> {
+    if folder.as_os_str().to_string_lossy().contains(CMD_EXPANSION_CHAR) {
+        return Err(PortError::Unsupported(format!(
+            "impossibile aprire in Visual Studio Code una cartella con `{CMD_EXPANSION_CHAR}` nel percorso tramite `code.cmd`: installa VS Code nel percorso standard o rinomina la cartella ({})",
+            folder.display()
+        )));
     }
     Ok(())
-}
-
-/// Opens `folder` in Windows Explorer. Explorer exits with 1 even on success, so it is not waited on.
-pub fn open_folder(folder: &str) -> AppResult<()> {
-    ensure_folder(folder)?;
-    Command::new("explorer.exe").arg(folder).spawn().map_err(|e| AppError::internal(format!("impossibile aprire la cartella: {e}")))?;
-    Ok(())
-}
-
-/// Opens `folder` in Visual Studio Code.
-pub fn open_in_vscode(folder: &str) -> AppResult<()> {
-    ensure_folder(folder)?;
-    let local_app_data = std::env::var_os("LOCALAPPDATA");
-    let program_files = std::env::var_os("ProgramFiles");
-    let program_files_x86 = std::env::var_os("ProgramFiles(x86)");
-    let path = std::env::var_os("PATH");
-    let search = VsCodeSearch { local_app_data: local_app_data.as_deref(), program_files: program_files.as_deref(), program_files_x86: program_files_x86.as_deref(), path: path.as_deref() };
-    let Some(vscode) = locate_vscode(search, Path::is_file) else {
-        return Err(AppError::new(ErrorCode::PackageMissing, "Visual Studio Code non trovato: installalo o aggiungi `code` al PATH"));
-    };
-    let mut command = match &vscode {
-        VsCode::Exe(exe) => {
-            let mut c = Command::new(exe);
-            c.arg(folder);
-            c
-        }
-        VsCode::Cmd(script) => {
-            ensure_cmd_safe(folder)?;
-            // `cmd /s /c ""<script>" "<folder>""`: with /s cmd strips exactly the outer quote pair,
-            // so both paths keep their own quotes (and may contain spaces). Windows paths cannot
-            // contain `"`; `%` is refused above and `/v:off` keeps `!` literal.
-            let mut c = Command::new("cmd.exe");
-            c.args(["/d", "/v:off", "/s", "/c"]).raw_arg(format!("\"\"{}\" \"{}\"\"", script.display(), folder));
-            c
-        }
-    };
-    command.current_dir(folder).creation_flags(CREATE_NO_WINDOW).spawn().map_err(|e| AppError::internal(format!("impossibile avviare Visual Studio Code: {e}")))?;
-    Ok(())
-}
-
-fn ensure_folder(folder: &str) -> AppResult<()> {
-    if Path::new(folder).is_dir() { Ok(()) } else { Err(AppError::new(ErrorCode::Validation, format!("la cartella del progetto non esiste: {folder}"))) }
 }
 
 #[cfg(test)]
@@ -168,9 +187,9 @@ mod tests {
 
     #[test]
     fn cmd_launch_refuses_folders_with_percent() {
-        let err = ensure_cmd_safe(r"C:\www\%USERPROFILE%\app").unwrap_err();
-        assert_eq!(err.code, ErrorCode::Validation);
-        assert!(ensure_cmd_safe(r"C:\www\my app (1) & co").is_ok());
+        let err = ensure_cmd_safe(Path::new(r"C:\www\%USERPROFILE%\app")).unwrap_err();
+        assert!(matches!(&err, PortError::Unsupported(reason) if reason.ends_with(r"(C:\www\%USERPROFILE%\app)")), "{err:?}");
+        assert!(ensure_cmd_safe(Path::new(r"C:\www\my app (1) & co")).is_ok());
     }
 
     #[test]

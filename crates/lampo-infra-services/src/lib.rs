@@ -18,6 +18,7 @@
 //! | [`HeadlessAppLauncher`]      | `AppLauncher`                                |
 //! | [`TokioTimer`]               | `Timer`                                      |
 //! | [`ClaudeCliRunner`]          | `ClaudeCodeCli` (`claude` via the `CommandRunner`) |
+//! | [`WindowsExternalAppLauncher`] | `ExternalAppLauncher` (PowerShell, Explorer, VS Code) |
 //!
 //! Internal modules: `process` (process creation inside the job, IOCP stdio pipes),
 //! `service_host` (what every supervised runner shares; runners only describe their service),
@@ -33,6 +34,7 @@ pub mod claude_code;
 pub mod compression;
 pub mod control_pipe;
 pub mod database;
+mod external_apps;
 mod last_resort;
 pub mod launcher;
 pub mod logs;
@@ -53,6 +55,7 @@ mod win;
 pub use claude_code::ClaudeCliRunner;
 pub use control_pipe::{NamedPipeControlClient, NamedPipeControlServer};
 pub use database::MysqlCliAdmin;
+pub use external_apps::WindowsExternalAppLauncher;
 pub use last_resort::{LastResortStop, stop_mysql_servers};
 pub use launcher::HeadlessAppLauncher;
 pub use logs::FileLogReader;

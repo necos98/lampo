@@ -16,6 +16,7 @@ pub mod claude_code;
 pub mod database;
 pub mod diagnostics;
 pub mod environment;
+pub mod external_apps;
 pub(crate) mod generation;
 pub mod lifecycle;
 pub mod log_rotation;
@@ -55,6 +56,7 @@ pub use diagnostics::{
     VcRuntimeCheck,
 };
 pub use environment::{ApplyEnvironment, ApplyEnvironmentDeps, EnvironmentSync, ServiceLifecycle};
+pub use external_apps::{ExternalApp, OpenProjectIn};
 pub use lifecycle::{FirstRunDeps, FirstRunSetup, Shutdown, ShutdownGate, Startup};
 pub use log_rotation::PeriodicLogRotation;
 pub use logs::LogQueries;

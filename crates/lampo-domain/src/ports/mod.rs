@@ -26,6 +26,7 @@
 //! | [`services`] | `lampo-infra-services` (supervisor, runners, ports, logs, `DatabaseAdmin`) |
 //! | [`control`]  | `lampo-infra-services` (named pipe, headless launcher) |
 //! | [`agents`]   | `lampo-infra-services` (`ClaudeCodeCli`), `lampo-infra-store` (`AgentPluginFiles`) |
+//! | [`desktop`]  | `lampo-infra-services` (`WindowsExternalAppLauncher`) |
 //! | [`events`]   | composition roots (Tauri app, CLI) |
 //!
 //! Strategy traits with pure implementations live next to their domain module and are
@@ -34,6 +35,7 @@
 
 pub mod agents;
 pub mod control;
+pub mod desktop;
 pub mod events;
 pub mod packages;
 pub mod services;
@@ -43,6 +45,7 @@ pub mod web;
 
 pub use system::{Clock, Timer};
 pub use agents::{AgentPluginFiles, ClaudeCodeCli};
+pub use desktop::ExternalAppLauncher;
 pub use control::{AppLauncher, ControlChannelClient, ControlChannelServer, ControlFrameSink, ControlRequestHandler};
 pub use events::{EventPublisher, NullEventPublisher, NullProgressSink, ProgressSink};
 pub use packages::{

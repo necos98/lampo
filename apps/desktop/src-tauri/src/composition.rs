@@ -271,6 +271,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         relink_project: Arc::new(RelinkProject::new(project_writer.clone(), fs.clone())),
         export_project: Arc::new(ExportProject::new(projects.clone(), transfer.clone())),
         import_project,
+        open_project_in: Arc::new(OpenProjectIn::new(projects.clone(), fs.clone(), Arc::new(services::WindowsExternalAppLauncher))),
         preset_queries,
         save_preset: Arc::new(SavePreset::new(projects.clone(), custom_presets.clone(), builtin_presets.clone())),
         delete_preset: Arc::new(DeletePreset::new(custom_presets, builtin_presets)),

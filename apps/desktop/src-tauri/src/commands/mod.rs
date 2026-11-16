@@ -10,7 +10,6 @@
 pub mod app;
 mod blocking;
 pub mod diagnostics;
-mod external_apps;
 pub mod integrations;
 pub mod logs;
 pub mod packages;

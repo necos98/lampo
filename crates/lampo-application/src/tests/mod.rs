@@ -3,6 +3,7 @@
 mod allocation;
 mod claude_code;
 mod environment;
+mod external_apps;
 mod misc;
 mod packages;
 mod project_saves;

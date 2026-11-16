@@ -25,6 +25,7 @@ pub struct AppState {
     pub relink_project: Arc<RelinkProject>,
     pub export_project: Arc<ExportProject>,
     pub import_project: Arc<ImportProject>,
+    pub open_project_in: Arc<OpenProjectIn>,
 
     pub preset_queries: Arc<PresetQueries>,
     pub save_preset: Arc<SavePreset>,

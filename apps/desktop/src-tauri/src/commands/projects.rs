@@ -1,5 +1,6 @@
 use lampo_application::dto::*;
-use lampo_application::{AppError, AppResult, CallContext};
+use lampo_application::use_cases::ExternalApp;
+use lampo_application::{AppResult, CallContext};
 use tauri::State;
 
 use super::blocking::run_blocking;
@@ -57,40 +58,24 @@ pub async fn relink_project(state: State<'_, AppState>, request: RelinkProjectRe
 /// (`lampo -p <id> exec -- powershell`; `lampo.exe` sits next to the app executable).
 #[tauri::command]
 pub async fn open_terminal(state: State<'_, AppState>, project_id: String) -> AppResult<()> {
-    let projects = state.project_queries.clone();
-    run_blocking(move || {
-        let project = projects.get(&project_id)?;
-        spawn_terminal(&project)
-    })
-    .await
-}
-
-fn spawn_terminal(project: &ProjectDto) -> AppResult<()> {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-
-    let lampo = std::env::current_exe().map_err(|e| AppError::internal(e.to_string()))?.with_file_name("lampo.exe");
-    std::process::Command::new(lampo)
-        .args(["-p", &project.id, "exec", "--", "powershell.exe", "-NoLogo", "-NoExit"])
-        .current_dir(&project.root)
-        .creation_flags(CREATE_NEW_CONSOLE)
-        .spawn()
-        .map_err(|e| AppError::internal(format!("impossibile aprire il terminale: {e}")))?;
-    Ok(())
+    open_project_in(&state, project_id, ExternalApp::Terminal).await
 }
 
 /// Opens the project folder in Windows Explorer.
 #[tauri::command]
 pub async fn open_project_folder(state: State<'_, AppState>, project_id: String) -> AppResult<()> {
-    let projects = state.project_queries.clone();
-    run_blocking(move || super::external_apps::open_folder(&projects.get(&project_id)?.root)).await
+    open_project_in(&state, project_id, ExternalApp::Folder).await
 }
 
 /// Opens the project folder in Visual Studio Code.
 #[tauri::command]
 pub async fn open_in_vscode(state: State<'_, AppState>, project_id: String) -> AppResult<()> {
-    let projects = state.project_queries.clone();
-    run_blocking(move || super::external_apps::open_in_vscode(&projects.get(&project_id)?.root)).await
+    open_project_in(&state, project_id, ExternalApp::VsCode).await
+}
+
+async fn open_project_in(state: &AppState, project_id: String, app: ExternalApp) -> AppResult<()> {
+    let open = state.open_project_in.clone();
+    run_blocking(move || open.execute(&project_id, app)).await
 }
 
 #[tauri::command]
