@@ -3,7 +3,8 @@
 //!
 //! Every config file Lampo writes carries a `schema = <SCHEMA_VERSION>` header. When a file is rewritten, keys
 //! present on disk that this version does not know (written by a newer Lampo) are carried over
-//! instead of being dropped.
+//! instead of being dropped. A file of a newer schema is read-only: it loads, with a warning, but
+//! is never rewritten, so its header never goes back to an older schema.
 
 use std::path::{Path, PathBuf};
 
@@ -17,6 +18,8 @@ use toml::{Table, Value};
 pub const SCHEMA_VERSION: i64 = 2;
 /// Key of the schema header.
 pub const SCHEMA_KEY: &str = "schema";
+/// Schema of the files written before the header existed.
+const LEGACY_SCHEMA_VERSION: i64 = 1;
 
 /// Reads and parses a TOML file as a raw table; `Ok(None)` if it does not exist.
 pub fn read_table(path: &Path) -> PortResult<Option<Table>> {
@@ -31,8 +34,12 @@ pub fn read_table(path: &Path) -> PortResult<Option<Table>> {
 }
 
 /// Reads a TOML file into `T`; `Ok(None)` if the file does not exist. Unknown keys are ignored.
+/// A file of a newer schema loads too, with a warning that it is read-only (see [`write_toml`]).
 pub fn read_toml<T: serde::de::DeserializeOwned>(path: &Path) -> PortResult<Option<T>> {
     let Some(table) = read_table(path)? else { return Ok(None) };
+    if let Some(schema) = newer_schema(&table) {
+        tracing::warn!("{}: {}", path.display(), read_only_reason(schema));
+    }
     Value::Table(table).try_into::<T>().map(Some).map_err(|e| PortError::invalid_data(path.display().to_string(), e))
 }
 
@@ -43,6 +50,20 @@ pub fn to_table<T: serde::Serialize>(value: &T, source_name: &str) -> PortResult
         Ok(_) => Err(PortError::invalid_data(source_name, "value is not a TOML table")),
         Err(e) => Err(PortError::invalid_data(source_name, e)),
     }
+}
+
+/// The schema of a raw file; a file without the header predates it.
+fn schema_of(table: &Table) -> i64 {
+    table.get(SCHEMA_KEY).and_then(Value::as_integer).unwrap_or(LEGACY_SCHEMA_VERSION)
+}
+
+/// The schema of a file written by a newer Lampo than this one, if it is one.
+fn newer_schema(table: &Table) -> Option<i64> {
+    Some(schema_of(table)).filter(|&schema| schema > SCHEMA_VERSION)
+}
+
+fn read_only_reason(schema: i64) -> String {
+    format!("schema {schema} is newer than this Lampo supports ({SCHEMA_VERSION}): the file is read-only until Lampo is updated")
 }
 
 /// Writes `table` as pretty TOML, atomically.
@@ -57,18 +78,24 @@ pub fn write_table(path: &Path, table: &Table) -> PortResult<()> {
 /// An existing file that does not load as `T` (corrupt, or edited into an invalid state) is
 /// copied to `<file>.corrupt-<unix ms>` first: the caller asked to save, but the user's
 /// hand-made content must not vanish with it. A file that cannot even be read is an error.
+///
+/// The schema on disk never goes down: a file of a newer schema is refused with
+/// [`PortError::InvalidData`] and left untouched, so what ends up on disk is always
+/// `max(existing schema, SCHEMA_VERSION)`.
 pub fn write_toml<T: serde::Serialize + serde::de::DeserializeOwned>(path: &Path, value: &T) -> PortResult<()> {
     let name = path.display().to_string();
     let mut table = to_table(value, &name)?;
     table.insert(SCHEMA_KEY.to_string(), Value::Integer(SCHEMA_VERSION));
     match inspect_existing::<T>(path)? {
         Existing::Missing => {}
+        Existing::Newer(schema) => return Err(PortError::invalid_data(name, read_only_reason(schema))),
         Existing::Unloadable => back_up_corrupt(path)?,
-        // Only a file of this schema or a newer one can hold keys worth keeping: the unknown keys
-        // of an older file are retired ones that were migrated on read (`mysql`/`redis` →
-        // `services`), and keeping them would resurrect the old values on the next read.
-        Existing::Loadable { raw, known } => {
-            if raw.get(SCHEMA_KEY).and_then(Value::as_integer).unwrap_or(1) >= SCHEMA_VERSION {
+        // Only a file of this schema can hold keys worth keeping (newer ones are never rewritten):
+        // the unknown keys of an older file are retired ones that were migrated on read
+        // (`mysql`/`redis` → `services`), and keeping them would resurrect the old values on the
+        // next read.
+        Existing::Loadable { raw, known, schema } => {
+            if schema == SCHEMA_VERSION {
                 carry_unknown(&raw, &known, &mut table);
             }
         }
@@ -79,25 +106,34 @@ pub fn write_toml<T: serde::Serialize + serde::de::DeserializeOwned>(path: &Path
 /// What [`write_toml`] finds at the path it is about to replace.
 enum Existing {
     Missing,
+    /// Written by a newer Lampo (with this schema): read-only for this version, loadable or not.
+    Newer(i64),
     /// Malformed TOML, or values `T` rejects.
     Unloadable,
-    /// The raw file and its round-trip through `T` (what this version understands).
+    /// The raw file, its round-trip through `T` (what this version understands) and its schema,
+    /// at most [`SCHEMA_VERSION`].
     Loadable {
         raw: Value,
         known: Value,
+        schema: i64,
     },
 }
 
 fn inspect_existing<T: serde::Serialize + serde::de::DeserializeOwned>(path: &Path) -> PortResult<Existing> {
-    let raw = match read_table(path) {
+    let table = match read_table(path) {
         Ok(None) => return Ok(Existing::Missing),
-        Ok(Some(table)) => Value::Table(table),
+        Ok(Some(table)) => table,
         Err(PortError::InvalidData { .. }) => return Ok(Existing::Unloadable),
         Err(e) => return Err(e),
     };
+    if let Some(schema) = newer_schema(&table) {
+        return Ok(Existing::Newer(schema));
+    }
+    let schema = schema_of(&table);
+    let raw = Value::Table(table);
     let Ok(parsed) = raw.clone().try_into::<T>() else { return Ok(Existing::Unloadable) };
     let known = Value::try_from(&parsed).map_err(|e| PortError::invalid_data(path.display().to_string(), e))?;
-    Ok(Existing::Loadable { raw, known })
+    Ok(Existing::Loadable { raw, known, schema })
 }
 
 /// Copies `path` next to itself as `<name>.corrupt-<unix ms>`.
@@ -268,6 +304,32 @@ mod tests {
         std::fs::write(&file, "schema = 2\nname = 5\n").unwrap();
         write_toml(&file, &Sample { name: "n".into(), inner: Inner::default(), opt: None }).unwrap();
         assert_eq!(backups(dir.path()).iter().map(|(_, text)| text.as_str()).collect::<Vec<_>>(), ["schema = 2\nname = 5\n"]);
+    }
+
+    /// A file written by a newer Lampo still loads: this version shows it, read-only.
+    #[test]
+    fn a_newer_schema_file_is_still_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("s.toml");
+        std::fs::write(&file, "schema = 3\nname = \"n\"\nfuture = 1\n").unwrap();
+        assert_eq!(read_toml::<Sample>(&file).unwrap(), Some(Sample { name: "n".into(), inner: Inner::default(), opt: None }));
+    }
+
+    /// Saving over a file of a newer schema would relabel it as this schema, and the newer Lampo
+    /// would then migrate its own data again as if it were old: the write is refused and the
+    /// file stays exactly as it was, whether or not this version can load it.
+    #[test]
+    fn writing_over_a_newer_schema_file_is_refused_and_leaves_it_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("s.toml");
+        for original in ["schema = 3\nname = \"n\"\nfuture = 1\n", "schema = 3\nname = 5\n"] {
+            std::fs::write(&file, original).unwrap();
+            let err = write_toml(&file, &Sample { name: "new".into(), inner: Inner::default(), opt: None }).unwrap_err();
+            let message = err.to_string();
+            assert!(message.contains("s.toml") && message.contains("schema 3") && message.contains("read-only"), "{message}");
+            assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+            assert!(backups(dir.path()).is_empty(), "a refused write keeps no backup");
+        }
     }
 
     #[test]
