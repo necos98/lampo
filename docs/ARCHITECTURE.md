@@ -399,7 +399,12 @@ and never compute the config root. The tool a shim or `lampo exec` starts is tie
 Job Object (`lampo_cli::job`): the launcher joins the job before the spawn, so if an IDE, Node or
 CI kills the launcher, the tool and everything it started (`php artisan serve` and its PHP
 server) die with it; when the tool exits on its own the job is disarmed first, so programs it
-detached keep running.
+detached keep running. Closing the console (the window or a Windows Terminal tab), logging off
+or shutting down can end the launcher with `ExitProcess` while the tool still runs, which skips
+that step: a console handler disarms the job on `CTRL_CLOSE_EVENT`, `CTRL_LOGOFF_EVENT` and
+`CTRL_SHUTDOWN_EVENT`, so a `code .` or `start notepad` from "Apri terminale" survives the window
+(the tool attached to the console still gets the event and closes). Only a forced kill leaves
+the job armed.
 
 ## Building
 

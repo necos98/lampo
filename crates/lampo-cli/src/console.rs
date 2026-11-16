@@ -4,23 +4,21 @@
 //! it keeps waiting and forwards the child's exit code instead.
 
 /// Makes this process survive Ctrl+C / Ctrl+Break (other control events, such as closing the
-/// console window, keep their default behaviour). Not inherited by child processes: a handler
-/// routine, unlike `SetConsoleCtrlHandler(NULL, TRUE)`, is per process.
+/// console window, keep their default behaviour; `job` disarms the tie before it). Not inherited
+/// by child processes: a handler routine, unlike `SetConsoleCtrlHandler(NULL, TRUE)`, is per
+/// process.
 #[cfg(windows)]
 pub fn survive_ctrl_c() {
-    const CTRL_C_EVENT: u32 = 0;
-    const CTRL_BREAK_EVENT: u32 = 1;
+    use windows_sys::Win32::Foundation::{BOOL, TRUE};
+    use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler};
 
-    unsafe extern "system" fn handler(event: u32) -> i32 {
-        i32::from(event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT)
+    unsafe extern "system" fn handler(event: u32) -> BOOL {
+        BOOL::from(event == CTRL_C_EVENT || event == CTRL_BREAK_EVENT)
     }
 
-    unsafe extern "system" {
-        fn SetConsoleCtrlHandler(handler: Option<unsafe extern "system" fn(u32) -> i32>, add: i32) -> i32;
-    }
     // SAFETY: plain kernel32 call with a valid `extern "system"` function pointer.
     unsafe {
-        SetConsoleCtrlHandler(Some(handler), 1);
+        SetConsoleCtrlHandler(Some(handler), TRUE);
     }
 }
 

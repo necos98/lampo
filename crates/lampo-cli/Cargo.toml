@@ -36,8 +36,9 @@ serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "time", "signal"] }
 
 [target.'cfg(windows)'.dependencies]
-# Job Object tying the tool started by a shim or `lampo exec` to the launcher's lifetime.
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+# Job Object tying the tool started by a shim or `lampo exec` to the launcher's lifetime, and the
+# launcher's console handlers (Ctrl+C, console closed).
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

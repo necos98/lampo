@@ -9,7 +9,11 @@
 //!
 //! The limit is armed only while the tool runs. When the tool exits on its own (or cannot be
 //! started), the launcher disarms it before closing the handle: whatever the tool deliberately
-//! left running (a detached editor, a daemon) survives, as it did without Lampo.
+//! left running (a detached editor, a daemon) survives, as it did without Lampo. The same holds
+//! when the console goes away (window or tab closed, logoff, shutdown): Windows may end the
+//! launcher with `ExitProcess`, which runs no destructor, while the tool is still running, so a
+//! console handler disarms the job first. The tool, attached to the same console, still receives
+//! the event and closes as usual.
 //!
 //! The tie is best effort: when no job can be created or joined (a restrictive parent job), the
 //! tool runs untied rather than not at all.
@@ -22,11 +26,13 @@ use std::process::{Command, ExitStatus};
 pub fn run_tied(command: &mut Command) -> io::Result<ExitStatus> {
     let tie = win::Tie::new().ok();
     let launcher_joined = tie.as_ref().is_some_and(|t| t.join_current_process().is_ok());
+    // Released (disarmed, then closed) when this returns, or earlier if the console goes away.
+    let held = tie.map(win::Held::new);
     let mut child = command.spawn()?;
     if !launcher_joined {
         // Fallback when the launcher cannot join: only what the child starts from now on is tied.
-        if let Some(tie) = &tie {
-            let _untied = tie.join_child(&child);
+        if let Some(held) = &held {
+            let _untied = held.join_child(&child);
         }
     }
     child.wait()
@@ -42,8 +48,10 @@ mod win {
     use std::io;
     use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
     use std::process::Child;
+    use std::sync::{Mutex, MutexGuard, Once, PoisonError};
 
-    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::Foundation::{BOOL, FALSE, HANDLE, TRUE};
+    use windows_sys::Win32::System::Console::{CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT, SetConsoleCtrlHandler};
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
         JobObjectExtendedLimitInformation, SetInformationJobObject,
@@ -112,6 +120,62 @@ mod win {
         }
     }
 
+    /// The tie of the tool now running, where the console handler can reach it.
+    static RUNNING: Mutex<Option<Tie>> = Mutex::new(None);
+
+    fn running() -> MutexGuard<'static, Option<Tie>> {
+        RUNNING.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Keeps the tie in [`RUNNING`] while the tool runs (one tool at a time per process) and
+    /// releases it when dropped. The console handler releases it earlier if the console goes away.
+    pub struct Held(());
+
+    impl Held {
+        pub fn new(tie: Tie) -> Self {
+            static HANDLER: Once = Once::new();
+            HANDLER.call_once(|| {
+                // SAFETY: plain kernel32 call with a valid `extern "system"` function pointer.
+                // Should it fail, closing the console kills the tree, as a forced kill does.
+                let _unregistered = unsafe { SetConsoleCtrlHandler(Some(release_on_session_end), TRUE) };
+            });
+            let mut slot = running();
+            debug_assert!(slot.is_none(), "one tied tool at a time");
+            *slot = Some(tie);
+            Self(())
+        }
+
+        pub fn join_child(&self, child: &Child) -> io::Result<()> {
+            running().as_ref().map_or(Ok(()), |tie| tie.join_child(child))
+        }
+    }
+
+    impl Drop for Held {
+        fn drop(&mut self) {
+            release();
+        }
+    }
+
+    /// Disarms and closes the running tie, if any.
+    fn release() {
+        drop(running().take());
+    }
+
+    /// Releases the tie on the events after which Windows ends the launcher with `ExitProcess`.
+    /// Ctrl+C and Ctrl+Break leave it armed: the launcher survives them (see `console`).
+    fn on_console_event(event: u32) {
+        if matches!(event, CTRL_CLOSE_EVENT | CTRL_LOGOFF_EVENT | CTRL_SHUTDOWN_EVENT) {
+            release();
+        }
+    }
+
+    /// Console handler. It never handles the event: the next handler, or the default one that
+    /// ends the launcher, still runs.
+    unsafe extern "system" fn release_on_session_end(event: u32) -> BOOL {
+        on_console_event(event);
+        FALSE
+    }
+
     #[cfg(test)]
     mod tests {
         use std::mem::ManuallyDrop;
@@ -119,33 +183,111 @@ mod win {
         use std::time::{Duration, Instant};
 
         use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT};
 
         use super::*;
+
+        /// Pings of a child that should outlive its job: about 3 seconds of work.
+        const SHORT_WORK: &str = "4";
+        /// Pings of a child that should be killed: about 30 seconds of work.
+        const LONG_WORK: &str = "31";
+        /// A child still alive this long after its job was closed was not killed with it (job
+        /// termination is asynchronous: right after the close the child may still be running).
+        const SURVIVED: Duration = Duration::from_secs(2);
+        /// A child gone within this time was killed with its job.
+        const KILLED: Duration = Duration::from_secs(10);
+
+        /// Serializes the tests that use the process-wide [`RUNNING`] slot.
+        static SLOT: Mutex<()> = Mutex::new(());
+
+        fn spawn_ping(count: &str) -> Child {
+            Command::new("ping").args(["-n", count, "127.0.0.1"]).stdout(Stdio::null()).spawn().unwrap()
+        }
+
+        /// Closes the armed handle without the drop's disarming: what the OS does when the
+        /// launcher dies.
+        fn close_armed(tie: Tie) {
+            let tie = ManuallyDrop::new(tie);
+            // SAFETY: the handle is closed once, here; ManuallyDrop prevents a second close.
+            unsafe { CloseHandle(tie.raw()) };
+        }
+
+        /// Holds a fresh tie with `child` in it, as `run_tied` does.
+        fn hold_with(child: &Child) -> Held {
+            let held = Held::new(Tie::new().unwrap());
+            held.join_child(child).unwrap();
+            held
+        }
+
+        /// What `ExitProcess` does to the launcher: no destructor runs, the OS closes the handles.
+        fn exit_process(held: Held) {
+            std::mem::forget(held);
+            if let Some(tie) = running().take() {
+                close_armed(tie);
+            }
+        }
+
+        fn assert_survives(mut child: Child, why: &str) {
+            let closed = Instant::now();
+            assert!(child.wait().unwrap().success(), "{why}");
+            assert!(closed.elapsed() >= SURVIVED, "{why}");
+        }
+
+        fn assert_killed(mut child: Child, why: &str) {
+            let closed = Instant::now();
+            child.wait().unwrap();
+            assert!(closed.elapsed() < KILLED, "{why}");
+        }
 
         #[test]
         fn a_disarmed_job_lets_its_processes_live() {
             let tie = Tie::new().unwrap();
-            let mut child = Command::new("ping").args(["-n", "3", "127.0.0.1"]).stdout(Stdio::null()).spawn().unwrap();
+            let child = spawn_ping(SHORT_WORK);
             tie.join_child(&child).unwrap();
             drop(tie);
-            assert!(child.try_wait().unwrap().is_none(), "dropping the tie must not kill the child");
-            assert!(child.wait().unwrap().success());
+            assert_survives(child, "dropping the tie must not kill the child");
         }
 
         #[test]
         fn an_armed_job_kills_its_processes_when_closed() {
             let tie = Tie::new().unwrap();
-            // About 30 seconds of work unless killed.
-            let mut child = Command::new("ping").args(["-n", "31", "127.0.0.1"]).stdout(Stdio::null()).spawn().unwrap();
+            let child = spawn_ping(LONG_WORK);
             tie.join_child(&child).unwrap();
-            let started = Instant::now();
-            // Close the armed handle without the drop's disarming: what the OS does when the
-            // launcher dies.
-            let tie = ManuallyDrop::new(tie);
-            // SAFETY: the handle is closed once, here; ManuallyDrop prevents a second close.
-            unsafe { CloseHandle(tie.raw()) };
-            child.wait().unwrap();
-            assert!(started.elapsed() < Duration::from_secs(10), "the child must be killed with the job");
+            close_armed(tie);
+            assert_killed(child, "the child must be killed with the job");
+        }
+
+        #[test]
+        fn a_tool_done_on_its_own_releases_the_held_tie_and_its_programs_live() {
+            let _slot = SLOT.lock().unwrap_or_else(PoisonError::into_inner);
+            let child = spawn_ping(SHORT_WORK);
+            drop(hold_with(&child));
+            assert!(running().is_none(), "the slot must be empty once the tool is done");
+            assert_survives(child, "a tool that exits on its own leaves its programs alive");
+        }
+
+        #[test]
+        fn the_end_of_the_console_lets_the_detached_programs_live() {
+            let _slot = SLOT.lock().unwrap_or_else(PoisonError::into_inner);
+            for event in [CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT] {
+                let child = spawn_ping(SHORT_WORK);
+                let held = hold_with(&child);
+                on_console_event(event);
+                exit_process(held);
+                assert_survives(child, &format!("console event {event} must disarm the job"));
+            }
+        }
+
+        #[test]
+        fn ctrl_c_and_ctrl_break_leave_the_job_armed() {
+            let _slot = SLOT.lock().unwrap_or_else(PoisonError::into_inner);
+            for event in [CTRL_C_EVENT, CTRL_BREAK_EVENT] {
+                let child = spawn_ping(LONG_WORK);
+                let held = hold_with(&child);
+                on_console_event(event);
+                exit_process(held);
+                assert_killed(child, &format!("console event {event} must not disarm the job"));
+            }
         }
     }
 }
