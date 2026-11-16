@@ -2,7 +2,7 @@
 //! hosts files through its debug-only `--hosts` option. Never touches the system hosts file and
 //! never triggers UAC.
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -22,10 +22,7 @@ fn fixture(name: &str) -> Vec<u8> {
 }
 
 fn block(names: &[&str]) -> HostsBlock {
-    HostsBlock::new(names.iter().flat_map(|n| {
-        let h = Hostname::new(n).unwrap();
-        [HostsEntry { ip: IpAddr::V4(Ipv4Addr::LOCALHOST), hostname: h.clone() }, HostsEntry { ip: IpAddr::V6(Ipv6Addr::LOCALHOST), hostname: h }]
-    }))
+    HostsBlock::new(names.iter().map(|n| HostsEntry { ip: IpAddr::V4(Ipv4Addr::LOCALHOST), hostname: Hostname::new(n).unwrap() }))
 }
 
 /// Runs the helper as a normal child process (the test stand-in for the UAC launcher).
@@ -65,6 +62,7 @@ async fn adapter_and_real_helper_preserve_the_rest_of_the_file() {
 
 #[tokio::test]
 async fn existing_block_in_an_lf_file_is_replaced_in_place() {
+    // The fixture holds a block written by an older Lampo, with `::1` lines.
     let dir = tempfile::tempdir().unwrap();
     let hosts = temp_hosts(&dir, &fixture("lf-with-existing-block.hosts"));
     let file = ElevatedHostsFile::with_launcher(hosts.clone(), PathBuf::from(HELPER), Arc::new(DirectLauncher));
@@ -73,6 +71,7 @@ async fn existing_block_in_an_lf_file_is_replaced_in_place() {
     assert!(text.starts_with("127.0.0.1 localhost\n# >>> Lampo"));
     assert!(text.ends_with("# <<< Lampo managed block <<<\n10.1.1.1 keep.lan\n"));
     assert!(!text.contains("old.test") && !text.contains('\r'));
+    assert!(text.contains("127.0.0.1\tnew.test\n") && !text.contains("::1"));
 }
 
 fn run_helper(args: &[String]) -> i32 {
@@ -125,7 +124,7 @@ fn helper_rejects_bad_requests_without_touching_the_file() {
     assert_eq!(std::fs::read(&hosts).unwrap(), b"127.0.0.1 localhost\r\n");
 
     assert_eq!(run_helper(&request_for(&request, &valid, &hosts)), helper_exit::OK);
-    assert!(std::fs::read_to_string(&hosts).unwrap().contains("::1\tok.test\r\n"));
+    assert!(std::fs::read_to_string(&hosts).unwrap().contains("127.0.0.1\tok.test\r\n"));
 }
 
 #[test]

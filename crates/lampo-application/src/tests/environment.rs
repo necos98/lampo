@@ -1,8 +1,12 @@
 //! The reconciliation loop: services plan, Apache staging/isolation, hosts file, shim index.
 
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use lampo_domain::hostname::Hostname;
+use lampo_domain::hosts::{HostsBlock, HostsEntry};
 use lampo_domain::mysql::MysqlSeries;
 use lampo_domain::package::PackageKind;
 use lampo_domain::service::ServiceKind;
@@ -231,6 +235,22 @@ async fn hosts_changes_need_elevation_and_are_never_triggered_implicitly() {
 }
 
 #[tokio::test]
+async fn a_legacy_block_with_ipv6_entries_is_rewritten_with_ipv4_only() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", true);
+    let shop = Hostname::new("shop.test").unwrap();
+    let legacy = [IpAddr::V4(Ipv4Addr::LOCALHOST), IpAddr::V6(Ipv6Addr::LOCALHOST)].map(|ip| HostsEntry { ip, hostname: shop.clone() });
+    *w.hosts.block.lock().unwrap() = Some(HostsBlock::new(legacy));
+
+    let doctor = Doctor::new(w.doctor_deps(Arc::new(FakeLocator::default())));
+    assert!(!doctor.run().await.unwrap().hosts_file_in_sync);
+
+    assert!(w.env.sync(&gui()).await.unwrap().hosts_file_updated);
+    let written = w.hosts.block.lock().unwrap().clone().unwrap();
+    assert_eq!(written.entries().cloned().collect::<Vec<_>>(), [HostsEntry { ip: IpAddr::V4(Ipv4Addr::LOCALHOST), hostname: shop }]);
+}
+
+#[tokio::test]
 async fn busy_ports_are_reported_without_blocking_other_services() {
     let w = World::with_basics();
     w.project("shop", "C:\\sites\\shop", true);
@@ -348,7 +368,6 @@ async fn uninstalling_a_php_regenerates_the_shim_index() {
 async fn a_new_service_kind_is_added_by_registering_a_descriptor_and_a_runner() {
     use lampo_domain::package::PackageKind;
     use lampo_domain::service::{ServiceClient, ServiceDescriptor, ServiceKind};
-    use std::sync::Arc;
 
     struct Memcached;
     impl ServiceDescriptor for Memcached {

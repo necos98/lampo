@@ -73,7 +73,8 @@ pub struct EnvVar {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderOptions {
     pub fcgid: FcgidTuning,
-    /// Also listen on `[::1]` for the shared port (hosts-file entries exist for both loopbacks).
+    /// Also listen on `[::1]` for the shared port: browsers resolve `*.localhost` names to both
+    /// loopbacks. Hosts-file names map to `127.0.0.1` only, which is always listened on.
     pub ipv6_loopback: bool,
     pub threads_per_child: u32,
     /// Environment for php-cgi.exe. On Windows mod_fcgid starts PHP with *only* the variables

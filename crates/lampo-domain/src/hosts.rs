@@ -7,7 +7,7 @@
 //! a UAC prompt. It only changes when projects are added, removed or renamed.
 
 use std::collections::BTreeSet;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr};
 
 use serde::{Deserialize, Serialize};
 
@@ -34,15 +34,12 @@ impl HostsBlock {
         Self { entries: entries.into_iter().collect() }
     }
 
-    /// One IPv4 and one IPv6 loopback entry per project address that needs one
-    /// (`*.localhost` names and loopback ports need none).
+    /// One IPv4 loopback entry per project address that needs one (`*.localhost` names and
+    /// loopback ports need none). No `::1` entry, as Laragon and XAMPP do: an app that
+    /// allow-lists `127.0.0.1` answers 403 to a browser arriving over IPv6. A block written by an
+    /// older Lampo with `::1` lines differs from this one, so the next sync rewrites it.
     pub fn for_projects<'a>(projects: impl IntoIterator<Item = &'a Project>) -> Self {
-        Self::new(
-            projects
-                .into_iter()
-                .flat_map(|p| p.hosts_file_names().cloned().collect::<Vec<_>>())
-                .flat_map(|h| [HostsEntry { ip: IpAddr::V4(Ipv4Addr::LOCALHOST), hostname: h.clone() }, HostsEntry { ip: IpAddr::V6(Ipv6Addr::LOCALHOST), hostname: h }]),
-        )
+        Self::new(projects.into_iter().flat_map(|p| p.hosts_file_names().cloned().collect::<Vec<_>>()).map(|hostname| HostsEntry { ip: IpAddr::V4(Ipv4Addr::LOCALHOST), hostname }))
     }
 
     pub fn entries(&self) -> impl Iterator<Item = &HostsEntry> {
@@ -124,12 +121,16 @@ mod tests {
     }
 
     #[test]
-    fn renders_sorted_entries_for_both_loopbacks() {
+    fn renders_sorted_ipv4_entries_only() {
         let text = block().render();
-        assert!(text.starts_with(BEGIN_MARKER));
-        assert!(text.contains("127.0.0.1\tblog.test\r\n127.0.0.1\tshop.test\r\n"));
-        assert!(text.contains("::1\tshop.test"));
-        assert!(text.trim_end().ends_with(END_MARKER));
+        assert_eq!(text, format!("{BEGIN_MARKER}\r\n127.0.0.1\tblog.test\r\n127.0.0.1\tshop.test\r\n{END_MARKER}\r\n"));
+    }
+
+    #[test]
+    fn a_block_with_ipv6_entries_is_out_of_date_and_gets_rewritten() {
+        let legacy = format!("{BEGIN_MARKER}\r\n127.0.0.1\tblog.test\r\n::1\tblog.test\r\n127.0.0.1\tshop.test\r\n::1\tshop.test\r\n{END_MARKER}\r\n");
+        assert_ne!(HostsBlock::extract(&legacy), Some(block()));
+        assert_eq!(block().apply_to(&legacy), block().render());
     }
 
     #[test]
