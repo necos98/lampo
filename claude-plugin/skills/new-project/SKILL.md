@@ -39,7 +39,7 @@ Options:
 | `--php <x.y>` | PHP minor; default: the preset's (the newest), raised to `composer.json` `require.php` |
 | `--activate` | serve it right away (otherwise `lampo project activate <id>` later) |
 | `--no-database` | do not create the MySQL database |
-| `--hosts-name` | also a `<id>.test` hosts-file name: needs `--allow-elevation` (UAC) |
+| `--addressing <mode>` | `no-elevation`, `hosts-only` or `standard` (see Addresses); default: the `default-addressing` setting |
 
 Pass `--php` explicitly when you know the version the project runs on in production or in its
 old environment: the default is the newest PHP, which old code may not support. The PHP must
@@ -83,14 +83,23 @@ still points at SQLite or `127.0.0.1` defaults: set the database values from
 
 ## Addresses
 
-- Default: `http://<id>.localhost` plus a dedicated loopback port (`http://127.0.0.1:8100`).
-  Browsers resolve `*.localhost` to the loopback by themselves: no hosts file, no UAC. Some
-  command-line HTTP clients do not; the `127.0.0.1:<port>` URL always works.
-- `--hosts-name` adds `<id>.test` (the top-level domain is a Lampo setting) through the hosts
-  file. That needs a UAC prompt: ASK the user, and only then add `--allow-elevation`. Without
-  it the command exits with 7. If the user refuses the prompt (exit 8), stay on `.localhost`.
-- `.test` names may already be used by Laragon or Herd on the same machine: prefer the default
-  addressing unless the user wants a hosts name.
+`--addressing` picks the addresses; without it the `default-addressing` setting applies
+(`lampo settings` shows it), which is `no-elevation` unless the user changed it.
+
+- `no-elevation`: `http://<id>.localhost` plus a dedicated loopback port
+  (`http://127.0.0.1:8100`). Browsers resolve `*.localhost` to the loopback by themselves: no
+  hosts file, no UAC. Some command-line HTTP clients do not; the `127.0.0.1:<port>` URL always
+  works.
+- `hosts-only`: just `<id>.test` (the top-level domain is a Lampo setting), through the hosts
+  file. `standard`: `<id>.test` plus `<id>.localhost` (`--hosts-name` is the same as
+  `--addressing standard`). Both need a UAC prompt: ASK the user, and only then add
+  `--allow-elevation`. Without it the command exits with 7 (`project new` checks this before
+  cloning or installing anything). If the user refuses the prompt (exit 8), use
+  `--addressing no-elevation`.
+- `lampo settings set --default-addressing hosts-only` (or another mode) changes the default
+  for later projects (existing ones keep their addresses): only when the user asks for it.
+- `.test` names may already be used by Laragon or Herd on the same machine: prefer
+  `no-elevation` unless the user wants a hosts name.
 
 ## Activate and check
 

@@ -15,6 +15,7 @@ use lampo_domain::tcp_port::Port;
 
 use super::{cli, gui};
 use crate::dto::*;
+use crate::context::CallContext;
 use crate::error::{AppError, ErrorCode};
 use crate::testing::*;
 use crate::use_cases::*;
@@ -133,6 +134,21 @@ async fn no_elevation_addressing_allocates_a_free_loopback_port_and_never_prompt
     assert!(dto.active);
     assert_eq!(w.hosts.writes.load(Ordering::SeqCst), 0);
     assert!(w.web.last().unwrap().vhosts.iter().any(|v| v.site.to_string() == "api" && v.loopback_port == Some(Port::of(8102))));
+}
+
+#[tokio::test]
+async fn hosts_only_addressing_gives_just_the_hosts_file_name_and_needs_elevation() {
+    let w = World::with_basics();
+    w.fs.add("C:\\sites\\shop");
+    let request = || CreateProjectRequest { addressing: AddressingDto::HostsOnly, ..req("C:\\sites\\shop") };
+    let err = create(&w, None).execute(request(), &cli()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::ElevationRequired);
+    assert!(err.message.contains("`shop.test`"), "{}", err.message);
+    assert!(w.projects.list().unwrap().is_empty(), "refused before saving");
+
+    let dto = create(&w, None).execute(request(), &CallContext::cli(true)).await.unwrap().project;
+    assert_eq!(dto.addresses, [SiteAddressDto::Hostname { host: "shop.test".into() }]);
+    assert_eq!(dto.url, "http://shop.test");
 }
 
 #[tokio::test]
@@ -320,6 +336,10 @@ async fn address_suggestions_use_the_domain_defaults_and_the_allocator() {
     assert_eq!(s.loopback_port, SiteAddressDto::LoopbackPort { port: 8102 }, "8100 is a worktree's, 8101 is busy");
     assert_eq!(s.no_elevation, [s.localhost.clone(), s.loopback_port.clone()]);
     assert_eq!(s.standard, [s.hostname.clone(), s.localhost.clone()]);
+    assert_eq!(s.hosts_only, std::slice::from_ref(&s.hostname));
+    assert_eq!(s.default_addressing, AddressingDto::NoElevation);
+    w.settings.0.lock().unwrap().default_addressing = lampo_domain::address::Addressing::HostsOnly;
+    assert_eq!(SuggestAddresses::new(w.allocator.clone(), w.settings.clone()).execute("blog").await.unwrap().default_addressing, AddressingDto::HostsOnly);
     assert_eq!(SuggestAddresses::new(w.allocator.clone(), w.settings.clone()).execute("Bad Id").await.unwrap_err().code, ErrorCode::Validation);
 }
 

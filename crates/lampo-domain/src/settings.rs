@@ -7,9 +7,12 @@
 //!
 //! An instance has one port, plus an optional `ui_port` for kinds with a second listener (the
 //! Mailpit web UI): absent in older files, it falls back to the kind's default.
+//!
+//! `default_addressing` (added later) reads as `no-elevation` when a file lacks it.
 
 use serde::{Deserialize, Serialize};
 
+use crate::address::Addressing;
 use crate::error::DomainError;
 use crate::hostname::Tld;
 use crate::mysql::MysqlSeries;
@@ -70,6 +73,9 @@ pub struct Settings {
     /// Closing the window hides to tray (and destroys the webview) instead of quitting.
     pub close_to_tray: bool,
     pub first_run_completed: bool,
+    /// Addresses a new project gets when none are chosen (CLI `project create` without
+    /// `--addressing`).
+    pub default_addressing: Addressing,
 }
 
 fn mysql_id(series: MysqlSeries) -> ServiceId {
@@ -91,6 +97,7 @@ impl Default for Settings {
             loopback_ports: PortRange::default(),
             close_to_tray: true,
             first_run_completed: false,
+            default_addressing: Addressing::default(),
         }
     }
 }
@@ -107,6 +114,7 @@ struct SettingsFile {
     loopback_ports: PortRange,
     close_to_tray: bool,
     first_run_completed: bool,
+    default_addressing: Addressing,
     mysql_instances: Option<Vec<LegacyMysqlInstance>>,
     redis_port: Option<Port>,
 }
@@ -129,6 +137,7 @@ impl Default for SettingsFile {
             loopback_ports: d.loopback_ports,
             close_to_tray: d.close_to_tray,
             first_run_completed: d.first_run_completed,
+            default_addressing: d.default_addressing,
             mysql_instances: None,
             redis_port: None,
         }
@@ -163,6 +172,7 @@ impl TryFrom<SettingsFile> for Settings {
             loopback_ports: f.loopback_ports,
             close_to_tray: f.close_to_tray,
             first_run_completed: f.first_run_completed,
+            default_addressing: f.default_addressing,
         };
         settings.validate()?;
         Ok(settings)
@@ -309,6 +319,17 @@ mod tests {
     }
 
     /// A file edited by hand into an invalid state does not load: `validate` runs on read.
+    #[test]
+    fn default_addressing_is_no_elevation_unless_the_file_says_otherwise() {
+        let before: Settings = serde_json::from_str(r#"{"apache_port": 80}"#).unwrap();
+        assert_eq!(before.default_addressing, Addressing::NoElevation);
+        let hosts_only = Settings { default_addressing: Addressing::HostsOnly, ..Settings::default() };
+        let json = serde_json::to_value(&hosts_only).unwrap();
+        assert_eq!(json["default_addressing"], "hosts-only");
+        assert_eq!(serde_json::from_value::<Settings>(json).unwrap(), hosts_only);
+        assert!(serde_json::from_str::<Settings>(r#"{"default_addressing": "everywhere"}"#).is_err());
+    }
+
     #[test]
     fn invalid_files_are_rejected_on_read() {
         let clash = r#"{"apache_port": 3306}"#;

@@ -28,7 +28,7 @@ use super::support::{load_project, newest_of, package_missing, parse_project_id,
 use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::mapping::{address_from_dto, address_to_dto, environment_from_dto};
+use crate::mapping::{address_from_dto, address_to_dto, addressing_from_dto, addressing_to_dto, environment_from_dto};
 
 /// Preset used when neither the request nor detection names one.
 pub const FALLBACK_PRESET: &str = "generic-php";
@@ -223,13 +223,13 @@ impl CreateProject {
             self.add_detected_services(&mut environment, &detection.services);
         }
         let explicit = request.addresses.as_ref().map(|list| list.iter().map(address_from_dto).collect::<Result<Vec<_>, _>>()).transpose()?;
+        let addressing = addressing_from_dto(request.addressing);
 
         let build = |snap: &SiteSnapshot, port: Option<Port>| -> AppResult<Project> {
             let id = requested_id.clone().unwrap_or_else(|| unique_project_id(&snap.projects, &ProjectId::from_name(name.as_str())));
-            let addresses = match (&explicit, port) {
-                (Some(list), _) => list.clone(),
-                (None, Some(port)) => vec![SiteAddress::localhost(id.as_str())?, SiteAddress::loopback_port(port)?],
-                (None, None) => SiteAddress::defaults_for(id.as_str(), &snap.settings.tld)?,
+            let addresses = match &explicit {
+                Some(list) => list.clone(),
+                None => addressing.addresses_for(id.as_str(), &snap.settings.tld, port)?,
             };
             let mut project = Project::new(id, name.clone(), root.clone(), addresses, environment.clone())?;
             project.origin_preset = Some(preset.id.clone());
@@ -237,9 +237,9 @@ impl CreateProject {
             require_project_hosts_elevation(ctx, &project, "creating", "nothing was created")?;
             Ok(project)
         };
-        let saved = match (&explicit, request.addressing) {
-            (None, AddressingDto::NoElevation) => self.writer.insert_with_free_port(|snap, port| build(snap, Some(port))).await?,
-            _ => self.writer.insert(|snap| build(snap, None)).await?,
+        let saved = match explicit.is_none() && addressing.needs_loopback_port() {
+            true => self.writer.insert_with_free_port(|snap, port| build(snap, Some(port))).await?,
+            false => self.writer.insert(|snap| build(snap, None)).await?,
         };
         let database_setup = if request.create_database { self.databases.provision_project(&saved.project).await } else { None };
         let project = self.writer.finish(saved, ctx).await?;
@@ -465,6 +465,8 @@ impl SuggestAddresses {
             loopback_port: address_to_dto(&loopback),
             no_elevation: vec![address_to_dto(&localhost), address_to_dto(&loopback)],
             standard: standard.iter().map(address_to_dto).collect(),
+            hosts_only: vec![address_to_dto(&hostname)],
+            default_addressing: addressing_to_dto(settings.default_addressing),
         })
     }
 }

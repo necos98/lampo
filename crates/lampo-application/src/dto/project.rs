@@ -28,9 +28,11 @@ pub enum AddressingDto {
     /// compatibility); the GUI offers it as an explicit option.
     #[default]
     Standard,
-    /// `<id>.localhost` + a dedicated loopback port: never needs elevation. Default of both the
-    /// CLI and the GUI.
+    /// `<id>.localhost` + a dedicated loopback port: never needs elevation. The built-in value of
+    /// `SettingsDto::default_addressing`, which front-ends use when nothing is chosen.
     NoElevation,
+    /// Only `<id>.<tld>` (hosts file): needs elevation, like `Standard`.
+    HostsOnly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -417,8 +419,12 @@ pub struct AddressSuggestionsDto {
     pub localhost: SiteAddressDto,
     /// The loopback port the allocator would assign now (not reserved).
     pub loopback_port: SiteAddressDto,
-    /// `AddressingDto::NoElevation` defaults: localhost + loopback port (the default).
+    /// `AddressingDto::NoElevation` defaults: localhost + loopback port.
     pub no_elevation: Vec<SiteAddressDto>,
     /// `AddressingDto::Standard` defaults: hostname + localhost.
     pub standard: Vec<SiteAddressDto>,
+    /// `AddressingDto::HostsOnly` defaults: the hostname alone.
+    pub hosts_only: Vec<SiteAddressDto>,
+    /// The global default (`SettingsDto::default_addressing`), to preselect.
+    pub default_addressing: AddressingDto,
 }

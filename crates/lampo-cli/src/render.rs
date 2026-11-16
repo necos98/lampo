@@ -624,7 +624,17 @@ pub fn settings(s: &SettingsDto) -> String {
     }
     rows.push(vec!["loopback port range".into(), format!("{}-{}", s.loopback_port_range.start, s.loopback_port_range.end)]);
     rows.push(vec!["close to tray".into(), yes_no(s.close_to_tray).into()]);
+    rows.push(vec!["default addressing".into(), addressing(s.default_addressing).into()]);
     table(&rows)
+}
+
+/// The command-line spelling of an addressing mode (`--addressing hosts-only`).
+fn addressing(a: AddressingDto) -> &'static str {
+    match a {
+        AddressingDto::HostsOnly => "hosts-only",
+        AddressingDto::Standard => "standard",
+        AddressingDto::NoElevation => "no-elevation",
+    }
 }
 
 pub fn settings_patch(r: &SettingsPatchResultDto) -> String {

@@ -54,7 +54,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 		],
 		loopbackPortRange: { start: 8100, end: 8199 },
 		closeToTray: true,
-		firstRunCompleted: !fresh
+		firstRunCompleted: !fresh,
+		defaultAddressing: 'no-elevation'
 	};
 	let shims: T.ShimStatus = { shimDir: 'C:\\Users\\dev\\AppData\\Local\\Lampo\\shims', installed: true, onPath: false, shadowed: [{ tool: 'php', shim: 'C:\\Users\\dev\\AppData\\Local\\Lampo\\shims\\php.exe', shadowedBy: 'C:\\xampp\\php\\php.exe' }] };
 	const expectedPlugin = '0.1.0-mock-h1a2b3c4d';
@@ -115,7 +116,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 		const hostname: T.SiteAddress = { kind: 'hostname', host: `${id}.${settings.tld}` };
 		const localhost: T.SiteAddress = { kind: 'localhost', host: `${id}.localhost` };
 		const loopbackPort: T.SiteAddress = { kind: 'loopback-port', port };
-		return { hostname, localhost, loopbackPort, noElevation: [localhost, loopbackPort], standard: [hostname, localhost] };
+		return { hostname, localhost, loopbackPort, noElevation: [localhost, loopbackPort], standard: [hostname, localhost], hostsOnly: [hostname], defaultAddressing: settings.defaultAddressing };
 	};
 
 	// ---- tasks ---------------------------------------------------------------------------------
@@ -274,7 +275,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 			const environment: T.ProjectEnvironment = clone(r.environment ?? preset.environment);
 			if (r.phpVersion) environment.phpVersion = r.phpVersion;
 			const suggested = suggest(id);
-			const addresses = r.addresses ?? (r.addressing === 'standard' ? suggested.standard : suggested.noElevation);
+			const byMode: Record<T.Addressing, T.SiteAddress[]> = { standard: suggested.standard, 'hosts-only': suggested.hostsOnly, 'no-elevation': suggested.noElevation };
+			const addresses = r.addresses ?? byMode[r.addressing ?? 'no-elevation'];
 			const next = rebuild({ id, name, root: r.root, folderExists: true, addresses, url: '', urls: [], documentRoot: '', environment, databaseName: mysqlOf(environment) ? id.replace(/-/g, '_') : null, database: null, tls: 'disabled', active: r.activate ?? true, originPreset: preset.id, worktrees: [] });
 			projects = [...projects, next];
 			if (hasHostname(next)) hostsInSync = false;

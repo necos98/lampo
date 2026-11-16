@@ -111,6 +111,8 @@ pub struct Fake {
     pub extensions_php: Mutex<Vec<Option<String>>>,
     /// What `env`/`exec` resolve to (default: [`toolchain_json`]).
     pub toolchain: Mutex<Value>,
+    /// What `settings get` (and the default addressing) read locally (default: [`settings_json`]).
+    pub settings: Mutex<Value>,
     /// `LAMPO_QUIET` of the context.
     pub quiet: AtomicBool,
 }
@@ -143,6 +145,7 @@ impl Fake {
             extensions_result: Mutex::new(None),
             extensions_php: Mutex::new(Vec::new()),
             toolchain: Mutex::new(toolchain_json()),
+            settings: Mutex::new(settings_json()),
             quiet: AtomicBool::new(false),
         })
     }
@@ -361,13 +364,14 @@ pub fn settings_json() -> Value {
             {"service": "mysql-5.7", "label": "MySQL 5.7", "port": 3307, "alwaysOn": false},
             {"service": "redis", "label": "Redis", "port": 6379, "alwaysOn": false}
         ],
-        "loopbackPortRange": {"start": 8100, "end": 8199}, "closeToTray": true, "firstRunCompleted": true
+        "loopbackPortRange": {"start": 8100, "end": 8199}, "closeToTray": true, "firstRunCompleted": true,
+        "defaultAddressing": "no-elevation"
     })
 }
 
 impl SettingsReader for Fake {
     fn get(&self) -> AppResult<SettingsDto> {
-        Ok(dto(settings_json()))
+        Ok(dto(self.settings.lock().unwrap().clone()))
     }
 }
 

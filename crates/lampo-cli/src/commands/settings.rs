@@ -6,7 +6,7 @@ use lampo_application::AppResult;
 use lampo_application::control::ControlRequest;
 use lampo_application::dto::*;
 
-use super::{Cmd, validation};
+use super::{Cmd, addressing, validation};
 use crate::cli::{SettingsCommand, SettingsSetArgs};
 use crate::render;
 
@@ -60,7 +60,14 @@ fn patch_request(args: SettingsSetArgs) -> AppResult<SettingsPatchRequest> {
             parsed.ok_or_else(|| validation(format!("--loopback-range expects START-END (`8100-8199`), got `{range}`")))
         })
         .transpose()?;
-    Ok(SettingsPatchRequest { apache_port: args.apache_port, service_ports, service_ui_ports, default_php_version: args.default_php, loopback_port_range })
+    Ok(SettingsPatchRequest {
+        apache_port: args.apache_port,
+        service_ports,
+        service_ui_ports,
+        default_php_version: args.default_php,
+        loopback_port_range,
+        default_addressing: args.default_addressing.map(addressing::to_dto),
+    })
 }
 
 /// `NAME=PORT` with a port in 1-65535.

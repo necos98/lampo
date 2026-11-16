@@ -110,6 +110,49 @@ impl fmt::Display for SiteAddress {
     }
 }
 
+/// Which default addresses a new project gets when none are given explicitly. Stored as the
+/// global default (`Settings::default_addressing`, kebab-case in the file).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Addressing {
+    /// `<id>.<tld>` (hosts file) + `<id>.localhost`.
+    Standard,
+    /// `<id>.localhost` + a dedicated loopback port: never needs elevation.
+    #[default]
+    NoElevation,
+    /// Only `<id>.<tld>` (hosts file).
+    HostsOnly,
+}
+
+impl Addressing {
+    /// `true` when the addresses include a dedicated loopback port, which the caller allocates.
+    pub fn needs_loopback_port(self) -> bool {
+        self == Self::NoElevation
+    }
+
+    /// The addresses of project `slug`. `loopback_port` is used (and required) only when
+    /// [`Addressing::needs_loopback_port`].
+    pub fn addresses_for(self, slug: &str, tld: &Tld, loopback_port: Option<Port>) -> Result<Vec<SiteAddress>, DomainError> {
+        match (self, loopback_port) {
+            (Self::Standard, _) => SiteAddress::defaults_for(slug, tld),
+            (Self::HostsOnly, _) => Ok(vec![SiteAddress::hostname(Hostname::for_project(slug, tld)?)?]),
+            (Self::NoElevation, Some(port)) => Ok(vec![SiteAddress::localhost(slug)?, SiteAddress::loopback_port(port)?]),
+            (Self::NoElevation, None) => Err(DomainError::InvalidAddresses("no-elevation addressing needs a dedicated loopback port".into())),
+        }
+    }
+}
+
+/// The stored form: `standard`, `no-elevation`, `hosts-only`.
+impl fmt::Display for Addressing {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Standard => "standard",
+            Self::NoElevation => "no-elevation",
+            Self::HostsOnly => "hosts-only",
+        })
+    }
+}
+
 /// Validates a project's address list: non-empty, no duplicates.
 pub fn validate_addresses(addresses: &[SiteAddress]) -> Result<(), DomainError> {
     if addresses.is_empty() {
@@ -172,6 +215,28 @@ mod tests {
         assert_eq!(a.iter().map(|x| x.to_string()).collect::<Vec<_>>(), ["shop.test", "shop.localhost"]);
         assert!(a[0].needs_hosts_entry());
         assert!(!a[1].needs_hosts_entry());
+    }
+
+    #[test]
+    fn addressing_modes_give_their_addresses() {
+        let tld = Tld::default();
+        let names = |a: Addressing, port: Option<Port>| a.addresses_for("shop", &tld, port).unwrap().iter().map(ToString::to_string).collect::<Vec<_>>();
+        assert_eq!(names(Addressing::Standard, None), ["shop.test", "shop.localhost"]);
+        assert_eq!(names(Addressing::HostsOnly, None), ["shop.test"]);
+        assert_eq!(names(Addressing::NoElevation, Some(Port::of(8101))), ["shop.localhost", "127.0.0.1:8101"]);
+        assert!(Addressing::NoElevation.addresses_for("shop", &tld, None).is_err());
+        assert_eq!(Addressing::default(), Addressing::NoElevation);
+        assert!(Addressing::NoElevation.needs_loopback_port());
+        assert!(!Addressing::HostsOnly.needs_loopback_port() && !Addressing::Standard.needs_loopback_port());
+    }
+
+    #[test]
+    fn addressing_is_kebab_case_on_the_wire() {
+        assert_eq!(serde_json::to_string(&Addressing::HostsOnly).unwrap(), r#""hosts-only""#);
+        assert_eq!(serde_json::from_str::<Addressing>(r#""no-elevation""#).unwrap(), Addressing::NoElevation);
+        for a in [Addressing::Standard, Addressing::NoElevation, Addressing::HostsOnly] {
+            assert_eq!(serde_json::to_string(&a).unwrap(), format!("\"{a}\""), "Display matches the stored form");
+        }
     }
 
     #[test]

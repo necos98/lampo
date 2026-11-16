@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::SyncReportDto;
+use super::{AddressingDto, SyncReportDto};
 
 /// One configured service instance (`mysql-8.4`, `redis`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -45,6 +45,8 @@ pub struct SettingsDto {
     pub close_to_tray: bool,
     /// Read-only from the GUI's point of view (set by the first-run wizard).
     pub first_run_completed: bool,
+    /// Addresses new projects get when the creator chooses none.
+    pub default_addressing: AddressingDto,
 }
 
 /// A registered kind of service, so front-ends offer what the backend knows (no hard-coded
@@ -80,6 +82,8 @@ pub struct SettingsPatchRequest {
     pub default_php_version: Option<String>,
     /// Range new dedicated loopback ports (worktree environments) are taken from.
     pub loopback_port_range: Option<PortRangeDto>,
+    /// Addresses new projects get when the creator chooses none.
+    pub default_addressing: Option<AddressingDto>,
 }
 
 impl SettingsPatchRequest {
@@ -89,7 +93,7 @@ impl SettingsPatchRequest {
 }
 
 /// One changed setting: `setting` is `apache.port`, `<service>.port` (`mysql-8.4.port`), `<service>.ui-port` (`mailpit.ui-port`),
-/// `default-php` or `loopback-port-range`; `from`/`to` are display values.
+/// `default-php`, `loopback-port-range` or `default-addressing`; `from`/`to` are display values.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingChangeDto {

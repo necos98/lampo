@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use lampo_domain::address::SiteAddress;
+use lampo_domain::address::{Addressing, SiteAddress};
 use lampo_domain::events::DomainEvent;
 use lampo_domain::mysql::MysqlSeries;
 use lampo_domain::ports::{ProjectRepository, SettingsRepository};
@@ -73,6 +73,27 @@ async fn default_php_and_loopback_range() {
     assert!(missing.message.contains("lampo package install php 8.2"), "{}", missing.message);
     let bad_range = w.patch_settings().execute(SettingsPatchRequest { loopback_port_range: Some(PortRangeDto { start: 9100, end: 9000 }), ..Default::default() }, &cli()).await.unwrap_err();
     assert_eq!(bad_range.code, ErrorCode::Validation);
+}
+
+#[tokio::test]
+async fn the_default_addressing_is_saved_without_a_sync() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", true);
+    w.hosts_in_sync();
+    assert_eq!(w.settings_service().get().unwrap().default_addressing, AddressingDto::NoElevation, "the built-in default");
+
+    let request = SettingsPatchRequest { default_addressing: Some(AddressingDto::HostsOnly), ..Default::default() };
+    let result = w.patch_settings().execute(request, &cli()).await.unwrap();
+    assert_eq!(result.settings.default_addressing, AddressingDto::HostsOnly);
+    let changes: Vec<(&str, &str, &str)> = result.changes.iter().map(|c| (c.setting.as_str(), c.from.as_str(), c.to.as_str())).collect();
+    assert_eq!(changes, [("default-addressing", "no-elevation", "hosts-only")]);
+    assert_eq!(w.settings.load().unwrap().default_addressing, Addressing::HostsOnly);
+    assert!(w.events.all().contains(&DomainEvent::SettingsChanged));
+    assert_eq!(result.sync, SyncReportDto::default(), "only new projects are affected");
+    assert!(w.all_calls().is_empty(), "the pending sync of `shop` was not run: {:?}", w.all_calls());
+
+    let again = w.patch_settings().execute(SettingsPatchRequest { default_addressing: Some(AddressingDto::HostsOnly), ..Default::default() }, &cli()).await.unwrap();
+    assert!(again.changes.is_empty());
 }
 
 #[tokio::test]
@@ -188,6 +209,16 @@ async fn gui_save_refuses_a_default_php_that_is_not_installed() {
     dto.close_to_tray = !dto.close_to_tray;
     let saved = w.settings_service().update(dto, &gui()).await.unwrap();
     assert_eq!(saved.default_php_version.as_deref(), Some("8.2"));
+}
+
+#[tokio::test]
+async fn gui_save_sets_the_default_addressing() {
+    let w = World::with_basics();
+    let mut dto = w.settings_service().get().unwrap();
+    dto.default_addressing = AddressingDto::Standard;
+    let saved = w.settings_service().update(dto, &gui()).await.unwrap();
+    assert_eq!(saved.default_addressing, AddressingDto::Standard);
+    assert_eq!(w.settings.load().unwrap().default_addressing, Addressing::Standard);
 }
 
 #[tokio::test]

@@ -13,7 +13,8 @@ export class SettingsDraft {
 		services: [],
 		loopbackPortRange: { start: 8100, end: 8199 },
 		closeToTray: true,
-		firstRunCompleted: false
+		firstRunCompleted: false,
+		defaultAddressing: 'no-elevation'
 	});
 
 	#baseline = new Baseline();

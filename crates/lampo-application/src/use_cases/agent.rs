@@ -197,14 +197,14 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         ),
         c(
             "lampo project create",
-            "lampo project create [<path>] [--name] [--preset] [--php] [--activate] [--no-database]",
+            "lampo project create [<path>] [--name] [--preset] [--php] [--addressing hosts-only|standard|no-elevation] [--activate] [--no-database]",
             "Register a folder as a project and create its MySQL database (unless --no-database).",
             true,
             true,
         ),
         c(
             "lampo project new",
-            "lampo project new (--git <url> [--branch] [--folder] | --laravel <name> [--php] [--starter-kit] [--phpunit] [--init-git] [--npm]) [--in <dir>] [--activate] [--no-database] [--no-register]",
+            "lampo project new (--git <url> [--branch] [--folder] | --laravel <name> [--php] [--starter-kit] [--phpunit] [--init-git] [--npm]) [--in <dir>] [--addressing <mode>] [--activate] [--no-database] [--no-register]",
             "Clone a repository or create a Laravel app (Lampo-managed installer), then register it.",
             true,
             true,
@@ -277,8 +277,8 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         ),
         c(
             "lampo settings set",
-            "lampo settings set [--apache-port <port>] [--mysql-port <series>=<port>] [--redis-port <port>] [--port <service>=<port>] [--ui-port <service>=<port>] [--default-php <minor>] [--loopback-range <start>-<end>]",
-            "Change ports (checked for conflicts and use; running services restart on the new port), the default PHP or the loopback range. Ask the user before changing ports.",
+            "lampo settings set [--apache-port <port>] [--mysql-port <series>=<port>] [--redis-port <port>] [--port <service>=<port>] [--ui-port <service>=<port>] [--default-php <minor>] [--loopback-range <start>-<end>] [--default-addressing <mode>]",
+            "Change ports (checked for conflicts and use; running services restart on the new port), the default PHP, the loopback range or the default addressing of new projects. Ask the user before changing ports.",
             true,
             true,
         ),

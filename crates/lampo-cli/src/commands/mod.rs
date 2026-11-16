@@ -3,6 +3,7 @@
 //! Read-only commands call the local role traits; commands that change state go through
 //! [`Cmd::app`], which starts the app headless unless `--no-start`.
 
+mod addressing;
 mod db;
 mod diagnostics;
 mod packages;

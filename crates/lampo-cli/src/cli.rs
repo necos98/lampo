@@ -161,9 +161,12 @@ pub enum ProjectCommand {
     },
     /// Register a folder (default: current folder). Defaults come from detection and presets.
     ///
-    /// Addressing defaults to `<id>.localhost` plus a dedicated loopback port, which never needs
-    /// elevation. Use `--hosts-name` for a `<id>.<tld>` hosts-file name (needs
-    /// `--allow-elevation`).
+    /// Addressing comes from `--addressing`, else the `default-addressing` setting (built-in:
+    /// `no-elevation`, `<id>.localhost` plus a dedicated loopback port, which never needs
+    /// elevation). `hosts-only` (just `<id>.<tld>`) and `standard` (`<id>.<tld>` plus
+    /// `<id>.localhost`) write the hosts file and need `--allow-elevation`.
+    ///
+    /// Example: lampo project create C:\sites\shop --addressing hosts-only --allow-elevation
     Create(ProjectCreateArgs),
     /// Set up a NEW project folder, then register it: clone a git repository (`--git <URL>`) or
     /// create a Laravel application with the Laravel Installer (`--laravel <NAME>`).
@@ -354,9 +357,12 @@ pub struct ProjectCreateArgs {
     /// PHP minor (`8.3`).
     #[arg(long)]
     pub php: Option<String>,
-    /// Also add a `<id>.<tld>` hosts-file name (needs `--allow-elevation`). Default addressing
-    /// is `<id>.localhost` + a dedicated loopback port (no UAC).
-    #[arg(long)]
+    /// Which addresses the project gets (default: the `default-addressing` setting).
+    /// `hosts-only` and `standard` need `--allow-elevation`.
+    #[arg(long, value_enum, value_name = "MODE")]
+    pub addressing: Option<AddressingArg>,
+    /// Same as `--addressing standard` (kept for compatibility).
+    #[arg(long, conflicts_with = "addressing")]
     pub hosts_name: bool,
     /// Serve the project right away.
     #[arg(long)]
@@ -404,12 +410,27 @@ pub struct ProjectNewArgs {
     /// Only set up the folder; do not register it as a project.
     #[arg(long)]
     pub no_register: bool,
+    /// Which addresses the project gets (default: the `default-addressing` setting).
+    /// `hosts-only` and `standard` need `--allow-elevation`, checked before the folder is set up.
+    #[arg(long, value_enum, value_name = "MODE", conflicts_with = "no_register")]
+    pub addressing: Option<AddressingArg>,
     /// Serve the project right away.
     #[arg(long)]
     pub activate: bool,
     /// Do not create the project's MySQL database.
     #[arg(long)]
     pub no_database: bool,
+}
+
+/// `--addressing` / `--default-addressing`: the addresses a new project gets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum AddressingArg {
+    /// Only `<id>.<tld>` (hosts file; needs --allow-elevation).
+    HostsOnly,
+    /// `<id>.<tld>` (hosts file; needs --allow-elevation) plus `<id>.localhost`.
+    Standard,
+    /// `<id>.localhost` plus a dedicated `127.0.0.1` port: never needs elevation.
+    NoElevation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -684,7 +705,7 @@ pub enum ShimsCommand {
 pub enum SettingsCommand {
     /// Show the settings (read-only, works without the app). `--json`: the SettingsDto.
     Get,
-    /// Change ports, the default PHP or the loopback port range
+    /// Change ports, the default PHP, the loopback port range or the default addressing
     ///
     /// Only what is named changes, in one atomic edit of the stored settings inside the app (no
     /// lost update with the GUI). Ports are checked first: 1-65535, not used by another Lampo
@@ -702,12 +723,13 @@ pub enum SettingsCommand {
     ///   lampo settings set --port mailpit=2025 --ui-port mailpit=9025
     ///   lampo settings set --default-php 8.4 --json
     ///   lampo settings set --loopback-range 8100-8299
+    ///   lampo settings set --default-addressing hosts-only
     #[command(verbatim_doc_comment)]
     Set(SettingsSetArgs),
 }
 
 #[derive(Debug, Args)]
-#[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args(["apache_port", "mysql_port", "redis_port", "port", "ui_port", "default_php", "loopback_range"])))]
+#[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args(["apache_port", "mysql_port", "redis_port", "port", "ui_port", "default_php", "loopback_range", "default_addressing"])))]
 pub struct SettingsSetArgs {
     /// Apache's shared port (host-name URLs use it; loopback-port URLs keep their own port).
     #[arg(long, value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
@@ -734,6 +756,10 @@ pub struct SettingsSetArgs {
     /// (start >= 1024). Existing sites keep their ports.
     #[arg(long, value_name = "START-END")]
     pub loopback_range: Option<String>,
+    /// Addresses `project create` and `project new` give a project when `--addressing` is not
+    /// passed. Existing projects keep theirs.
+    #[arg(long, value_enum, value_name = "MODE")]
+    pub default_addressing: Option<AddressingArg>,
 }
 
 #[cfg(test)]

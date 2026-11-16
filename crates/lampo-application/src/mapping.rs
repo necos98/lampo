@@ -3,7 +3,7 @@
 
 use std::collections::BTreeSet;
 
-use lampo_domain::address::SiteAddress;
+use lampo_domain::address::{Addressing, SiteAddress};
 use lampo_domain::hostname::{Hostname, Tld};
 use lampo_domain::mysql::DatabaseConnection;
 use lampo_domain::package::{PackageId, PackageKind};
@@ -68,6 +68,22 @@ pub fn address_from_dto(dto: &SiteAddressDto) -> Result<SiteAddress, DomainError
     }
 }
 
+pub fn addressing_to_dto(a: Addressing) -> AddressingDto {
+    match a {
+        Addressing::Standard => AddressingDto::Standard,
+        Addressing::NoElevation => AddressingDto::NoElevation,
+        Addressing::HostsOnly => AddressingDto::HostsOnly,
+    }
+}
+
+pub fn addressing_from_dto(dto: AddressingDto) -> Addressing {
+    match dto {
+        AddressingDto::Standard => Addressing::Standard,
+        AddressingDto::NoElevation => Addressing::NoElevation,
+        AddressingDto::HostsOnly => Addressing::HostsOnly,
+    }
+}
+
 pub fn tls_to_dto(t: TlsMode) -> TlsModeDto {
     match t {
         TlsMode::Disabled => TlsModeDto::Disabled,
@@ -125,6 +141,7 @@ pub fn settings_to_dto(s: &Settings, catalog: &ServiceCatalog) -> SettingsDto {
         loopback_port_range: PortRangeDto { start: s.loopback_ports.start().get(), end: s.loopback_ports.end().get() },
         close_to_tray: s.close_to_tray,
         first_run_completed: s.first_run_completed,
+        default_addressing: addressing_to_dto(s.default_addressing),
     }
 }
 
@@ -139,6 +156,7 @@ pub fn settings_from_dto(dto: &SettingsDto, current: &Settings) -> Result<Settin
         loopback_ports: PortRange::new(dto.loopback_port_range.start, dto.loopback_port_range.end)?,
         close_to_tray: dto.close_to_tray,
         first_run_completed: current.first_run_completed,
+        default_addressing: addressing_from_dto(dto.default_addressing),
     };
     s.validate()?;
     Ok(s)

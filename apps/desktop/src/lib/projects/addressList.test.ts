@@ -8,7 +8,7 @@ const suggestions = (port: number): AddressSuggestions => {
 	const hostname: SiteAddress = { kind: 'hostname', host: 'blog.test' };
 	const localhost: SiteAddress = { kind: 'localhost', host: 'blog.localhost' };
 	const loopbackPort: SiteAddress = { kind: 'loopback-port', port };
-	return { hostname, localhost, loopbackPort, noElevation: [localhost, loopbackPort], standard: [hostname, localhost] };
+	return { hostname, localhost, loopbackPort, noElevation: [localhost, loopbackPort], standard: [hostname, localhost], hostsOnly: [hostname], defaultAddressing: 'no-elevation' };
 };
 
 /** A `suggest` whose calls stay pending until resolved one by one, in any order. */

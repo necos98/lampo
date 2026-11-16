@@ -35,7 +35,7 @@ export type SiteAddress = { "kind": "hostname", host: string, } | { "kind": "loc
 /**
  * Default addresses for a new project when none are given explicitly.
  */
-export type Addressing = "standard" | "no-elevation";
+export type Addressing = "standard" | "no-elevation" | "hosts-only";
 
 export type TlsMode = "disabled" | "local-ca";
 
@@ -88,13 +88,21 @@ localhost: SiteAddress,
  */
 loopbackPort: SiteAddress, 
 /**
- * `AddressingDto::NoElevation` defaults: localhost + loopback port (the default).
+ * `AddressingDto::NoElevation` defaults: localhost + loopback port.
  */
 noElevation: Array<SiteAddress>, 
 /**
  * `AddressingDto::Standard` defaults: hostname + localhost.
  */
-standard: Array<SiteAddress>, };
+standard: Array<SiteAddress>, 
+/**
+ * `AddressingDto::HostsOnly` defaults: the hostname alone.
+ */
+hostsOnly: Array<SiteAddress>, 
+/**
+ * The global default (`SettingsDto::default_addressing`), to preselect.
+ */
+defaultAddressing: Addressing, };
 
 /**
  * Connection details shown to the user/agent. Lampo never writes them to `.env`.
@@ -717,7 +725,11 @@ loopbackPortRange: PortRange, closeToTray: boolean,
 /**
  * Read-only from the GUI's point of view (set by the first-run wizard).
  */
-firstRunCompleted: boolean, };
+firstRunCompleted: boolean, 
+/**
+ * Addresses new projects get when the creator chooses none.
+ */
+defaultAddressing: Addressing, };
 
 // --- Diagnostics and shims ---
 

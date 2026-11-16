@@ -6,7 +6,7 @@ use lampo_application::AppResult;
 use lampo_domain::php::PhpMinor;
 use serde::Serialize;
 
-use super::{Cmd, validation};
+use super::{Cmd, addressing, validation};
 use crate::cli::{ProjectCommand, ProjectCreateArgs, ProjectNewArgs, ProjectSetArgs, StarterKitArg};
 use crate::render;
 
@@ -25,7 +25,7 @@ pub async fn run(c: &Cmd<'_>, command: ProjectCommand) -> AppResult<i32> {
             c.io.emit(&detection, render::detection);
         }
         ProjectCommand::Create(args) => {
-            let request = create_request(c, args);
+            let request = create_request(c, args)?;
             let result: CreateProjectResultDto = c.app(ControlRequest::ProjectCreate(request)).await?;
             c.io.emit(&result, render::created_project);
             if let Some(setup) = result.database_setup.as_ref().filter(|s| s.status.is_problem()) {
@@ -156,21 +156,21 @@ fn service_use(raw: &str) -> ServiceUseDto {
     }
 }
 
-/// Localhost addressing (no UAC) unless `--hosts-name`; the database is created unless
-/// `--no-database`.
-fn create_request(c: &Cmd<'_>, args: ProjectCreateArgs) -> CreateProjectRequest {
+/// Addressing from `--addressing` / `--hosts-name`, else the `default-addressing` setting; the
+/// database is created unless `--no-database`.
+fn create_request(c: &Cmd<'_>, args: ProjectCreateArgs) -> AppResult<CreateProjectRequest> {
     let root = c.ctx.env.absolute(args.path.as_deref().unwrap_or("."));
-    CreateProjectRequest {
+    Ok(CreateProjectRequest {
         root,
         name: args.name,
         id: args.id,
         preset_id: args.preset,
         php_version: args.php,
-        addressing: if args.hosts_name { AddressingDto::Standard } else { AddressingDto::NoElevation },
+        addressing: addressing::for_new_project(c, args.addressing, args.hosts_name)?,
         activate: args.activate,
         create_database: !args.no_database,
         ..Default::default()
-    }
+    })
 }
 
 async fn set_active(c: &Cmd<'_>, id: Option<String>, active: bool) -> AppResult<()> {
@@ -181,7 +181,8 @@ async fn set_active(c: &Cmd<'_>, id: Option<String>, active: bool) -> AppResult<
 }
 
 /// `project new`: scaffold the folder in the app (streaming the tools' output), then register it
-/// like `project create` (detection fills the rest).
+/// like `project create` (detection fills the rest). A hosts-file addressing without
+/// `--allow-elevation` is refused before anything is set up.
 async fn new_project(c: &Cmd<'_>, args: ProjectNewArgs) -> AppResult<()> {
     let parent_dir = c.ctx.env.absolute(args.parent.as_deref().unwrap_or("."));
     let (folder_name, source) = match (&args.git, &args.laravel) {
@@ -204,15 +205,22 @@ async fn new_project(c: &Cmd<'_>, args: ProjectNewArgs) -> AppResult<()> {
         ),
         (None, None) => unreachable!("clap requires --git or --laravel"),
     };
+    let registration = match args.no_register {
+        true => None,
+        false => Some(addressing::for_new_project(c, args.addressing, false)?),
+    };
+    if let Some(chosen) = registration {
+        addressing::require_elevation_up_front(c, chosen)?;
+    }
     let scaffold: ScaffoldProjectResultDto = c.app(ControlRequest::ProjectScaffold(ScaffoldProjectRequest { parent_dir, folder_name, source })).await?;
-    if args.no_register {
+    let Some(chosen) = registration else {
         c.io.emit(&scaffold, |s| format!("created {}\n", s.folder));
         return Ok(());
-    }
+    };
     let request = CreateProjectRequest {
         root: scaffold.folder.clone(),
         php_version: args.php.or(scaffold.php_version),
-        addressing: AddressingDto::NoElevation,
+        addressing: chosen,
         activate: args.activate,
         create_database: !args.no_database,
         ..Default::default()

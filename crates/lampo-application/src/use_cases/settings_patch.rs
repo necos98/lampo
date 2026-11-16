@@ -1,5 +1,6 @@
 //! Partial edits of the global settings (`lampo settings set`): Apache's port, service instance
-//! ports and web UI ports (Mailpit), the default PHP and the loopback port range.
+//! ports and web UI ports (Mailpit), the default PHP, the loopback port range and the default
+//! addressing of new projects.
 //!
 //! The patch is applied to the *stored* settings through [`SettingsWriter::modify`] (under the
 //! allocator lock, with its port and default-PHP checks), so it never reverts a concurrent edit
@@ -9,6 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use lampo_domain::address::Addressing;
 use lampo_domain::php::PhpMinor;
 use lampo_domain::project::Project;
 use lampo_domain::service::{ServiceId, ServiceKind};
@@ -23,7 +25,7 @@ use super::support::validation;
 use crate::context::CallContext;
 use crate::dto::*;
 use crate::error::{AppError, AppResult};
-use crate::mapping::settings_to_dto;
+use crate::mapping::{addressing_from_dto, settings_to_dto};
 
 /// Applies a [`SettingsPatchRequest`].
 pub struct PatchSettings {
@@ -40,8 +42,9 @@ impl PatchSettings {
     /// a service, a bad port or range; `Conflict` for a port another Lampo service or a site's
     /// dedicated loopback port already has; `PortInUse` for a new port another program listens
     /// on; `PackageMissing` for a default PHP that is not installed. Nothing is saved on error.
-    /// When something changed: saves, publishes `SettingsChanged`, syncs (a sync failure is
-    /// returned with a message saying the settings were saved).
+    /// When something changed: saves, publishes `SettingsChanged`, syncs unless only the default
+    /// addressing changed (a sync failure is returned with a message saying the settings were
+    /// saved).
     pub async fn execute(&self, request: SettingsPatchRequest, ctx: &CallContext) -> AppResult<SettingsPatchResultDto> {
         if request.is_empty() {
             return Err(validation("nothing to change: give at least one setting"));
@@ -50,9 +53,9 @@ impl PatchSettings {
         let patch = Patch::parse(&request, services)?;
         let SettingsCommit { before, after, sites } = self.writer.modify(|current| patch.apply(current)).await?;
         let changes = describe_changes(&before, &after, services);
-        let sync = match changes.is_empty() {
-            true => SyncReportDto::default(),
-            false => self.env.sync_sites(sites.clone(), ctx).await.map_err(|e| AppError { message: format!("the settings were saved, but applying them failed: {}", e.message), ..e })?,
+        let sync = match changes_environment(&before, &after) {
+            false => SyncReportDto::default(),
+            true => self.env.sync_sites(sites.clone(), ctx).await.map_err(|e| AppError { message: format!("the settings were saved, but applying them failed: {}", e.message), ..e })?,
         };
         let notes = notes(&before, &after, &sites.projects, &sites.worktrees, &sync, services);
         Ok(SettingsPatchResultDto { settings: settings_to_dto(&after, services), changes, sync, notes })
@@ -67,6 +70,7 @@ struct Patch {
     ui_ports: Vec<(ServiceId, Port)>,
     default_php: Option<PhpMinor>,
     loopback_ports: Option<PortRange>,
+    default_addressing: Option<Addressing>,
 }
 
 /// `(id, port)` pairs of a request map, validated: well-formed ids, no Apache, no duplicates,
@@ -100,6 +104,7 @@ impl Patch {
             ui_ports,
             default_php: r.default_php_version.as_deref().map(|v| PhpMinor::parse(v.trim())).transpose()?,
             loopback_ports: r.loopback_port_range.map(|range| PortRange::new(range.start, range.end)).transpose()?,
+            default_addressing: r.default_addressing.map(addressing_from_dto),
         })
     }
 
@@ -127,9 +132,18 @@ impl Patch {
         if let Some(range) = self.loopback_ports {
             next.loopback_ports = range;
         }
+        if let Some(addressing) = self.default_addressing {
+            next.default_addressing = addressing;
+        }
         next.validate()?;
         Ok(next)
     }
+}
+
+/// `true` when a change needs a sync: anything but the default addressing, which only applies
+/// to projects created later.
+fn changes_environment(before: &Settings, after: &Settings) -> bool {
+    &Settings { default_addressing: before.default_addressing, ..after.clone() } != before
 }
 
 fn describe_changes(before: &Settings, after: &Settings, catalog: &ServiceCatalog) -> Vec<SettingChangeDto> {
@@ -142,6 +156,9 @@ fn describe_changes(before: &Settings, after: &Settings, catalog: &ServiceCatalo
     }
     if before.loopback_ports != after.loopback_ports {
         out.push(change("loopback-port-range".into(), before.loopback_ports.to_string(), after.loopback_ports.to_string()));
+    }
+    if before.default_addressing != after.default_addressing {
+        out.push(change("default-addressing".into(), before.default_addressing.to_string(), after.default_addressing.to_string()));
     }
     out
 }
