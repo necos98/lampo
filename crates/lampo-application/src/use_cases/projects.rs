@@ -23,7 +23,7 @@ use super::allocation::{LoopbackPortAllocator, SiteSnapshot};
 use super::database::DatabaseService;
 use super::presets::PresetQueries;
 use super::project_policy::require_mysql_for_database;
-use super::project_writer::ProjectWriter;
+use super::project_writer::{ProjectWriter, RemovedProject};
 use super::support::{load_project, newest_of, package_missing, parse_project_id, project_dto, validation};
 use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::*;
@@ -95,6 +95,11 @@ impl ProjectQueries {
     pub fn get(&self, project_id: &str) -> AppResult<ProjectDto> {
         let project = load_project(self.projects.as_ref(), project_id)?;
         Ok(project_dto(&project, &self.worktrees.list_for(&project.id)?, &self.settings.load()?, Some(self.fs.as_ref())))
+    }
+
+    /// The full view of `project` in the registry `sites` (a commit's, so nothing is read again).
+    pub(crate) fn present(&self, project: &Project, sites: &SiteSnapshot) -> ProjectDto {
+        project_dto(project, &sites.worktrees, &sites.settings, Some(self.fs.as_ref()))
     }
 }
 
@@ -232,12 +237,12 @@ impl CreateProject {
             require_project_hosts_elevation(ctx, &project, "creating", "nothing was created")?;
             Ok(project)
         };
-        let project = match (&explicit, request.addressing) {
+        let saved = match (&explicit, request.addressing) {
             (None, AddressingDto::NoElevation) => self.writer.insert_with_free_port(|snap, port| build(snap, Some(port))).await?,
             _ => self.writer.insert(|snap| build(snap, None)).await?,
         };
-        let database_setup = if request.create_database { self.databases.provision_project(&project).await } else { None };
-        let project = self.writer.finish(&project, ctx).await?;
+        let database_setup = if request.create_database { self.databases.provision_project(&saved.project).await } else { None };
+        let project = self.writer.finish(saved, ctx).await?;
         Ok(CreateProjectResultDto { project, database_setup })
     }
 }
@@ -264,7 +269,7 @@ impl UpdateProject {
         if database.is_some() {
             require_mysql_for_database(&environment)?;
         }
-        let project = self
+        let saved = self
             .writer
             .modify(&request.project_id, |project, _| {
                 project.name = name;
@@ -277,7 +282,7 @@ impl UpdateProject {
                 Ok(true)
             })
             .await?;
-        self.writer.finish(&project, ctx).await
+        self.writer.finish(saved, ctx).await
     }
 }
 
@@ -317,25 +322,27 @@ impl DeleteProject {
     /// concurrent edit never brings the project back. The result lists the worktree databases
     /// left in MySQL.
     pub async fn execute(&self, project_id: &str, ctx: &CallContext) -> AppResult<DeleteProjectResultDto> {
-        let (project, worktrees) = self
+        let RemovedProject { project, dependents: worktrees, sites } = self
             .writer
-            .remove(project_id, |project| require_project_hosts_elevation(ctx, project, "removing", "nothing was removed"), |project, snap| self.remove_worktrees(project, snap))
+            .remove(project_id, |project| require_project_hosts_elevation(ctx, project, "removing", "nothing was removed"), |project, sites| self.remove_worktrees(project, sites))
             .await?;
         if !worktrees.is_empty() {
             self.events.publish(DomainEvent::WorktreesChanged { project: project.id.clone() });
         }
-        self.writer.sync(ctx).await?;
+        self.writer.sync(sites, ctx).await?;
         Ok(DeleteProjectResultDto { orphaned_databases: worktrees.iter().filter_map(WorktreeEnvironment::owned_database).map(ToString::to_string).collect() })
     }
 
     /// Unregisters the worktree environments of the (already removed) `project`. On failure they
     /// are left stale, never served without their parent, for `lampo worktree prune` and
-    /// `lampo doctor` to report: the removal itself has happened.
-    fn remove_worktrees(&self, project: &Project, snap: &SiteSnapshot) -> Vec<WorktreeEnvironment> {
-        let environments: Vec<WorktreeEnvironment> = snap.worktrees.iter().filter(|w| w.parent == project.id).cloned().collect();
+    /// `lampo doctor` to report: the removal itself has happened. `sites` (the registry after the
+    /// removal) loses them only when they are gone.
+    fn remove_worktrees(&self, project: &Project, sites: &mut SiteSnapshot) -> Vec<WorktreeEnvironment> {
+        let environments: Vec<WorktreeEnvironment> = sites.worktrees.iter().filter(|w| w.parent == project.id).cloned().collect();
         if !environments.is_empty() {
-            if let Err(e) = self.worktrees.delete_all_for(&project.id) {
-                tracing::warn!("project `{}` removed, but not its worktree environments (left stale for `lampo worktree prune`): {e}", project.id);
+            match self.worktrees.delete_all_for(&project.id) {
+                Ok(()) => sites.forget_worktrees_of(&project.id),
+                Err(e) => tracing::warn!("project `{}` removed, but not its worktree environments (left stale for `lampo worktree prune`): {e}", project.id),
             }
         }
         environments
@@ -353,7 +360,7 @@ impl SetProjectActive {
 
     /// Idempotent. Never changes the hosts file (the block lists active and inactive projects).
     pub async fn execute(&self, request: SetProjectActiveRequest, ctx: &CallContext) -> AppResult<ProjectDto> {
-        let project = self
+        let saved = self
             .writer
             .modify(&request.project_id, |project, _| {
                 let changed = project.active != request.active;
@@ -361,7 +368,7 @@ impl SetProjectActive {
                 Ok(changed)
             })
             .await?;
-        self.writer.finish(&project, ctx).await
+        self.writer.finish(saved, ctx).await
     }
 }
 
@@ -380,7 +387,7 @@ impl SetProjectPhp {
     pub async fn execute(&self, request: SetProjectPhpRequest, ctx: &CallContext) -> AppResult<ProjectDto> {
         let php = PhpMinor::parse(&request.php_version)?;
         require_php_installed(&self.writer, self.installed.as_ref(), &request.project_id, php)?;
-        let project = self
+        let saved = self
             .writer
             .modify(&request.project_id, |project, _| {
                 if project.environment.php == php {
@@ -392,7 +399,7 @@ impl SetProjectPhp {
                 Ok(true)
             })
             .await?;
-        self.writer.finish(&project, ctx).await
+        self.writer.finish(saved, ctx).await
     }
 }
 
@@ -421,14 +428,14 @@ impl RelinkProject {
     /// of the project's addresses.
     pub async fn execute(&self, request: RelinkProjectRequest, ctx: &CallContext) -> AppResult<ProjectDto> {
         let root = existing_folder(self.fs.as_ref(), &request.root)?;
-        let project = self
+        let saved = self
             .writer
             .modify(&request.project_id, |project, _| {
                 project.relink(root);
                 Ok(true)
             })
             .await?;
-        self.writer.finish(&project, ctx).await
+        self.writer.finish(saved, ctx).await
     }
 }
 

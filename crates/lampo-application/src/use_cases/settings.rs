@@ -4,7 +4,7 @@ use lampo_domain::ports::SettingsRepository;
 
 use super::environment::EnvironmentSync;
 use super::service_catalog::ServiceCatalog;
-use super::settings_writer::SettingsWriter;
+use super::settings_writer::{SettingsCommit, SettingsWriter};
 use crate::context::CallContext;
 use crate::dto::{ServiceKindDto, SettingsDto};
 use crate::error::AppResult;
@@ -36,9 +36,9 @@ impl SettingsService {
     /// `PortInUse`, `PackageMissing` for a default PHP that is not installed). Then syncs
     /// (ports/TLD changes regenerate config and may move services).
     pub async fn update(&self, settings: SettingsDto, ctx: &CallContext) -> AppResult<SettingsDto> {
-        let commit = self.writer.modify(|current| Ok(settings_from_dto(&settings, current)?)).await?;
-        self.env.sync(ctx).await?;
-        Ok(settings_to_dto(&commit.after, &self.writer.services))
+        let SettingsCommit { after, sites, .. } = self.writer.modify(|current| Ok(settings_from_dto(&settings, current)?)).await?;
+        self.env.sync_sites(sites, ctx).await?;
+        Ok(settings_to_dto(&after, &self.writer.services))
     }
 }
 

@@ -11,6 +11,7 @@ use lampo_domain::ports::{
 use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
 use lampo_domain::project::{Project, ProjectRoot};
 use lampo_domain::resolution::git;
+use lampo_domain::settings::Settings;
 use lampo_domain::site::SiteId;
 use lampo_domain::worktree::{DatabaseMode, Occupancy, WorktreeDatabase, WorktreeEnvironment};
 use lampo_domain::PortError;
@@ -56,7 +57,12 @@ impl WorktreeQueries {
 
     /// The view of one environment of `parent`.
     pub(crate) fn present(&self, env: &WorktreeEnvironment, parent: &Project) -> AppResult<WorktreeEnvironmentDto> {
-        Ok(worktree_dto(env, parent, &self.settings.load()?, Some(self.fs.as_ref())))
+        Ok(self.present_in(env, parent, &self.settings.load()?))
+    }
+
+    /// [`Self::present`] with the `settings` at hand (a commit's, so nothing is read again).
+    pub(crate) fn present_in(&self, env: &WorktreeEnvironment, parent: &Project, settings: &Settings) -> WorktreeEnvironmentDto {
+        worktree_dto(env, parent, settings, Some(self.fs.as_ref()))
     }
 }
 
@@ -226,20 +232,22 @@ impl WorktreeUp {
         let placement = self.place(&request)?;
         let mode = database_mode_from_dto(&request.database)?;
 
-        let (env, created) = match d.worktrees.find_by_root(&placement.root)? {
-            Some(existing) => (existing, false),
+        // `sites`: the registry after the commit, when there was one.
+        let (env, created, sites) = match d.worktrees.find_by_root(&placement.root)? {
+            Some(existing) => (existing, false, None),
             None => {
                 let server_databases = d.databases.existing_on_instance(&placement.parent, &mode).await?;
                 d.allocator
                     .allocate(|port, snap| {
                         // Re-checked under the lock: a concurrent `up` may have created it.
                         if let Some(existing) = snap.worktrees.iter().find(|w| w.root == placement.root) {
-                            return Ok((existing.clone(), false));
+                            return Ok((existing.clone(), false, Some(snap.unchanged())));
                         }
                         let taken = Occupancy { projects: &snap.projects, worktrees: &snap.worktrees, server_databases: &server_databases };
                         let env = WorktreeEnvironment::derive(&placement.parent, &taken, placement.root.clone(), placement.branch.clone(), port, &mode, d.clock.now_unix_ms())?;
                         d.worktrees.save(&env)?;
-                        Ok((env, true))
+                        let sites = snap.with_worktree(&env);
+                        Ok((env, true, Some(sites)))
                     })
                     .await?
             }
@@ -248,15 +256,19 @@ impl WorktreeUp {
 
         if created {
             if let Err(e) = d.databases.provision(&env, &parent, progress, cancel).await {
-                if let Err(cleanup) = d.worktrees.delete(&env.parent, &env.slug) {
-                    tracing::warn!("could not remove the failed environment {}: {cleanup}", env.site_id());
+                if let Err(cleanup) = d.allocator.write(|| Ok(d.worktrees.delete(&env.parent, &env.slug)?)).await {
+                    tracing::warn!("could not remove the failed environment {}: {}", env.site_id(), cleanup.message);
                 }
                 return Err(e);
             }
             d.events.publish(DomainEvent::WorktreesChanged { project: env.parent.clone() });
         }
-        sync_without_elevation(d.env.as_ref(), ctx).await?;
-        Ok(WorktreeUpResultDto { environment: d.queries.present(&env, &parent)?, created })
+        let environment = match &sites {
+            Some(sites) => d.queries.present_in(&env, &parent, &sites.settings),
+            None => d.queries.present(&env, &parent)?,
+        };
+        sync_without_elevation(d.env.as_ref(), sites, ctx).await?;
+        Ok(WorktreeUpResultDto { environment, created })
     }
 }
 
@@ -276,14 +288,22 @@ fn find_environment(worktrees: &dyn WorktreeRepository, target: &str) -> AppResu
 /// `lampo worktree down <path|site>`.
 pub struct WorktreeDown {
     worktrees: Arc<dyn WorktreeRepository>,
+    /// Unregisters under its lock, like every registry write.
+    allocator: Arc<LoopbackPortAllocator>,
     databases: Arc<WorktreeDatabases>,
     env: Arc<dyn EnvironmentSync>,
     events: Arc<dyn EventPublisher>,
 }
 
 impl WorktreeDown {
-    pub fn new(worktrees: Arc<dyn WorktreeRepository>, databases: Arc<WorktreeDatabases>, env: Arc<dyn EnvironmentSync>, events: Arc<dyn EventPublisher>) -> Self {
-        Self { worktrees, databases, env, events }
+    pub fn new(
+        worktrees: Arc<dyn WorktreeRepository>,
+        allocator: Arc<LoopbackPortAllocator>,
+        databases: Arc<WorktreeDatabases>,
+        env: Arc<dyn EnvironmentSync>,
+        events: Arc<dyn EventPublisher>,
+    ) -> Self {
+        Self { worktrees, allocator, databases, env, events }
     }
 
     /// Removes the environment; drops its *own* database only if `drop_database` (first, so a
@@ -291,9 +311,9 @@ impl WorktreeDown {
     pub async fn execute(&self, request: WorktreeDownRequest, ctx: &CallContext) -> AppResult<WorktreeDownResultDto> {
         let env = find_environment(self.worktrees.as_ref(), &request.target)?;
         let dropped = if request.drop_database { self.databases.drop_owned(&env).await? } else { None };
-        self.worktrees.delete(&env.parent, &env.slug)?;
+        self.allocator.write(|| Ok(self.worktrees.delete(&env.parent, &env.slug)?)).await?;
         self.events.publish(DomainEvent::WorktreesChanged { project: env.parent.clone() });
-        sync_without_elevation(self.env.as_ref(), ctx).await?;
+        sync_without_elevation(self.env.as_ref(), None, ctx).await?;
         Ok(WorktreeDownResultDto { site: env.site_id().to_string(), database_dropped: dropped.map(|n| n.to_string()) })
     }
 }
@@ -303,6 +323,8 @@ impl WorktreeDown {
 pub struct PruneWorktrees {
     projects: Arc<dyn ProjectRepository>,
     worktrees: Arc<dyn WorktreeRepository>,
+    /// Unregisters under its lock, like every registry write.
+    allocator: Arc<LoopbackPortAllocator>,
     fs: Arc<dyn FileSystemInspector>,
     databases: Arc<WorktreeDatabases>,
     env: Arc<dyn EnvironmentSync>,
@@ -313,12 +335,13 @@ impl PruneWorktrees {
     pub fn new(
         projects: Arc<dyn ProjectRepository>,
         worktrees: Arc<dyn WorktreeRepository>,
+        allocator: Arc<LoopbackPortAllocator>,
         fs: Arc<dyn FileSystemInspector>,
         databases: Arc<WorktreeDatabases>,
         env: Arc<dyn EnvironmentSync>,
         events: Arc<dyn EventPublisher>,
     ) -> Self {
-        Self { projects, worktrees, fs, databases, env, events }
+        Self { projects, worktrees, allocator, fs, databases, env, events }
     }
 
     /// Environments that `prune` would remove.
@@ -358,7 +381,7 @@ impl PruneWorktrees {
             self.events.publish(DomainEvent::WorktreesChanged { project });
         }
         if !report.removed.is_empty() {
-            sync_without_elevation(self.env.as_ref(), ctx).await?;
+            sync_without_elevation(self.env.as_ref(), None, ctx).await?;
         }
         Ok(report)
     }
@@ -372,7 +395,7 @@ impl PruneWorktrees {
                 report.dropped_databases.push(name.to_string());
             }
         }
-        self.worktrees.delete(&env.parent, &env.slug)?;
+        self.allocator.write(|| Ok(self.worktrees.delete(&env.parent, &env.slug)?)).await?;
         report.removed.push(env.site_id().to_string());
         Ok(())
     }

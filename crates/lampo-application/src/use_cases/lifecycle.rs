@@ -12,11 +12,12 @@ use lampo_domain::version::VersionSeries;
 use super::environment::EnvironmentSync;
 use super::generation::runner_for;
 use super::service_catalog::ServiceCatalog;
-use super::packages::{InstallPackage, fetch_catalog};
+use super::packages::{InstallPackage, InternalInstallRequest, fetch_catalog};
 use super::claude_code::ClaudeCodeSetup;
 use super::settings_writer::SettingsWriter;
 use super::shims::ShimSetup;
 use super::support::{COMPOSER_LTS_SERIES, installed_php_minors, newest_of};
+use crate::blocking::unblocked;
 use crate::context::{CallContext, ElevationPolicy, Origin};
 use crate::dto::{FirstRunItemDto, FirstRunStatusDto, InstallPackageRequest};
 use crate::error::{AppError, AppResult};
@@ -59,10 +60,12 @@ impl Startup {
     /// update (after the CLI copy is refreshed: the hook calls it) runs concurrently with the
     /// sync, so its `claude` processes never delay the services; it only logs.
     pub async fn run(&self) -> AppResult<()> {
-        if let Err(e) = self.app_location.record_running_app() {
-            tracing::warn!("recording the app location failed: {e}");
+        let app_location = self.app_location.clone();
+        if let Err(e) = unblocked("recording the app location", move || Ok(app_location.record_running_app()?)).await {
+            tracing::warn!("recording the app location failed: {}", e.message);
         }
-        match self.shims.refresh() {
+        let shims = self.shims.clone();
+        match unblocked("refreshing the shims", move || shims.refresh()).await {
             Ok(true) => tracing::info!("shims refreshed to the current lampo-shim.exe"),
             Ok(false) => {}
             Err(e) => tracing::warn!("refreshing the shims failed: {e}"),
@@ -229,8 +232,8 @@ impl FirstRunSetup {
         PhpMinor::try_from(newest.id.series()).ok().map(PhpMinor::as_series)
     }
 
-    /// Installs what is missing (a task: progress per item). Resumable: re-running skips
-    /// installed items.
+    /// Installs what is missing (a task: progress per item), then syncs once: the installs
+    /// themselves do not sync. Resumable: re-running skips installed items.
     pub async fn run(&self, ctx: &CallContext, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<FirstRunStatusDto> {
         let missing: Vec<Item> = self.items()?.into_iter().filter(|(_, done)| !done).map(|(i, _)| i).collect();
         let total = missing.len() as u64;
@@ -243,12 +246,13 @@ impl FirstRunSetup {
             };
             progress.report(Progress::new(ProgressStage::Resolving, n as u64, Some(total)).with_subject(item.kind.to_string()));
             let request = InstallPackageRequest { kind: item.kind.to_string(), version: None, series: series.map(|s| s.to_string()), php_version: None };
-            self.install.execute(request, ctx, progress, cancel).await?;
+            self.install.execute_internal(InternalInstallRequest { request, skip_sync: true }, ctx, progress, cancel).await?;
         }
         cancel.check()?;
-        self.shims.install()?;
-        self.settings.modify(|current| Ok(Settings { first_run_completed: true, ..current.clone() })).await?;
-        self.env.sync(ctx).await?;
+        let shims = self.shims.clone();
+        unblocked("installing the shims", move || shims.install()).await?;
+        let completed = self.settings.modify(|current| Ok(Settings { first_run_completed: true, ..current.clone() })).await?;
+        self.env.sync_sites(completed.sites, ctx).await?;
         self.status()
     }
 }

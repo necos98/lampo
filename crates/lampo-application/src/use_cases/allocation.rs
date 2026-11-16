@@ -5,28 +5,21 @@
 //! any number of agents on the control pipe), so choosing a port and saving the site that owns it
 //! must be one atomic step. [`LoopbackPortAllocator`] holds that lock; every use case that saves
 //! loopback addresses goes through it, and the composition roots share **one** instance.
+//!
+//! Every write to the registry (projects, worktree environments, settings) runs under that lock
+//! and is numbered ([`RegistryRevision`]), so the snapshot a commit hands on can be told apart
+//! from a stale one (see [`super::site_snapshot`]).
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lampo_domain::ports::{PortAvailability, PortProbe, ProjectRepository, SettingsRepository, WorktreeRepository};
-use lampo_domain::project::Project;
-use lampo_domain::settings::Settings;
 use lampo_domain::tcp_port::Port;
-use lampo_domain::worktree::{WorktreeEnvironment, allocate_loopback_port, used_loopback_ports};
+use lampo_domain::worktree::{allocate_loopback_port, used_loopback_ports};
 
+pub use super::site_snapshot::SiteSnapshot;
+use super::site_snapshot::RegistryRevision;
+use crate::blocking::{in_place, unblocked};
 use crate::error::AppResult;
-
-/// The registry as seen under the allocation lock: what a commit validates against.
-#[derive(Debug, Clone)]
-pub struct SiteSnapshot {
-    pub projects: Vec<Project>,
-    /// Loopback ports named by project files that do not load: never handed out, so a repaired
-    /// project does not find its listener taken.
-    pub reserved_ports: BTreeSet<Port>,
-    pub worktrees: Vec<WorktreeEnvironment>,
-    pub settings: Settings,
-}
 
 pub struct LoopbackPortAllocator {
     projects: Arc<dyn ProjectRepository>,
@@ -34,17 +27,23 @@ pub struct LoopbackPortAllocator {
     settings: Arc<dyn SettingsRepository>,
     probe: Arc<dyn PortProbe>,
     lock: tokio::sync::Mutex<()>,
+    revision: Arc<RegistryRevision>,
 }
 
 impl LoopbackPortAllocator {
     pub fn new(projects: Arc<dyn ProjectRepository>, worktrees: Arc<dyn WorktreeRepository>, settings: Arc<dyn SettingsRepository>, probe: Arc<dyn PortProbe>) -> Self {
-        Self { projects, worktrees, settings, probe, lock: tokio::sync::Mutex::new(()) }
+        Self { projects, worktrees, settings, probe, lock: tokio::sync::Mutex::new(()), revision: Arc::default() }
     }
 
-    fn snapshot(&self) -> AppResult<SiteSnapshot> {
-        let listing = self.projects.scan()?;
-        let reserved_ports = listing.unreadable.iter().flat_map(|u| u.loopback_ports.iter().copied()).collect();
-        Ok(SiteSnapshot { projects: listing.projects, reserved_ports, worktrees: self.worktrees.list_all()?, settings: self.settings.load()? })
+    /// The registry, read on the blocking pool; stamped with `commit`.
+    async fn snapshot(&self, commit: u64) -> AppResult<SiteSnapshot> {
+        let (projects, worktrees, settings, revision) = (self.projects.clone(), self.worktrees.clone(), self.settings.clone(), self.revision.clone());
+        unblocked("reading the projects, worktree environments and settings", move || {
+            let listing = projects.scan()?;
+            let reserved_ports = listing.unreadable.iter().flat_map(|u| u.loopback_ports.iter().copied()).collect();
+            Ok(SiteSnapshot::loaded(listing.projects, reserved_ports, worktrees.list_all()?, settings.load()?, revision, commit))
+        })
+        .await
     }
 
     /// Lowest port of the configured range that is neither assigned to a site, nor named by an
@@ -68,9 +67,11 @@ impl LoopbackPortAllocator {
     /// reservation can observe the registry in between.
     pub async fn allocate<T>(&self, commit: impl FnOnce(Port, &SiteSnapshot) -> AppResult<T>) -> AppResult<T> {
         let _guard = self.lock.lock().await;
-        let snap = self.snapshot()?;
-        let port = self.free_port(&snap)?;
-        commit(port, &snap)
+        let snap = self.snapshot(self.revision.begin_commit()).await?;
+        in_place(|| {
+            let port = self.free_port(&snap)?;
+            commit(port, &snap)
+        })
     }
 
     /// For saves whose addresses were chosen by the caller (explicit ports, updates, relinks,
@@ -78,15 +79,25 @@ impl LoopbackPortAllocator {
     /// (`project::check_conflicts`) and its save cannot interleave with an allocation.
     pub async fn reserve<T>(&self, commit: impl FnOnce(&SiteSnapshot) -> AppResult<T>) -> AppResult<T> {
         let _guard = self.lock.lock().await;
-        let snap = self.snapshot()?;
-        commit(&snap)
+        let snap = self.snapshot(self.revision.begin_commit()).await?;
+        in_place(|| commit(&snap))
+    }
+
+    /// For registry writes that check nothing against the other sites (unregistering a worktree
+    /// environment): runs `write` under the same lock, numbered like every commit, so a sync
+    /// never applies a snapshot older than it.
+    pub async fn write<T>(&self, write: impl FnOnce() -> AppResult<T>) -> AppResult<T> {
+        let _guard = self.lock.lock().await;
+        self.revision.begin_commit();
+        in_place(write)
     }
 
     /// The port [`Self::allocate`] would pick right now, without reserving it (address
     /// suggestions shown before a project is created).
     pub async fn peek(&self) -> AppResult<Port> {
         let _guard = self.lock.lock().await;
-        let snap = self.snapshot()?;
-        self.free_port(&snap)
+        // Commit 0: never current, as nothing is committed with it.
+        let snap = self.snapshot(0).await?;
+        in_place(|| self.free_port(&snap))
     }
 }

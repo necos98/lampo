@@ -38,12 +38,11 @@ pub struct SettingsWriter {
 }
 
 /// The outcome of [`SettingsWriter::modify`]: the settings before and after (equal when nothing
-/// changed) and the sites seen under the lock.
+/// changed) and the registry after the commit (for the sync that follows).
 pub(crate) struct SettingsCommit {
     pub before: Settings,
     pub after: Settings,
-    pub projects: Vec<Project>,
-    pub worktrees: Vec<WorktreeEnvironment>,
+    pub sites: SiteSnapshot,
 }
 
 impl SettingsWriter {
@@ -59,12 +58,13 @@ impl SettingsWriter {
             .reserve(|snap| {
                 let before = &snap.settings;
                 let after = change(before)?;
-                if &after != before {
-                    self.check(before, &after, snap)?;
-                    self.repo.save(&after)?;
-                    self.events.publish(DomainEvent::SettingsChanged);
+                if &after == before {
+                    return Ok(SettingsCommit { before: before.clone(), after, sites: snap.unchanged() });
                 }
-                Ok(SettingsCommit { before: before.clone(), after, projects: snap.projects.clone(), worktrees: snap.worktrees.clone() })
+                self.check(before, &after, snap)?;
+                self.repo.save(&after)?;
+                self.events.publish(DomainEvent::SettingsChanged);
+                Ok(SettingsCommit { before: before.clone(), sites: snap.with_settings(after.clone()), after })
             })
             .await
     }

@@ -48,13 +48,13 @@ impl PatchSettings {
         }
         let services = &self.writer.services;
         let patch = Patch::parse(&request, services)?;
-        let SettingsCommit { before, after, projects, worktrees } = self.writer.modify(|current| patch.apply(current)).await?;
+        let SettingsCommit { before, after, sites } = self.writer.modify(|current| patch.apply(current)).await?;
         let changes = describe_changes(&before, &after, services);
         let sync = match changes.is_empty() {
             true => SyncReportDto::default(),
-            false => self.env.sync(ctx).await.map_err(|e| AppError { message: format!("the settings were saved, but applying them failed: {}", e.message), ..e })?,
+            false => self.env.sync_sites(sites.clone(), ctx).await.map_err(|e| AppError { message: format!("the settings were saved, but applying them failed: {}", e.message), ..e })?,
         };
-        let notes = notes(&before, &after, &projects, &worktrees, &sync, services);
+        let notes = notes(&before, &after, &sites.projects, &sites.worktrees, &sync, services);
         Ok(SettingsPatchResultDto { settings: settings_to_dto(&after, services), changes, sync, notes })
     }
 }

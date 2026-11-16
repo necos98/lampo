@@ -83,12 +83,12 @@ impl PatchProjectEnvironment {
             }
             Ok((project.name.clone(), project.addresses().to_vec(), project.environment.clone(), project.database().cloned()) != before)
         };
-        let project = if patch.wants_free_port() {
+        let saved = if patch.wants_free_port() {
             self.writer.modify_with_free_port(&request.project_id, |project, snap, port| change(project, snap, Some(port))).await?
         } else {
             self.writer.modify(&request.project_id, |project, snap| change(project, snap, None)).await?
         };
-        self.writer.finish(&project, ctx).await
+        self.writer.finish(saved, ctx).await
     }
 }
 

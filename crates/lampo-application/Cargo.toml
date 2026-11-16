@@ -15,8 +15,9 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
-# Only `sync`/`time` primitives (task registry, timeouts) and `join!`; no IO.
-tokio = { workspace = true, features = ["sync", "time", "macros"] }
+# `sync`/`time` primitives (task registry, timeouts), `join!`, and the blocking pool that keeps
+# the synchronous ports off the runtime's workers (`crate::blocking`); no IO of its own.
+tokio = { workspace = true, features = ["sync", "time", "macros", "rt", "rt-multi-thread"] }
 # `join_all` to query the package catalog sources concurrently.
 futures-util = { workspace = true }
 

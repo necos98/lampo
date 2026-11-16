@@ -16,7 +16,7 @@ use super::environment::EnvironmentSync;
 use super::project_policy::ProjectEnvironmentPolicy;
 use super::projects::ProjectQueries;
 use super::service_catalog::ServiceCatalog;
-use super::support::load_project;
+use super::support::{load_project, parse_project_id};
 use crate::context::CallContext;
 use crate::dto::ProjectDto;
 use crate::error::AppResult;
@@ -60,75 +60,94 @@ impl ProjectWriter {
 
     /// Saves the new project `build` makes from the registry seen under the allocator lock, then
     /// publishes `ProjectsChanged`. `build` may refuse (nothing is saved).
-    pub(crate) async fn insert(&self, build: impl FnOnce(&SiteSnapshot) -> AppResult<Project>) -> AppResult<Project> {
-        let project = self.allocator.reserve(|snap| self.commit_new(snap, build(snap)?)).await?;
-        self.changed(&project.id);
-        Ok(project)
+    pub(crate) async fn insert(&self, build: impl FnOnce(&SiteSnapshot) -> AppResult<Project>) -> AppResult<SavedProject> {
+        let saved = self.allocator.reserve(|snap| self.commit_new(snap, build(snap)?)).await?;
+        self.changed(&saved.project.id);
+        Ok(saved)
     }
 
     /// Like [`Self::insert`], also handing `build` a free loopback port picked under the same lock.
-    pub(crate) async fn insert_with_free_port(&self, build: impl FnOnce(&SiteSnapshot, Port) -> AppResult<Project>) -> AppResult<Project> {
-        let project = self.allocator.allocate(|port, snap| self.commit_new(snap, build(snap, port)?)).await?;
-        self.changed(&project.id);
-        Ok(project)
+    pub(crate) async fn insert_with_free_port(&self, build: impl FnOnce(&SiteSnapshot, Port) -> AppResult<Project>) -> AppResult<SavedProject> {
+        let saved = self.allocator.allocate(|port, snap| self.commit_new(snap, build(snap, port)?)).await?;
+        self.changed(&saved.project.id);
+        Ok(saved)
     }
 
     /// Loads `project_id`, applies `change` and, if it reports a change, saves the result, all
     /// under the allocator lock (no lost update, no conflict slipping in).
-    pub(crate) async fn modify(&self, project_id: &str, change: impl FnOnce(&mut Project, &SiteSnapshot) -> AppResult<bool>) -> AppResult<Project> {
+    pub(crate) async fn modify(&self, project_id: &str, change: impl FnOnce(&mut Project, &SiteSnapshot) -> AppResult<bool>) -> AppResult<SavedProject> {
         self.allocator.reserve(|snap| self.commit_change(project_id, snap, change)).await
     }
 
     /// Like [`Self::modify`], also handing `change` a free loopback port picked under the same
     /// lock (it may leave it unused).
-    pub(crate) async fn modify_with_free_port(&self, project_id: &str, change: impl FnOnce(&mut Project, &SiteSnapshot, Port) -> AppResult<bool>) -> AppResult<Project> {
+    pub(crate) async fn modify_with_free_port(&self, project_id: &str, change: impl FnOnce(&mut Project, &SiteSnapshot, Port) -> AppResult<bool>) -> AppResult<SavedProject> {
         self.allocator.allocate(|port, snap| self.commit_change(project_id, snap, |project, snap| change(project, snap, port))).await
     }
 
     /// Under the allocator lock: loads `project_id`, lets `check` refuse (nothing removed),
-    /// deletes the project, then runs `dependents` (its worktree environments…) on it. The
-    /// project goes first: a failure there leaves everything in place, and a concurrent
-    /// [`Self::modify`] either ran before or finds it gone, so it never brings it back. Publishes
-    /// `ProjectsChanged`.
-    pub(crate) async fn remove<T>(&self, project_id: &str, check: impl FnOnce(&Project) -> AppResult<()>, dependents: impl FnOnce(&Project, &SiteSnapshot) -> T) -> AppResult<(Project, T)> {
+    /// deletes the project, then runs `dependents` (its worktree environments…) on it and on the
+    /// registry without it, which `dependents` updates with what it removes too. The project goes
+    /// first: a failure there leaves everything in place, and a concurrent [`Self::modify`] either
+    /// ran before or finds it gone, so it never brings it back. Publishes `ProjectsChanged`.
+    pub(crate) async fn remove<T>(
+        &self,
+        project_id: &str,
+        check: impl FnOnce(&Project) -> AppResult<()>,
+        dependents: impl FnOnce(&Project, &mut SiteSnapshot) -> T,
+    ) -> AppResult<RemovedProject<T>> {
         let removed = self
             .allocator
             .reserve(|snap| {
-                let project = self.load(project_id)?;
+                let project = self.stored(project_id, snap)?;
                 check(&project)?;
                 self.projects.delete(&project.id)?;
-                let left = dependents(&project, snap);
-                Ok((project, left))
+                let mut sites = snap.without_project(&project.id);
+                let dependents = dependents(&project, &mut sites);
+                Ok(RemovedProject { project, dependents, sites })
             })
             .await?;
-        self.changed(&removed.0.id);
+        self.changed(&removed.project.id);
         Ok(removed)
     }
 
-    /// Syncs the environment to the saved configuration.
-    pub(crate) async fn sync(&self, ctx: &CallContext) -> AppResult<()> {
-        self.env.sync(ctx).await?;
+    /// Syncs the environment to the registry `sites` a commit handed on.
+    pub(crate) async fn sync(&self, sites: SiteSnapshot, ctx: &CallContext) -> AppResult<()> {
+        self.env.sync_sites(sites, ctx).await?;
         Ok(())
     }
 
-    /// Syncs, then returns the full view of `project`.
-    pub(crate) async fn finish(&self, project: &Project, ctx: &CallContext) -> AppResult<ProjectDto> {
-        self.sync(ctx).await?;
-        self.queries.get(project.id.as_str())
+    /// Syncs, then returns the full view of the saved project, both from the registry the save
+    /// handed on (nothing is read again).
+    pub(crate) async fn finish(&self, saved: SavedProject, ctx: &CallContext) -> AppResult<ProjectDto> {
+        let view = self.queries.present(&saved.project, &saved.sites);
+        self.sync(saved.sites, ctx).await?;
+        Ok(view)
     }
 
-    fn commit_new(&self, snap: &SiteSnapshot, project: Project) -> AppResult<Project> {
-        self.save_checked(snap, &project, true)?;
-        Ok(project)
-    }
-
-    fn commit_change(&self, project_id: &str, snap: &SiteSnapshot, change: impl FnOnce(&mut Project, &SiteSnapshot) -> AppResult<bool>) -> AppResult<Project> {
-        let mut project = self.load(project_id)?;
-        if change(&mut project, snap)? {
-            self.save_checked(snap, &project, false)?;
-            self.changed(&project.id);
+    /// `project_id` as stored: from the snapshot, else read (`NotFound`, or why its file does not
+    /// load).
+    fn stored(&self, project_id: &str, snap: &SiteSnapshot) -> AppResult<Project> {
+        let id = parse_project_id(project_id)?;
+        match snap.projects.iter().find(|p| p.id == id) {
+            Some(project) => Ok(project.clone()),
+            None => self.load(project_id),
         }
-        Ok(project)
+    }
+
+    fn commit_new(&self, snap: &SiteSnapshot, project: Project) -> AppResult<SavedProject> {
+        self.save_checked(snap, &project, true)?;
+        Ok(SavedProject { sites: snap.with_project(&project), project })
+    }
+
+    fn commit_change(&self, project_id: &str, snap: &SiteSnapshot, change: impl FnOnce(&mut Project, &SiteSnapshot) -> AppResult<bool>) -> AppResult<SavedProject> {
+        let mut project = self.stored(project_id, snap)?;
+        if !change(&mut project, snap)? {
+            return Ok(SavedProject { sites: snap.unchanged(), project });
+        }
+        self.save_checked(snap, &project, false)?;
+        self.changed(&project.id);
+        Ok(SavedProject { sites: snap.with_project(&project), project })
     }
 
     /// Validates `candidate` (the environment policy against the stored version, its conflicts
@@ -145,4 +164,18 @@ impl ProjectWriter {
     fn changed(&self, id: &ProjectId) {
         self.events.publish(DomainEvent::ProjectsChanged { changed: vec![id.clone()] });
     }
+}
+
+/// A project as a commit saved it (or found it, when nothing changed), with the registry after
+/// that commit: what the sync and the view that follow use instead of reading the files again.
+pub(crate) struct SavedProject {
+    pub project: Project,
+    pub sites: SiteSnapshot,
+}
+
+/// A removed project, what its `dependents` step returned, and the registry after the removal.
+pub(crate) struct RemovedProject<T> {
+    pub project: Project,
+    pub dependents: T,
+    pub sites: SiteSnapshot,
 }

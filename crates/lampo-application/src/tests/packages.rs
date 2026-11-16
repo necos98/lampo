@@ -592,6 +592,7 @@ async fn first_run_installs_what_is_missing_and_is_resumable() {
     assert_eq!(k.w.settings.load().unwrap().default_php, Some(php("8.4")));
     let downloads = k.downloader.downloads.lock().unwrap().len();
     assert_eq!(downloads, 4);
+    assert_eq!(k.sync.calls.load(Ordering::SeqCst), 1, "the installs do not sync: one sync at the end");
 
     // Resumable / idempotent: nothing left to install.
     setup.run(&cli(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap();

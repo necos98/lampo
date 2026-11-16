@@ -52,14 +52,31 @@ fn key(p: &Path) -> String {
 // Store
 // ---------------------------------------------------------------------------------------------
 
+/// How many times a fake repository was read (each listing or lookup is one read of the store).
+#[derive(Default)]
+pub struct Reads(AtomicUsize);
+impl Reads {
+    fn count(&self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+    pub fn get(&self) -> usize {
+        self.0.load(Ordering::SeqCst)
+    }
+    pub fn reset(&self) {
+        self.0.store(0, Ordering::SeqCst);
+    }
+}
+
 /// The projects that load, plus the files that do not (`unreadable`, set by tests).
 #[derive(Default)]
-pub struct MemProjects(pub Mutex<BTreeMap<ProjectId, Project>>, pub Mutex<Vec<UnreadableProject>>);
+pub struct MemProjects(pub Mutex<BTreeMap<ProjectId, Project>>, pub Mutex<Vec<UnreadableProject>>, pub Reads);
 impl ProjectRepository for MemProjects {
     fn scan(&self) -> PortResult<ProjectListing> {
+        self.2.count();
         Ok(ProjectListing { projects: lock(&self.0).values().cloned().collect(), unreadable: lock(&self.1).clone() })
     }
     fn get(&self, id: &ProjectId) -> PortResult<Option<Project>> {
+        self.2.count();
         Ok(lock(&self.0).get(id).cloned())
     }
     fn save(&self, project: &Project) -> PortResult<()> {
@@ -73,18 +90,22 @@ impl ProjectRepository for MemProjects {
 }
 
 #[derive(Default)]
-pub struct MemWorktrees(pub Mutex<Vec<WorktreeEnvironment>>);
+pub struct MemWorktrees(pub Mutex<Vec<WorktreeEnvironment>>, pub Reads);
 impl WorktreeRepository for MemWorktrees {
     fn list_all(&self) -> PortResult<Vec<WorktreeEnvironment>> {
+        self.1.count();
         Ok(lock(&self.0).clone())
     }
     fn list_for(&self, parent: &ProjectId) -> PortResult<Vec<WorktreeEnvironment>> {
+        self.1.count();
         Ok(lock(&self.0).iter().filter(|w| &w.parent == parent).cloned().collect())
     }
     fn get(&self, parent: &ProjectId, slug: &WorktreeSlug) -> PortResult<Option<WorktreeEnvironment>> {
+        self.1.count();
         Ok(lock(&self.0).iter().find(|w| &w.parent == parent && &w.slug == slug).cloned())
     }
     fn find_by_root(&self, root: &ProjectRoot) -> PortResult<Option<WorktreeEnvironment>> {
+        self.1.count();
         Ok(lock(&self.0).iter().find(|w| &w.root == root).cloned())
     }
     fn save(&self, env: &WorktreeEnvironment) -> PortResult<()> {
@@ -105,7 +126,7 @@ impl WorktreeRepository for MemWorktrees {
 
 /// The stored settings; saves fail (a locked or read-only file) while the flag is set.
 #[derive(Default)]
-pub struct MemSettings(pub Mutex<Settings>, pub AtomicBool);
+pub struct MemSettings(pub Mutex<Settings>, pub AtomicBool, pub Reads);
 impl MemSettings {
     pub fn fail_saves(&self, fail: bool) {
         self.1.store(fail, Ordering::SeqCst);
@@ -113,6 +134,7 @@ impl MemSettings {
 }
 impl SettingsRepository for MemSettings {
     fn load(&self) -> PortResult<Settings> {
+        self.2.count();
         Ok(lock(&self.0).clone())
     }
     fn save(&self, settings: &Settings) -> PortResult<()> {
@@ -1078,11 +1100,11 @@ impl World {
     }
 
     pub fn worktree_down(&self) -> WorktreeDown {
-        WorktreeDown::new(self.worktrees.clone(), self.worktree_databases(), self.env.clone(), self.events.clone())
+        WorktreeDown::new(self.worktrees.clone(), self.allocator.clone(), self.worktree_databases(), self.env.clone(), self.events.clone())
     }
 
     pub fn prune_worktrees(&self) -> PruneWorktrees {
-        PruneWorktrees::new(self.projects.clone(), self.worktrees.clone(), self.fs.clone(), self.worktree_databases(), self.env.clone(), self.events.clone())
+        PruneWorktrees::new(self.projects.clone(), self.worktrees.clone(), self.allocator.clone(), self.fs.clone(), self.worktree_databases(), self.env.clone(), self.events.clone())
     }
 
     pub fn database_service(&self) -> Arc<DatabaseService> {
@@ -1182,6 +1204,17 @@ impl World {
 
     pub fn all_calls(&self) -> Vec<String> {
         [self.apache.calls(), self.mysql.calls(), self.redis.calls(), self.mailpit.calls()].concat()
+    }
+
+    /// Reads of the projects, worktree environments and settings: (projects, worktrees, settings).
+    pub fn store_reads(&self) -> (usize, usize, usize) {
+        (self.projects.2.get(), self.worktrees.1.get(), self.settings.2.get())
+    }
+
+    pub fn reset_store_reads(&self) {
+        self.projects.2.reset();
+        self.worktrees.1.reset();
+        self.settings.2.reset();
     }
 
     pub fn clear_calls(&self) {

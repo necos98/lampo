@@ -87,6 +87,15 @@ so a concurrent edit never brings it back; it returns the worktree databases it 
 (`orphanedDatabases`). `lampo worktree prune` removes what it can and reports the rest in
 `failed` (exit code of the first failure), publishing and syncing the removals all the same.
 
+Every registry write (projects, worktree environments, settings) runs under that lock and takes
+a commit number (`RegistryRevision`). A commit hands its snapshot, updated with what it saved
+(`SiteSnapshot::with_project`…), to the sync (`EnvironmentSync::sync_sites`) and to the view it
+returns, so a mutation reads each store once; the sync reads the files again when a later commit
+has started since (`SiteSnapshot::is_current`). Store I/O called from async code runs off the
+runtime's workers (`crate::blocking`: the blocking pool, or `block_in_place` for commits that
+borrow). The first-run wizard installs without syncing (`InternalInstallRequest::skip_sync`)
+and syncs once at the end.
+
 The GUI saves a whole project (`UpdateProject`); the CLI edits one with `lampo project set`
 (`PatchProjectEnvironment`, control request `project-patch`): a patch of extensions, add-ons,
 php.ini values, services, database name, public folder and Apache directives, applied to the

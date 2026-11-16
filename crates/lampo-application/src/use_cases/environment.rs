@@ -17,6 +17,7 @@ use lampo_domain::tcp_port::Port;
 use lampo_domain::web::{PhpIniSpec, WebServerConfig};
 use lampo_domain::PortError;
 
+use super::allocation::SiteSnapshot;
 use super::generation::{ConfigSnapshot, php_ini_specs, runner_for, shim_index, web_config};
 use super::service_catalog::ServiceCatalog;
 use super::service_leases::{ServiceLease, ServiceLeases};
@@ -24,6 +25,7 @@ use super::support::sync_without_elevation;
 use super::sync_outcome::Outcome;
 use super::web_apply::apply_web_config;
 use super::web_state::WebState;
+use crate::blocking::in_place;
 use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::SyncReportDto;
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -34,6 +36,13 @@ use crate::error::{AppError, AppResult, ErrorCode};
 #[async_trait]
 pub trait EnvironmentSync: Send + Sync {
     async fn sync(&self, ctx: &CallContext) -> AppResult<SyncReportDto>;
+
+    /// [`Self::sync`] after a commit that handed on `sites`, the registry as it saved it: used
+    /// instead of reading the projects, worktree environments and settings again while it is
+    /// still the newest state ([`SiteSnapshot::is_current`]), read again otherwise.
+    async fn sync_sites(&self, _sites: SiteSnapshot, ctx: &CallContext) -> AppResult<SyncReportDto> {
+        self.sync(ctx).await
+    }
 
     /// [`Self::sync`] as if `retiring` were no longer installed: vhosts, php.ini files, CLI
     /// shims and services using it move to the build that remains (restarted) or stop, so its
@@ -129,19 +138,25 @@ impl ApplyEnvironment {
     pub async fn apply_deferred_changes(&self) {
         loop {
             self.leases.deferred_released().await;
-            if let Err(e) = sync_without_elevation(self, &CallContext::GUI).await {
+            if let Err(e) = sync_without_elevation(self, None, &CallContext::GUI).await {
                 tracing::warn!("applying the service changes postponed by a database operation failed: {}", e.message);
             }
         }
     }
 
     /// The configuration and the installed packages, leaving out `retiring` (being uninstalled).
-    fn snapshot(&self, retiring: Option<&PackageId>) -> AppResult<ConfigSnapshot> {
+    /// `sites` (handed on by a commit) stands in for the projects, worktree environments and
+    /// settings while it is the newest state of the registry; they are read otherwise.
+    fn snapshot(&self, retiring: Option<&PackageId>, sites: Option<SiteSnapshot>) -> AppResult<ConfigSnapshot> {
         let mut installed = self.deps.installed.list()?;
         if let Some(retiring) = retiring {
             installed.retain(|p| &p.id != retiring);
         }
-        Ok(ConfigSnapshot { projects: self.deps.projects.list()?, worktrees: self.deps.worktrees.list_all()?, settings: self.deps.settings.load()?, installed })
+        let (projects, worktrees, settings) = match sites.filter(SiteSnapshot::is_current) {
+            Some(sites) => (sites.projects, sites.worktrees, sites.settings),
+            None => (self.deps.projects.list()?, self.deps.worktrees.list_all()?, self.deps.settings.load()?),
+        };
+        Ok(ConfigSnapshot { projects, worktrees, settings, installed })
     }
 
     /// Writes the php.ini files and the shim index; returns the specs written.
@@ -159,7 +174,7 @@ impl ApplyEnvironment {
     /// Only steps 1–2 (no processes, no elevation): used by the CLI fallback and at startup
     /// before services come up.
     pub fn write_generated_files(&self) -> AppResult<()> {
-        let snap = self.snapshot(None)?;
+        let snap = self.snapshot(None, None)?;
         let mut warnings = Vec::new();
         self.write_files(&snap, &mut warnings)?;
         for w in warnings {
@@ -326,13 +341,15 @@ impl ApplyEnvironment {
         }
     }
 
-    /// The steps of the type docs, against the installed packages minus `retiring`.
-    async fn reconcile(&self, retiring: Option<&PackageId>, ctx: &CallContext) -> AppResult<SyncReportDto> {
+    /// The steps of the type docs, against the installed packages minus `retiring` and, while it
+    /// is current, the registry `sites` handed on by a commit. The store is read and the files
+    /// are written off the runtime's worker ([`in_place`]).
+    async fn reconcile(&self, retiring: Option<&PackageId>, sites: Option<SiteSnapshot>, ctx: &CallContext) -> AppResult<SyncReportDto> {
         let mut state = self.lock.lock().await;
         let mut out = Outcome::default();
-        let snap = self.snapshot(retiring)?;
+        let snap = in_place(|| self.snapshot(retiring, sites))?;
 
-        let ini = match self.write_files(&snap, &mut out.report.warnings) {
+        let ini = match in_place(|| self.write_files(&snap, &mut out.report.warnings)) {
             Ok(specs) => specs,
             Err(e) => {
                 out.fail(e);
@@ -364,11 +381,15 @@ impl ApplyEnvironment {
 #[async_trait]
 impl EnvironmentSync for ApplyEnvironment {
     async fn sync(&self, ctx: &CallContext) -> AppResult<SyncReportDto> {
-        self.reconcile(None, ctx).await
+        self.reconcile(None, None, ctx).await
+    }
+
+    async fn sync_sites(&self, sites: SiteSnapshot, ctx: &CallContext) -> AppResult<SyncReportDto> {
+        self.reconcile(None, Some(sites), ctx).await
     }
 
     async fn sync_without(&self, retiring: &PackageId, ctx: &CallContext) -> AppResult<SyncReportDto> {
-        self.reconcile(Some(retiring), ctx).await
+        self.reconcile(Some(retiring), None, ctx).await
     }
 }
 

@@ -17,6 +17,7 @@ use lampo_domain::version::VersionSeries;
 use lampo_domain::worktree::{WorktreeDatabase, WorktreeEnvironment};
 use lampo_domain::DomainError;
 
+use super::allocation::SiteSnapshot;
 use super::environment::EnvironmentSync;
 use super::service_catalog::ServiceCatalog;
 use crate::context::{CallContext, ElevationPolicy};
@@ -254,10 +255,15 @@ pub(crate) fn mysql_endpoint(installed: &dyn InstalledPackageRegistry, settings:
 // ---------------------------------------------------------------------------------------------
 
 /// Syncs without ever prompting for elevation, and does not fail because an *unrelated* hosts
-/// change is pending (worktree environments never touch the hosts file).
-pub(crate) async fn sync_without_elevation(env: &dyn EnvironmentSync, ctx: &CallContext) -> AppResult<()> {
+/// change is pending (worktree environments never touch the hosts file). `sites`: the registry
+/// a commit handed on ([`EnvironmentSync::sync_sites`]), if any.
+pub(crate) async fn sync_without_elevation(env: &dyn EnvironmentSync, sites: Option<SiteSnapshot>, ctx: &CallContext) -> AppResult<()> {
     let ctx = CallContext { origin: ctx.origin, elevation: ElevationPolicy::Deny };
-    match env.sync(&ctx).await {
+    let synced = match sites {
+        Some(sites) => env.sync_sites(sites, &ctx).await,
+        None => env.sync(&ctx).await,
+    };
+    match synced {
         Ok(_) => Ok(()),
         Err(e) if e.code == ErrorCode::ElevationRequired => {
             tracing::info!("hosts file left unchanged: {}", e.message);

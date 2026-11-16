@@ -11,6 +11,7 @@ mod projects;
 mod scaffold;
 mod service_lifecycle;
 mod settings;
+mod store_reads;
 mod uninstall;
 mod untrusted_config;
 mod web_isolation;

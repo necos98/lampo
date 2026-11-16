@@ -39,6 +39,7 @@ pub mod settings;
 pub mod settings_patch;
 pub mod settings_writer;
 pub mod shims;
+pub(crate) mod site_snapshot;
 pub mod status;
 pub(crate) mod support;
 pub(crate) mod sync_outcome;

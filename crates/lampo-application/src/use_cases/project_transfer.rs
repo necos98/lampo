@@ -67,7 +67,7 @@ impl ImportProject {
         }
         project.set_active(false);
         project.tls = TlsMode::Disabled;
-        let project = self
+        let saved = self
             .writer
             .insert(|snap| {
                 let id = unique_project_id(&snap.projects, &project.id);
@@ -82,7 +82,7 @@ impl ImportProject {
                 Ok(project)
             })
             .await?;
-        let project = self.writer.finish(&project, ctx).await?;
+        let project = self.writer.finish(saved, ctx).await?;
         Ok(ImportProjectResultDto { project, dropped_apache_directives: dropped.apache_directives, dropped_php_ini_keys: dropped.php_ini_keys })
     }
 }

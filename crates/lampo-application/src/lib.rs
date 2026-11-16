@@ -13,6 +13,7 @@
 //! * [`context`] — per-call context (origin, elevation policy);
 //! * [`error`] — [`AppError`] with stable [`ErrorCode`]s.
 
+pub(crate) mod blocking;
 pub mod context;
 pub mod control;
 pub mod dto;

@@ -423,6 +423,13 @@ impl InstallPackage {
     /// The final environment sync is best effort: its failure is logged, not returned (the
     /// package *is* installed; `lampo up` reports the environment problem).
     pub async fn execute(&self, request: InstallPackageRequest, ctx: &CallContext, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<InstalledPackageDto> {
+        self.execute_internal(InternalInstallRequest { request, skip_sync: false }, ctx, progress, cancel).await
+    }
+
+    /// [`Self::execute`] for the use cases that install several packages in a row and sync once
+    /// at the end (`skip_sync`).
+    pub(crate) async fn execute_internal(&self, internal: InternalInstallRequest, ctx: &CallContext, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<InstalledPackageDto> {
+        let InternalInstallRequest { request, skip_sync } = internal;
         let d = &self.deps;
         // One subject for every stage, so a UI can follow one package through resolve,
         // download (the downloader would name the file), extraction (unnamed) and configure.
@@ -460,9 +467,19 @@ impl InstallPackage {
 
         self.adopt_default_php(&entry.id).await;
         d.events.publish(DomainEvent::PackagesChanged);
-        if let Err(e) = d.env.sync(ctx).await {
-            tracing::warn!("environment sync after installing {} failed: {}", entry.id, e.message);
+        if !skip_sync {
+            if let Err(e) = d.env.sync(ctx).await {
+                tracing::warn!("environment sync after installing {} failed: {}", entry.id, e.message);
+            }
         }
         Ok(InstalledPackageDto { id: package_id_to_dto(&package.id), path: package.install_dir.display().to_string(), used_by: Vec::new(), series: package.id.series().to_string() })
     }
+}
+
+/// An [`InstallPackageRequest`] as the use cases inside the application issue it (never a wire
+/// type: front-ends always get the sync).
+pub(crate) struct InternalInstallRequest {
+    pub request: InstallPackageRequest,
+    /// The caller syncs once after a batch of installs (the first-run wizard).
+    pub skip_sync: bool,
 }

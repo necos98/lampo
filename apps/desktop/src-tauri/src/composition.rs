@@ -212,8 +212,8 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         env: env.clone(),
         events: events.clone(),
     }));
-    let worktree_down = Arc::new(WorktreeDown::new(worktrees.clone(), worktree_databases.clone(), env.clone(), events.clone()));
-    let prune_worktrees = Arc::new(PruneWorktrees::new(projects.clone(), worktrees.clone(), fs.clone(), worktree_databases, env.clone(), events.clone()));
+    let worktree_down = Arc::new(WorktreeDown::new(worktrees.clone(), allocator.clone(), worktree_databases.clone(), env.clone(), events.clone()));
+    let prune_worktrees = Arc::new(PruneWorktrees::new(projects.clone(), worktrees.clone(), allocator.clone(), fs.clone(), worktree_databases, env.clone(), events.clone()));
     let shutdown = Arc::new(Shutdown::new(runners, service_catalog.clone(), settings.clone()));
     let shims = Arc::new(ShimSetup::new(shim_installer.clone(), user_path.clone(), locator.clone(), paths.clone(), shim_tools.clone()));
     // Claude Code: user scope only, never under an isolated data root (`LAMPO_HOME`).
