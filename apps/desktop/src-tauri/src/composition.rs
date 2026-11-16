@@ -322,6 +322,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         prune_worktrees,
         logs: Arc::new(LogQueries::new(Arc::new(services::FileLogReader), projects.clone(), settings.clone(), service_catalog.clone(), paths.clone())),
         settings: Arc::new(SettingsService::new(settings_writer, env.clone())),
+        hosts_sync: Arc::new(HostsSyncQuery::new(projects.clone(), hosts.clone())),
         doctor: Arc::new(Doctor::new(DoctorDeps {
             projects,
             worktrees,

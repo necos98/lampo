@@ -637,10 +637,19 @@ export const it = {
 			} as Record<string, Partial<Record<CheckStatus, string>>>,
 			technical: 'Dettagli tecnici',
 			vcRuntime: 'Runtime Visual C++ mancanti',
-			download: 'Scarica',
 			staleWorktrees: 'Ambienti worktree orfani',
 			missingPackages: 'Pacchetti mancanti',
 			hostsOutOfSync: 'Il file hosts non è allineato.',
+			/** Buttons next to a failed check (`lib/diagnostics/fixes.ts`). */
+			actions: {
+				'install-shims': 'Installa shim',
+				'prune-worktrees': 'Pulisci worktree',
+				'apply-hosts': 'Aggiorna file hosts',
+				open: (page: string) => `Apri ${page}`,
+				download: (redistributable: string) => `Scarica ${redistributable}`
+			},
+			pruneTitle: 'Rimuovere gli ambienti worktree orfani?',
+			pruneBody: 'Le cartelle o i progetti di questi ambienti non esistono più:',
 			status: { ok: 'OK', warning: 'Attenzione', error: 'Errore' } satisfies Record<CheckStatus, string>
 		},
 		updates: {

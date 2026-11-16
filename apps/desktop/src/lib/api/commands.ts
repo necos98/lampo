@@ -60,6 +60,7 @@ export const COMMANDS = {
 	listServiceKinds: 'list_service_kinds',
 	updateSettings: 'update_settings',
 	runDoctor: 'run_doctor',
+	hostsInSync: 'hosts_in_sync',
 	shimStatus: 'shim_status',
 	installShims: 'install_shims',
 	claudeCodeStatus: 'claude_code_status',
@@ -149,6 +150,8 @@ export const updateSettings = (settings: T.Settings) => call<T.Settings>(COMMAND
 
 // Diagnostics and shims
 export const runDoctor = () => call<T.DoctorReport>(COMMANDS.runDoctor);
+/** Only the hosts-file comparison of the doctor, cheap enough to re-check after every change. */
+export const hostsInSync = () => call<boolean>(COMMANDS.hostsInSync);
 export const shimStatus = () => call<T.ShimStatus>(COMMANDS.shimStatus);
 export const installShims = () => call<T.ShimStatus>(COMMANDS.installShims);
 

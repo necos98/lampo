@@ -10,7 +10,7 @@
 	import { diagnostics } from '#lib/stores/index.js';
 
 	import ErrorNotice from '../common/ErrorNotice.svelte';
-	import ExternalLink from '../common/ExternalLink.svelte';
+	import DoctorFixActions from './DoctorFixActions.svelte';
 
 	const t = m.settings.doctor;
 	const report = $derived(diagnostics.doctor.data);
@@ -49,6 +49,7 @@
 							<p class="text-xs text-muted-foreground" title={t.technical}>{check.message}</p>
 						{/if}
 						{#if check.fix && check.status !== 'ok'}<p class="font-mono text-xs text-muted-foreground">{t.fix}: {check.fix}</p>{/if}
+						<DoctorFixActions {check} {report} />
 					</div>
 				</li>
 			{/each}
@@ -59,7 +60,6 @@
 				{#each report.missingVcRuntimes as vc (vc.redistributable)}
 					<li class="flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
 						<span class="flex-1">{vc.redistributable} <span class="text-xs text-muted-foreground">({vc.requiredBy.join(', ')})</span></span>
-						<ExternalLink href={vc.downloadUrl}>{t.download}</ExternalLink>
 					</li>
 				{/each}
 			</ul>

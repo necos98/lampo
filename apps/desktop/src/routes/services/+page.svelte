@@ -19,7 +19,7 @@
 
 	onMount(() => {
 		void services.load();
-		void diagnostics.runDoctor();
+		void diagnostics.ensureDoctor();
 	});
 </script>
 

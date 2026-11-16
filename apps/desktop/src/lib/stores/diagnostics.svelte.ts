@@ -24,6 +24,8 @@ export class DiagnosticsStore {
 
 	runDoctor = () => this.doctor.load();
 	loadShims = () => this.shims.load();
+	/** Views needing the report only once share one run (the user re-runs it explicitly). */
+	ensureDoctor = () => this.doctor.ensure();
 
 	async installShims() {
 		this.installingShims = true;

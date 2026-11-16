@@ -10,6 +10,13 @@ pub async fn run_doctor(state: State<'_, AppState>) -> AppResult<DoctorReportDto
     state.doctor.run().await
 }
 
+/// Only the hosts-file comparison of the doctor: what the GUI re-checks after project changes.
+#[tauri::command]
+pub async fn hosts_in_sync(state: State<'_, AppState>) -> AppResult<bool> {
+    let hosts_sync = state.hosts_sync.clone();
+    run_blocking(move || hosts_sync.in_sync()).await
+}
+
 #[tauri::command]
 pub async fn shim_status(state: State<'_, AppState>) -> AppResult<ShimStatusDto> {
     let shims = state.shims.clone();

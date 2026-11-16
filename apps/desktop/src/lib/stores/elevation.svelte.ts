@@ -38,13 +38,15 @@ export class ElevationStore {
 		this.pending = true;
 	}
 
-	/** Re-derives the state from the backend (window re-created, hosts edited elsewhere). */
+	/**
+	 * Re-derives the state from the backend (window re-created, hosts edited elsewhere). Asks only
+	 * for the hosts-file comparison: the full doctor also probes ports, PATH and runtimes.
+	 */
 	async refresh(): Promise<void> {
 		try {
-			const report = await this.#backend.commands.runDoctor();
-			this.pending = !report.hostsFileInSync;
+			this.pending = !(await this.#backend.commands.hostsInSync());
 		} catch {
-			// Keep the last known state: a failed doctor run says nothing about the hosts file.
+			// Keep the last known state: an unreadable hosts file says nothing about its content.
 		}
 	}
 

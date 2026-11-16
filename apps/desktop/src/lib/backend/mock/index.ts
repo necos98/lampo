@@ -632,14 +632,18 @@ export function createMockBackend({ fresh }: Options): Backend {
 			const failed = services.get('mysql-5.7')?.state === 'failed';
 			const missingVc: T.VcRuntimeIssue[] = isInstalled({ kind: 'php', version: '5.6.40', phpVersion: null }) ? [{ redistributable: 'Visual C++ 2012 (x64)', downloadUrl: 'https://www.microsoft.com/download/details.aspx?id=30679', requiredBy: ['php-5.6.40'] }] : [];
 			const stale = worktrees.filter((w) => w.stale).map((w) => w.site);
+			const missingPackages = fresh && !firstRunCompleted ? ['php 8.4', 'mysql 8.4', 'apache 2.4'] : [];
+			// Same ids, order and fix hints as the real `standard_checks`, so every fix action can show up.
 			const checks: T.DoctorCheck[] = [
-				{ id: 'app', status: 'ok', message: 'App in esecuzione', fix: null },
 				{ id: 'vc-runtime', status: missingVc.length ? 'error' : 'ok', message: missingVc.length ? 'Runtime Visual C++ 2012 mancante (php-5.6.40)' : 'Runtime Visual C++ presenti', fix: missingVc.length ? 'Install the Visual C++ 2012 redistributable' : null },
 				{ id: 'ports', status: failed ? 'error' : 'ok', message: failed ? 'La porta 3307 è occupata da mysqld.exe (PID 4412)' : 'Nessun conflitto di porte', fix: failed ? 'Stop mysqld.exe or change the MySQL 5.7 port in settings' : null },
 				{ id: 'shims-on-path', status: shims.onPath ? 'ok' : 'warning', message: shims.onPath ? 'Le shim sono nel PATH' : 'Le shim non sono nel PATH', fix: shims.onPath ? null : 'Run install shims' },
 				{ id: 'path-shadowing', status: shims.shadowed.length ? 'warning' : 'ok', message: shims.shadowed.length ? 'php è oscurato da C:\\xampp\\php\\php.exe' : 'Nessuno strumento oscurato', fix: null },
-				{ id: 'hosts-block', status: hostsInSync ? 'ok' : 'warning', message: hostsInSync ? 'File hosts aggiornato' : 'Il file hosts non è aggiornato', fix: hostsInSync ? null : 'Apply the environment' },
-				{ id: 'stale-worktrees', status: stale.length ? 'warning' : 'ok', message: stale.length ? `${stale.length} ambiente worktree con cartella mancante` : 'Nessun ambiente orfano', fix: null }
+				{ id: 'hosts-block', status: hostsInSync ? 'ok' : 'warning', message: hostsInSync ? 'File hosts aggiornato' : 'Il file hosts non è aggiornato', fix: hostsInSync ? null : 'lampo up --allow-elevation' },
+				{ id: 'packages', status: missingPackages.length ? 'error' : 'ok', message: missingPackages.length ? `Pacchetti mancanti: ${missingPackages.join(', ')}` : 'Pacchetti presenti', fix: missingPackages.length ? 'lampo package install <kind> <series>' : null },
+				{ id: 'folders', status: 'ok', message: 'Cartelle dei progetti presenti', fix: null },
+				{ id: 'stale-worktrees', status: stale.length ? 'warning' : 'ok', message: stale.length ? `${stale.length} ambiente worktree con cartella mancante` : 'Nessun ambiente orfano', fix: stale.length ? 'lampo worktree prune' : null },
+				{ id: 'app', status: 'ok', message: 'App in esecuzione', fix: null }
 			];
 			return {
 				ok: checks.every((c) => c.status !== 'error'),
@@ -648,9 +652,13 @@ export function createMockBackend({ fresh }: Options): Backend {
 				portConflicts: failed ? [{ port: 3307, wantedBy: 'mysql-5.7', owner: 'mysqld.exe (PID 4412)' }] : [],
 				shadowedTools: clone(shims.shadowed),
 				staleWorktrees: stale,
-				missingPackages: fresh && !firstRunCompleted ? ['php 8.4', 'mysql 8.4', 'apache 2.4'] : [],
+				missingPackages,
 				hostsFileInSync: hostsInSync
 			};
+		},
+		hostsInSync: async () => {
+			await sleep(80);
+			return hostsInSync;
 		},
 		shimStatus: async () => {
 			await sleep(150);

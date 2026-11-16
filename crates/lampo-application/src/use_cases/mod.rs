@@ -19,6 +19,7 @@ pub mod diagnostics;
 pub mod environment;
 pub mod external_apps;
 pub(crate) mod generation;
+pub mod hosts_sync;
 pub mod lifecycle;
 pub mod log_rotation;
 pub mod logs;
@@ -62,6 +63,7 @@ pub use diagnostics::{
 };
 pub use environment::{ApplyEnvironment, ApplyEnvironmentDeps, EnvironmentSync, ServiceLifecycle};
 pub use external_apps::{ExternalApp, OpenProjectIn};
+pub use hosts_sync::{HostsSyncQuery, hosts_block_in_sync};
 pub use lifecycle::{FirstRunDeps, FirstRunSetup, Shutdown, ShutdownGate, Startup};
 pub use log_rotation::PeriodicLogRotation;
 pub use logs::LogQueries;

@@ -76,7 +76,8 @@ export class WorktreesStore {
 		return this.#runner.run(() => this.#backend.commands.pruneWorktrees({ projectId, dryRun: true }));
 	}
 
-	async prune(projectId: string, dropDatabases: boolean) {
+	/** `projectId` null prunes the stale environments of every project (the Doctor fix). */
+	async prune(projectId: string | null, dropDatabases: boolean) {
 		const result = await this.#runner.run<PruneReport>(() => this.#backend.commands.pruneWorktrees({ projectId, dryRun: false, dropDatabases }), {
 			success: m.worktrees.pruned,
 			warning: (r) => (r.failed.length ? m.worktrees.prunedPartially(r.failed.map((f) => `${f.site}: ${f.message}`).join('; ')) : null)

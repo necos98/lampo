@@ -10,7 +10,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use lampo_domain::address::SiteAddress;
-use lampo_domain::hosts::HostsBlock;
 use lampo_domain::package::InstalledPackage;
 use lampo_domain::ports::{
     ControlChannelClient, ExecutableLocator, FileSystemInspector, HostsFileReader, InstalledPackageRegistry, PortAvailability, PortProbe, ProjectRepository, SettingsRepository,
@@ -23,6 +22,7 @@ use lampo_domain::tcp_port::Port;
 use lampo_domain::vc_runtime::VcRedistributable;
 use lampo_domain::worktree::WorktreeEnvironment;
 
+use super::hosts_sync::hosts_block_in_sync;
 use super::requirements::{missing, requirements};
 use super::service_catalog::ServiceCatalog;
 use super::shims::shadowed_tools;
@@ -255,9 +255,8 @@ pub struct HostsBlockCheck {
 
 impl DoctorCheck for HostsBlockCheck {
     fn run(&self, facts: &DoctorFacts, report: &mut DoctorReportDto) -> DoctorCheckDto {
-        let desired = HostsBlock::for_projects(&facts.projects);
-        report.hosts_file_in_sync = match self.hosts.read_block() {
-            Ok(current) => current.unwrap_or_default() == desired,
+        report.hosts_file_in_sync = match hosts_block_in_sync(&facts.projects, self.hosts.as_ref()) {
+            Ok(in_sync) => in_sync,
             Err(e) => {
                 tracing::warn!("hosts file unreadable: {e}");
                 false

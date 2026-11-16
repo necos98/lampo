@@ -417,9 +417,14 @@ pub struct FakeHosts {
     pub block: Mutex<Option<HostsBlock>>,
     pub writes: AtomicUsize,
     pub deny: AtomicBool,
+    /// Reads fail like a hosts file locked by an antivirus.
+    pub unreadable: AtomicBool,
 }
 impl HostsFileReader for FakeHosts {
     fn read_block(&self) -> PortResult<Option<HostsBlock>> {
+        if self.unreadable.load(Ordering::SeqCst) {
+            return Err(PortError::Io { context: "reading the hosts file".into(), message: "access denied".into() });
+        }
         Ok(lock(&self.block).clone())
     }
 }

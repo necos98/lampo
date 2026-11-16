@@ -22,7 +22,7 @@
 
 	onMount(() => {
 		void firstRun.load();
-		void diagnostics.runDoctor();
+		void diagnostics.ensureDoctor();
 	});
 
 	// Someone opened the wizard although everything is installed (e.g. a stale link).

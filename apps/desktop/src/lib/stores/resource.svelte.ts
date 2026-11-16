@@ -45,6 +45,14 @@ export class Resource<T> {
 		}
 	}
 
+	/**
+	 * Loads only if nothing was ever requested: views sharing one costly value (the doctor
+	 * report) reuse the result or the load in flight instead of starting their own.
+	 */
+	async ensure(): Promise<void> {
+		if (this.status === 'idle') await this.load();
+	}
+
 	/** Applies an incremental update (from an event) on top of the current data. */
 	patch(update: (current: T) => T): void {
 		if (this.data === null) {

@@ -116,6 +116,43 @@ async fn doctor_runs_the_standard_checks_in_order() {
     assert_eq!(ids, ["vc-runtime", "ports", "shims-on-path", "path-shadowing", "hosts-block", "packages", "folders", "stale-worktrees", "app"]);
 }
 
+/// The cheap query the GUI polls agrees with the doctor's `hosts-block` check.
+#[tokio::test]
+async fn hosts_sync_query_matches_the_doctor() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", true);
+    let query = HostsSyncQuery::new(w.projects.clone(), w.hosts.clone());
+    let doctor = Doctor::new(w.doctor_deps(Arc::new(FakeLocator::default())));
+
+    assert!(!query.in_sync().unwrap(), "no Lampo block yet");
+    assert!(!doctor.run().await.unwrap().hosts_file_in_sync);
+
+    w.hosts_in_sync();
+    assert!(query.in_sync().unwrap());
+    assert!(doctor.run().await.unwrap().hosts_file_in_sync);
+
+    w.project("blog", "C:\\sites\\blog", true);
+    assert!(!query.in_sync().unwrap(), "a new project's hostname is missing");
+}
+
+#[test]
+fn hosts_sync_query_fails_when_the_hosts_file_is_unreadable() {
+    let w = World::with_basics();
+    w.hosts_in_sync();
+    w.hosts.unreadable.store(true, Ordering::SeqCst);
+    let query = HostsSyncQuery::new(w.projects.clone(), w.hosts.clone());
+    assert!(query.in_sync().is_err(), "unknown must not be reported as out of sync");
+}
+
+#[tokio::test]
+async fn an_unreadable_hosts_file_is_a_doctor_warning() {
+    let w = World::with_basics();
+    w.hosts.unreadable.store(true, Ordering::SeqCst);
+    let report = Doctor::new(w.doctor_deps(Arc::new(FakeLocator::default()))).run().await.unwrap();
+    assert!(!report.hosts_file_in_sync);
+    assert_eq!(report.checks.iter().find(|c| c.id == "hosts-block").unwrap().status, CheckStatus::Warning);
+}
+
 // --- resolution, agent context, toolchain ----------------------------------------------------
 
 #[tokio::test]

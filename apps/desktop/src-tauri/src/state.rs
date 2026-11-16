@@ -49,6 +49,7 @@ pub struct AppState {
     pub logs: Arc<LogQueries>,
     pub settings: Arc<SettingsService>,
     pub doctor: Arc<Doctor>,
+    pub hosts_sync: Arc<HostsSyncQuery>,
     pub shims: Arc<ShimSetup>,
     pub claude_code: Arc<ClaudeCodeSetup>,
 
