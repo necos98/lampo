@@ -4,8 +4,9 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use lampo_domain::mysql::{DatabaseName, is_system_schema};
-use lampo_domain::ports::{CommandOutput, CommandRunner, CommandSpec, DatabaseAdmin, MysqlEndpoint, PipedCommand, PipedCommandRunner, ProgressSink};
+use lampo_domain::ports::{CommandOutput, CommandRunner, CommandSpec, DatabaseAdmin, DumpImportOptions, MysqlEndpoint, PipedCommand, PipedCommandRunner, ProgressSink, StreamCompression};
 use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
+use lampo_domain::sql_dump::{DUMP_HEAD_BYTES, find_database_switch};
 use lampo_domain::{PortError, PortResult};
 
 use crate::compression;
@@ -88,6 +89,24 @@ fn reporter<'a>(progress: &'a dyn ProgressSink, total: Option<u64>, subject: Str
     move |done| progress.report(Progress::new(ProgressStage::Configuring, done, total).with_subject(subject.clone()))
 }
 
+/// `InvalidData` if the head of the dump has a `USE` / `CREATE DATABASE`: `--database=` only sets
+/// the initial database, so the statements after it would not land in `target`.
+fn refuse_database_switch(sql_file: &Path, compression: StreamCompression, target: &DatabaseName) -> PortResult<()> {
+    let head = compression::read_head(sql_file, compression, DUMP_HEAD_BYTES)?;
+    match find_database_switch(&head) {
+        None => Ok(()),
+        Some(switch) => Err(PortError::invalid_data(
+            sql_file.display().to_string(),
+            format!(
+                "line {} switches or creates a database (`{}`): MySQL would run the statements after it in the database it names, not in `{target}`, \
+                 possibly overwriting another database. Remove the USE / CREATE DATABASE statements (or export without `mysqldump --databases`), \
+                 or import anyway with --allow-use if that is intended",
+                switch.line, switch.statement
+            ),
+        )),
+    }
+}
+
 fn partial_path(sql_file: &Path) -> PathBuf {
     let mut p = sql_file.as_os_str().to_owned();
     p.push(".partial");
@@ -128,16 +147,21 @@ impl DatabaseAdmin for MysqlCliAdmin {
         self.execute_ok(endpoint, &format!("DROP DATABASE IF EXISTS {}", quote_ident(name))).await.map(drop)
     }
 
-    async fn import(&self, endpoint: &MysqlEndpoint, name: &DatabaseName, sql_file: &Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
+    async fn import(&self, endpoint: &MysqlEndpoint, name: &DatabaseName, sql_file: &Path, options: DumpImportOptions, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
         let total = std::fs::metadata(sql_file).map_err(|_| PortError::not_found("file", sql_file.display().to_string()))?.len();
-        // Checked before touching the server: a bad archive fails without creating the database.
+        // Checked before touching the server: a bad archive or a dump that would write elsewhere
+        // fails without creating the database.
         let stdin_compression = compression::detect_input(sql_file)?;
+        if !options.allow_database_switch {
+            refuse_database_switch(sql_file, stdin_compression, name)?;
+        }
         cancel.check()?;
         self.execute_ok(endpoint, &format!("CREATE DATABASE IF NOT EXISTS {} CHARACTER SET utf8mb4", quote_ident(name))).await?;
         let command = PipedCommand { stages: vec![restore_spec(endpoint, name)?], stdin_file: Some(sql_file.to_path_buf()), stdin_compression, ..Default::default() };
         let on_bytes = reporter(progress, Some(total), format!("import {name}"));
-        let outputs = self.pipes.run_piped(command, &on_bytes, cancel, TRANSFER_TIMEOUT).await?;
-        ensure_ok("mysql", &outputs)
+        // From here on statements may already have run: whatever stops the import leaves them.
+        let outputs = self.pipes.run_piped(command, &on_bytes, cancel, TRANSFER_TIMEOUT).await.map_err(PortError::interrupted)?;
+        ensure_ok("mysql", &outputs).map_err(PortError::interrupted)
     }
 
     async fn export(&self, endpoint: &MysqlEndpoint, name: &DatabaseName, sql_file: &Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
@@ -190,6 +214,8 @@ mod tests {
         /// `(stdin_compression, stdout_compression)` of every piped command.
         compressions: Mutex<Vec<(StreamCompression, StreamCompression)>>,
         reply: Mutex<Vec<CommandOutput>>,
+        /// Returned by the next piped command after recording it (a cancellation mid-stream).
+        pipe_error: Mutex<Option<PortError>>,
     }
 
     impl FakeRunner {
@@ -216,6 +242,9 @@ mod tests {
             }
             self.compressions.lock().unwrap().push((command.stdin_compression, command.stdout_compression));
             self.calls.lock().unwrap().push(command.stages);
+            if let Some(error) = self.pipe_error.lock().unwrap().take() {
+                return Err(error);
+            }
             Ok((0..n).map(|_| self.next()).collect())
         }
     }
@@ -320,7 +349,7 @@ mod tests {
         let gz = dir.path().join("dump.sql.gz");
         std::fs::write(&gz, gzipped(b"SELECT 1;")).unwrap();
         for file in [&plain, &gz] {
-            admin.import(&endpoint(dir.path()), &name, file, &NullProgressSink, &CancelFlag::new()).await.unwrap();
+            admin.import(&endpoint(dir.path()), &name, file, DumpImportOptions::default(), &NullProgressSink, &CancelFlag::new()).await.unwrap();
         }
         let compressions = fake.compressions.lock().unwrap();
         assert_eq!(*compressions, [(StreamCompression::None, StreamCompression::None), (StreamCompression::Gzip, StreamCompression::None)]);
@@ -339,9 +368,70 @@ mod tests {
             w.start_file(entry, zip::write::SimpleFileOptions::default()).unwrap();
         }
         w.finish().unwrap();
-        let err = admin.import(&endpoint(dir.path()), &DatabaseName::new("shop").unwrap(), &zip_path, &NullProgressSink, &CancelFlag::new()).await.unwrap_err();
+        let err = admin.import(&endpoint(dir.path()), &DatabaseName::new("shop").unwrap(), &zip_path, DumpImportOptions::default(), &NullProgressSink, &CancelFlag::new()).await.unwrap_err();
         assert!(matches!(&err, PortError::InvalidData { message, .. } if message.contains("2 .sql files")), "{err}");
         assert!(fake.calls.lock().unwrap().is_empty(), "no CREATE DATABASE, no mysql");
+    }
+
+    const MULTI_DATABASE_DUMP: &[u8] = b"-- MySQL dump 10.13\n\nCREATE DATABASE /*!32312 IF NOT EXISTS*/ `other_db`;\n\nUSE `other_db`;\nCREATE TABLE t (id INT);\n";
+
+    #[tokio::test]
+    async fn import_refuses_a_dump_that_switches_database_before_touching_the_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(FakeRunner::default());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let name = DatabaseName::new("shop").unwrap();
+        let plain = dir.path().join("all.sql");
+        std::fs::write(&plain, b"-- dump\nUSE `other_db`;\nDROP TABLE IF EXISTS users;\n").unwrap();
+        let gz = dir.path().join("all.sql.gz");
+        std::fs::write(&gz, gzipped(MULTI_DATABASE_DUMP)).unwrap();
+        for (file, line, statement) in [(&plain, 2, "USE `other_db`;"), (&gz, 3, "CREATE DATABASE /*!32312 IF NOT EXISTS*/ `other_db`;")] {
+            let err = admin.import(&endpoint(dir.path()), &name, file, DumpImportOptions::default(), &NullProgressSink, &CancelFlag::new()).await.unwrap_err();
+            let PortError::InvalidData { message, .. } = &err else { panic!("{err}") };
+            assert!(message.contains(&format!("line {line} switches or creates a database (`{statement}`)")), "{message}");
+            assert!(message.contains("not in `shop`") && message.contains("--allow-use"), "{message}");
+        }
+        assert!(fake.calls.lock().unwrap().is_empty(), "no CREATE DATABASE, no mysql");
+    }
+
+    #[tokio::test]
+    async fn import_runs_a_dump_that_switches_database_when_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(FakeRunner::default());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let file = dir.path().join("all.sql");
+        std::fs::write(&file, MULTI_DATABASE_DUMP).unwrap();
+        let allow = DumpImportOptions { allow_database_switch: true };
+        admin.import(&endpoint(dir.path()), &DatabaseName::new("shop").unwrap(), &file, allow, &NullProgressSink, &CancelFlag::new()).await.unwrap();
+        assert_eq!(fake.calls.lock().unwrap().len(), 2, "CREATE DATABASE, then the restore");
+    }
+
+    #[tokio::test]
+    async fn an_import_stopped_mid_stream_is_reported_as_interrupted() {
+        let dir = tempfile::tempdir().unwrap();
+        let fake = Arc::new(FakeRunner::default());
+        let admin = MysqlCliAdmin::new(fake.clone(), fake.clone());
+        let (ep, name, file) = (endpoint(dir.path()), DatabaseName::new("shop").unwrap(), dir.path().join("dump.sql"));
+        std::fs::write(&file, b"SELECT 1;").unwrap();
+        let import = |cancel: CancelFlag| {
+            let (admin, ep, name, file) = (&admin, &ep, &name, &file);
+            async move { admin.import(ep, name, file, DumpImportOptions::default(), &NullProgressSink, &cancel).await.unwrap_err() }
+        };
+
+        *fake.pipe_error.lock().unwrap() = Some(PortError::Cancelled);
+        assert_eq!(import(CancelFlag::new()).await, PortError::Interrupted(Box::new(PortError::Cancelled)));
+
+        // Replies are popped from the end: restore fails, CREATE DATABASE ok.
+        fake.reply.lock().unwrap().extend([
+            CommandOutput { exit_code: Some(1), stdout: String::new(), stderr: "ERROR 1064 at line 1".into() },
+            CommandOutput { exit_code: Some(0), stdout: String::new(), stderr: String::new() },
+        ]);
+        let err = import(CancelFlag::new()).await;
+        assert!(matches!(&err, PortError::Interrupted(cause) if cause.to_string().contains("ERROR 1064")), "{err}");
+
+        let cancelled = CancelFlag::new();
+        cancelled.cancel();
+        assert_eq!(import(cancelled).await, PortError::Cancelled, "cancelled before reaching the server: nothing was written");
     }
 
     #[tokio::test]

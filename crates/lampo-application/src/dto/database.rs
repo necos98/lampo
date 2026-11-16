@@ -50,6 +50,21 @@ pub struct DatabaseFileRequest {
     pub file: String,
 }
 
+/// `lampo db import`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseImportRequest {
+    pub site: String,
+    /// Default: the site's database.
+    pub name: Option<String>,
+    /// SQL dump to read (`.sql`, `.sql.gz`, `.zip`).
+    pub file: String,
+    /// Import even a dump with `USE` / `CREATE DATABASE` statements, which make it write
+    /// outside `name` (`--allow-use`). Absent (older clients) = refused.
+    #[serde(default)]
+    pub allow_database_switch: bool,
+}
+
 /// What happened to a new project's database (`CreateProjectResultDto::database_setup`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

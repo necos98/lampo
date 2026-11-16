@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use lampo_domain::mysql::{DatabaseName, MysqlSeries};
-use lampo_domain::ports::{DatabaseAdmin, MysqlEndpoint, NullEventPublisher, NullProgressSink, ServiceRunner};
+use lampo_domain::ports::{DatabaseAdmin, DumpImportOptions, MysqlEndpoint, NullEventPublisher, NullProgressSink, ServiceRunner};
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::service::{ServiceLaunch, ServiceState};
 use lampo_infra_services::{JobObjectSupervisor, MysqlCliAdmin, MysqlRunner};
@@ -80,7 +80,7 @@ async fn mysql_end_to_end() {
         }
     }
     let t = Instant::now();
-    admin.import(&endpoint, &shop, &sql, &NullProgressSink, &CancelFlag::new()).await.unwrap();
+    admin.import(&endpoint, &shop, &sql, DumpImportOptions::default(), &NullProgressSink, &CancelFlag::new()).await.unwrap();
     println!("imported {} bytes in {:?}", std::fs::metadata(&sql).unwrap().len(), t.elapsed());
 
     let dump = root.path().join("dump.sql");

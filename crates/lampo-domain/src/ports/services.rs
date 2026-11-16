@@ -187,6 +187,14 @@ pub struct MysqlEndpoint {
     pub user: String,
 }
 
+/// How [`DatabaseAdmin::import`] treats a dump. The default is the safe one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DumpImportOptions {
+    /// Import even when the dump has `USE` / `CREATE DATABASE` statements: its statements may
+    /// then run in (and create) databases other than the target.
+    pub allow_database_switch: bool,
+}
+
 /// Database administration on a running instance (via the MySQL command-line clients).
 #[async_trait]
 pub trait DatabaseAdmin: Send + Sync {
@@ -198,7 +206,14 @@ pub trait DatabaseAdmin: Send + Sync {
     async fn drop_database(&self, endpoint: &MysqlEndpoint, name: &DatabaseName) -> PortResult<()>;
     /// Runs an SQL dump file into `name` (created if missing): plain SQL, gzip (`.sql.gz`) or a
     /// zip holding exactly one `.sql` file, streamed. Reports bytes of the file read.
-    async fn import(&self, endpoint: &MysqlEndpoint, name: &DatabaseName, sql_file: &Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()>;
+    ///
+    /// Before touching the server, a dump whose head ([`crate::sql_dump::DUMP_HEAD_BYTES`])
+    /// switches or creates a database is refused with `InvalidData` unless `options` allows it.
+    /// A failure or cancellation once statements may have run is [`PortError::Interrupted`]:
+    /// `name` may be left incomplete.
+    ///
+    /// [`PortError::Interrupted`]: crate::PortError::Interrupted
+    async fn import(&self, endpoint: &MysqlEndpoint, name: &DatabaseName, sql_file: &Path, options: DumpImportOptions, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()>;
     /// Dumps `name` to `sql_file` (`--single-transaction --routines --triggers`), gzipped when
     /// its name ends in `.gz`.
     async fn export(&self, endpoint: &MysqlEndpoint, name: &DatabaseName, sql_file: &Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()>;

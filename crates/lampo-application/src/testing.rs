@@ -511,6 +511,8 @@ pub struct FakeDb {
     pub hold_import: AtomicBool,
     pub import_started: tokio::sync::Notify,
     pub import_resumed: tokio::sync::Notify,
+    /// Returned by the next `import`, once it reached the server.
+    pub import_error: Mutex<Option<PortError>>,
 }
 impl FakeDb {
     pub fn has(&self, name: &str) -> bool {
@@ -544,15 +546,16 @@ impl DatabaseAdmin for FakeDb {
         lock(&self.dbs).remove(name.as_str());
         Ok(())
     }
-    async fn import(&self, _e: &MysqlEndpoint, name: &DatabaseName, file: &Path, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
+    async fn import(&self, _e: &MysqlEndpoint, name: &DatabaseName, file: &Path, options: DumpImportOptions, progress: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
         if self.hold_import.load(Ordering::SeqCst) {
             self.import_started.notify_one();
             self.import_resumed.notified().await;
         }
         cancel.check()?;
         progress.report(Progress::new(ProgressStage::Configuring, 1, Some(1)));
-        lock(&self.calls).push(format!("import:{name}:{}", file.display()));
-        Ok(())
+        let allowed = if options.allow_database_switch { ":allow-use" } else { "" };
+        lock(&self.calls).push(format!("import:{name}:{}{allowed}", file.display()));
+        lock(&self.import_error).take().map_or(Ok(()), Err)
     }
     async fn export(&self, _e: &MysqlEndpoint, name: &DatabaseName, file: &Path, _p: &dyn ProgressSink, cancel: &CancelFlag) -> PortResult<()> {
         cancel.check()?;

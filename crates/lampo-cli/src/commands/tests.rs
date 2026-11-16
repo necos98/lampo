@@ -299,6 +299,7 @@ async fn db_commands_target_the_resolved_site_and_absolute_files() {
     assert_eq!(code, 0);
     let (ControlRequest::DbImport(r), _) = fake.last_request() else { panic!("wrong request") };
     assert_eq!((r.site.as_str(), r.name.as_deref(), r.file.as_str()), ("shop", Some("other"), r"C:\work\shop\dump.sql"));
+    assert!(!r.allow_database_switch, "a dump with USE / CREATE DATABASE is refused unless asked");
 
     fake.resolves_to(None);
     let (code, _, _) = run_cli(&fake, &["db", "list"]).await;
@@ -320,6 +321,12 @@ async fn db_import_and_export_pass_compressed_files_through() {
     assert_eq!(code, 0);
     let (ControlRequest::DbExport(r), _) = fake.last_request() else { panic!("wrong request") };
     assert_eq!((r.name.as_deref(), r.file.as_str()), (Some("shop"), r"C:\work\shop\backup.sql.gz"));
+
+    fake.reply(Ok(Value::Null));
+    let (code, _, _) = run_cli(&fake, &["db", "import", "all.sql", "--allow-use"]).await;
+    assert_eq!(code, 0);
+    let (ControlRequest::DbImport(r), _) = fake.last_request() else { panic!("wrong request") };
+    assert!(r.allow_database_switch, "--allow-use");
 
     fake.reply(Err(AppError::new(ErrorCode::Validation, "invalid data in two.zip: the zip archive contains 2 .sql files (a.sql, b.sql)")));
     let (code, out, _) = run_cli(&fake, &["db", "import", "two.zip", "--json"]).await;

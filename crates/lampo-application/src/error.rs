@@ -118,6 +118,8 @@ impl From<PortError> for AppError {
             PortError::ElevationDenied => Self::new(ErrorCode::ElevationDenied, message),
             PortError::Cancelled => Self::new(ErrorCode::Cancelled, message),
             PortError::Unsupported(_) => Self::new(ErrorCode::Unsupported, message),
+            // Same category as the cause (a cancellation stays `cancelled`), told it was partial.
+            PortError::Interrupted(cause) => Self { message, ..Self::from(*cause) },
         }
     }
 }
@@ -140,6 +142,15 @@ mod tests {
         assert_eq!(e.code, ErrorCode::Conflict);
         let e: AppError = PortError::not_found("app", "pipe").into();
         assert_eq!(e.code, ErrorCode::AppUnavailable);
+    }
+
+    #[test]
+    fn an_interrupted_error_keeps_the_category_of_its_cause() {
+        let e: AppError = PortError::Cancelled.interrupted().into();
+        assert_eq!(e.code, ErrorCode::Cancelled);
+        assert!(e.message.contains("stopped part-way"), "{}", e.message);
+        let e: AppError = PortError::process("mysql", "ERROR 1064").interrupted().into();
+        assert_eq!(e.code, ErrorCode::ProcessFailed);
     }
 
     #[test]

@@ -144,6 +144,18 @@ compressors (`.bz2`, `.xz`, `.zst`, `.7z`, `.rar`) are refused: extract the `.sq
 (`tar -xf` handles `.tar.gz`). A corrupt or truncated archive stops the import with exit 4
 (`corrupt or truncated gzip data`).
 
+A dump whose first 64 KB contain `USE` or `CREATE DATABASE` (made with `mysqldump --databases`
+or `--all-databases`) is refused with exit 4 (`switches or creates a database`) before anything
+is written: its statements would run in the database it names, not in the target. Tell the
+user which line was found and which database it names; prefer removing those statements (or a
+new export without `--databases`). Add `--allow-use` only when the user confirms that writing
+to that database is intended.
+
+An import that fails or is cancelled part-way leaves what already ran: the error says the
+database `may now be incomplete`. Report it, never retry on your own; with the user's
+confirmation, drop the database (`lampo db drop <name> --yes`) and import again, or import the
+backup exported before.
+
 Dump caveats:
 
 - A dump made with `--databases` / `--all-databases` contains `CREATE DATABASE` and `USE`

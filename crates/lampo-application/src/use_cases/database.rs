@@ -2,7 +2,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use lampo_domain::mysql::DatabaseName;
-use lampo_domain::ports::{DatabaseAdmin, InstalledPackageRegistry, MysqlEndpoint, ProgressSink, ProjectRepository, SettingsRepository, WorktreeRepository};
+use lampo_domain::ports::{DatabaseAdmin, DumpImportOptions, InstalledPackageRegistry, MysqlEndpoint, ProgressSink, ProjectRepository, SettingsRepository, WorktreeRepository};
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::project::Project;
 use lampo_domain::PortError;
@@ -138,12 +138,18 @@ impl DatabaseService {
         Ok(name.to_string())
     }
 
-    pub async fn import(&self, request: &DatabaseFileRequest, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<()> {
+    /// A dump that switches database is refused unless `allow_database_switch`. A failed or
+    /// cancelled import that already ran statements says the database may be incomplete.
+    pub async fn import(&self, request: &DatabaseImportRequest, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<()> {
         let file = Self::file(&request.file)?;
         let target = self.target(&request.site).await?;
         let name = Self::name_or_default(request.name.as_deref(), &target)?;
         cancel.check()?;
-        Ok(self.admin.import(&target.endpoint, &name, file, progress, cancel).await?)
+        let options = DumpImportOptions { allow_database_switch: request.allow_database_switch };
+        self.admin.import(&target.endpoint, &name, file, options, progress, cancel).await.map_err(|e| match e {
+            PortError::Interrupted(cause) => incomplete_import(&name, *cause),
+            e => e.into(),
+        })
     }
 
     pub async fn export(&self, request: &DatabaseFileRequest, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<()> {
@@ -153,4 +159,16 @@ impl DatabaseService {
         cancel.check()?;
         Ok(self.admin.export(&target.endpoint, &name, file, progress, cancel).await?)
     }
+}
+
+/// The error of an import that stopped part-way (same category as `cause`), telling that `name`
+/// may be incomplete and how to get back to a consistent state.
+fn incomplete_import(name: &DatabaseName, cause: PortError) -> AppError {
+    let error = AppError::from(cause);
+    let message = format!(
+        "{}. The import stopped part-way: the database `{name}` may now be incomplete (the statements that already ran were kept). \
+         To restore it, drop it (`lampo db drop {name} --yes`) and import the dump again, or import a backup of it.",
+        error.message
+    );
+    AppError { message, ..error }
 }

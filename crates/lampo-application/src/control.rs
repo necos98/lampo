@@ -92,7 +92,7 @@ pub enum ControlRequest {
     /// → `string` (database name)
     DbDrop(DatabaseRequest),
     /// → `null` (progress frames)
-    DbImport(DatabaseFileRequest),
+    DbImport(DatabaseImportRequest),
     /// → `null` (progress frames)
     DbExport(DatabaseFileRequest),
     /// → [`WorktreeUpResultDto`] (progress frames when cloning a database)

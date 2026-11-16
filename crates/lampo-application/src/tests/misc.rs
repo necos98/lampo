@@ -14,6 +14,7 @@ use lampo_domain::progress::CancelFlag;
 use lampo_domain::project::{ProjectId, ProjectRoot};
 use lampo_domain::service::{ServiceId, ServiceState};
 use lampo_domain::worktree::{DatabaseMode, Occupancy, WorktreeEnvironment};
+use lampo_domain::PortError;
 
 use super::{cli, gui};
 use crate::control::*;
@@ -313,8 +314,10 @@ async fn database_operations_target_the_sites_instance() {
     assert_eq!(db.list(&DatabaseListRequest { site: "ghost".into() }).await.unwrap_err().code, ErrorCode::NotFound);
 
     let progress = RecordingProgress::default();
-    db.import(&DatabaseFileRequest { site: "shop".into(), name: None, file: "D:\\dump.sql".into() }, &progress, &CancelFlag::new()).await.unwrap();
-    assert!(w.db.calls().contains(&"import:shop:D:\\dump.sql".to_string()));
+    db.import(&import_request(None, false), &progress, &CancelFlag::new()).await.unwrap();
+    assert!(w.db.calls().contains(&"import:shop:D:\\dump.sql".to_string()), "a database switch is refused by default");
+    db.import(&import_request(Some("shop"), true), &progress, &CancelFlag::new()).await.unwrap();
+    assert!(w.db.calls().contains(&"import:shop:D:\\dump.sql:allow-use".to_string()), "--allow-use reaches the adapter");
     assert!(!progress.0.lock().unwrap().is_empty());
     let cancel = CancelFlag::new();
     cancel.cancel();
@@ -335,10 +338,39 @@ async fn database_operations_refuse_system_schemas_before_reaching_the_server() 
         assert_eq!(err.code, ErrorCode::Validation, "drop {name}");
         assert!(err.message.contains("system schema"), "{}", err.message);
         assert_eq!(db.create(&request).await.unwrap_err().code, ErrorCode::Validation, "create {name}");
-        let file_request = DatabaseFileRequest { site: "shop".into(), name: Some(name.into()), file: "D:\\dump.sql".into() };
-        assert_eq!(db.import(&file_request, &progress, &CancelFlag::new()).await.unwrap_err().code, ErrorCode::Validation, "import {name}");
+        assert_eq!(db.import(&import_request(Some(name), false), &progress, &CancelFlag::new()).await.unwrap_err().code, ErrorCode::Validation, "import {name}");
     }
     assert!(w.db.calls().is_empty(), "nothing reached the server: {:?}", w.db.calls());
+}
+
+/// Imports `D:\dump.sql` into `name` (default: the site's database) of the site `shop`.
+fn import_request(name: Option<&str>, allow_database_switch: bool) -> DatabaseImportRequest {
+    DatabaseImportRequest { site: "shop".into(), name: name.map(String::from), file: "D:\\dump.sql".into(), allow_database_switch }
+}
+
+#[tokio::test]
+async fn an_interrupted_import_says_the_database_may_be_incomplete_and_how_to_restore_it() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", false);
+    let db = w.database_service();
+    let progress = RecordingProgress::default();
+
+    *w.db.import_error.lock().unwrap() = Some(PortError::Cancelled.interrupted());
+    let err = db.import(&import_request(None, false), &progress, &CancelFlag::new()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Cancelled, "still a cancellation");
+    assert!(err.message.starts_with("operation cancelled. The import stopped part-way: the database `shop` may now be incomplete"), "{}", err.message);
+    assert!(err.message.contains("`lampo db drop shop --yes`") && err.message.contains("import the dump again"), "{}", err.message);
+
+    *w.db.import_error.lock().unwrap() = Some(PortError::process("mysql", "ERROR 1064 at line 7").interrupted());
+    let err = db.import(&import_request(Some("shop_copy"), false), &progress, &CancelFlag::new()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::ProcessFailed);
+    assert!(err.message.contains("ERROR 1064 at line 7") && err.message.contains("`shop_copy` may now be incomplete"), "{}", err.message);
+
+    // Refused before reaching the server: nothing was written, no restore advice.
+    *w.db.import_error.lock().unwrap() = Some(PortError::invalid_data("all.sql", "line 2 switches or creates a database"));
+    let err = db.import(&import_request(None, false), &progress, &CancelFlag::new()).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::Validation);
+    assert!(!err.message.contains("incomplete"), "{}", err.message);
 }
 
 // --- shims -----------------------------------------------------------------------------------

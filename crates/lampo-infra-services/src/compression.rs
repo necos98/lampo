@@ -146,6 +146,19 @@ pub(crate) fn decode(path: &Path, compression: StreamCompression, position: &Arc
     }
 }
 
+/// The first `limit` bytes of the decompressed content of `path` (fewer if it is shorter), for
+/// inspecting a dump before importing it (blocking; reads only as much as needed).
+pub fn read_head(path: &Path, compression: StreamCompression, limit: usize) -> PortResult<Vec<u8>> {
+    let mut head = Vec::with_capacity(limit.min(CHUNK));
+    decode(path, compression, &Arc::new(AtomicU64::new(0)), |chunk| {
+        head.extend_from_slice(&chunk);
+        head.len() < limit
+    })
+    .map_err(|message| PortError::invalid_data(display_name(path), message))?;
+    head.truncate(limit);
+    Ok(head)
+}
+
 fn label(compression: StreamCompression) -> &'static str {
     match compression {
         StreamCompression::None => "dump",
@@ -314,6 +327,20 @@ mod tests {
             false
         });
         assert_eq!((result, chunks), (Ok(()), 1));
+    }
+
+    #[test]
+    fn read_head_returns_the_decompressed_start_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let big: Vec<u8> = (0..CHUNK * 3).map(|i| b'a' + (i % 26) as u8).collect();
+        let gz = write(dir.path(), "big.sql.gz", &gzip(&big));
+        assert_eq!(read_head(&gz, StreamCompression::Gzip, CHUNK + 10).unwrap(), &big[..CHUNK + 10]);
+        let zip = zip_file(dir.path(), "dump.zip", &[("shop.sql", SQL.as_bytes())]);
+        assert_eq!(read_head(&zip, StreamCompression::Zip, 1024).unwrap(), SQL.as_bytes(), "shorter than the limit");
+        let plain = write(dir.path(), "dump.sql", SQL.as_bytes());
+        assert_eq!(read_head(&plain, StreamCompression::None, 6).unwrap(), b"CREATE");
+        let cut = write(dir.path(), "cut.sql.gz", &gzip(&big)[..20]);
+        assert!(matches!(read_head(&cut, StreamCompression::Gzip, CHUNK), Err(PortError::InvalidData { .. })));
     }
 
     #[test]

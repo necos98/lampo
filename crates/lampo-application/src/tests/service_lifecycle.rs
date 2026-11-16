@@ -11,7 +11,7 @@ use lampo_domain::progress::CancelFlag;
 use lampo_domain::service::{ServiceId, ServiceState};
 
 use super::{cli, gui};
-use crate::dto::{DatabaseFileRequest, ServicesRequest};
+use crate::dto::{DatabaseImportRequest, ServicesRequest};
 use crate::error::ErrorCode;
 use crate::testing::{RecordingProgress, World};
 use crate::use_cases::{EnvironmentSync, ServiceEnsurer};
@@ -88,7 +88,7 @@ async fn a_sync_during_an_import_never_restarts_its_mysql_and_restarts_it_afterw
     w.db.hold_import.store(true, Ordering::SeqCst);
     let db = w.database_service();
     let (progress, cancel) = (RecordingProgress::default(), CancelFlag::new());
-    let request = DatabaseFileRequest { site: "shop".into(), name: None, file: "D:\\dump.sql".into() };
+    let request = DatabaseImportRequest { site: "shop".into(), name: None, file: "D:\\dump.sql".into(), allow_database_switch: false };
 
     let during_import = async {
         w.db.import_started.notified().await;

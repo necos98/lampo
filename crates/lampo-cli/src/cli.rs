@@ -568,11 +568,19 @@ pub enum DbCommand {
     /// Plain `.sql`, gzip (`.sql.gz`, `.gz`) or a `.zip` holding exactly one `.sql` file, detected
     /// from the content and decompressed on the fly (never extracted to disk). Progress counts
     /// the bytes of the file as given.
+    ///
+    /// A dump whose first 64 KB contain `USE` or `CREATE DATABASE` (`mysqldump --databases`) is
+    /// refused: its statements would run in the database it names, not in the target. If the
+    /// import fails or is cancelled part-way, the target may be left incomplete.
     Import {
         /// `.sql`, `.sql.gz` or `.zip` file.
         file: String,
         /// Target database.
         name: Option<String>,
+        /// Import even a dump with `USE` / `CREATE DATABASE` statements (it may write to other
+        /// databases than the target).
+        #[arg(long)]
+        allow_use: bool,
     },
     /// Export a database to an SQL file (default database: the site's).
     ///

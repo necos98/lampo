@@ -40,10 +40,11 @@ pub async fn run(c: &Cmd<'_>, command: DbCommand) -> AppResult<i32> {
             let dropped: String = c.app(ControlRequest::DbDrop(DatabaseRequest { site: site.clone(), name: Some(name) })).await?;
             report(c, DatabaseActionDto { site, action: "dropped", database: Some(dropped), file: None });
         }
-        DbCommand::Import { file, name } => {
+        DbCommand::Import { file, name, allow_use } => {
             let site = c.site_id()?;
             let file = c.ctx.env.absolute(&file);
-            let _: serde_json::Value = c.app(ControlRequest::DbImport(DatabaseFileRequest { site: site.clone(), name: name.clone(), file: file.clone() })).await?;
+            let request = DatabaseImportRequest { site: site.clone(), name: name.clone(), file: file.clone(), allow_database_switch: allow_use };
+            let _: serde_json::Value = c.app(ControlRequest::DbImport(request)).await?;
             report(c, DatabaseActionDto { site, action: "imported", database: name, file: Some(file) });
         }
         DbCommand::Export { file, name } => {

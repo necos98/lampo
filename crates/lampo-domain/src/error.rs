@@ -123,6 +123,10 @@ pub enum PortError {
     Cancelled,
     #[error("unsupported: {0}")]
     Unsupported(String),
+    /// The operation failed (or was cancelled) after it had started changing state: what it
+    /// already wrote was kept. The inner error says why it stopped.
+    #[error("{0} (stopped part-way: the changes already made were kept)")]
+    Interrupted(Box<PortError>),
     #[error(transparent)]
     Domain(#[from] DomainError),
 }
@@ -144,6 +148,14 @@ impl PortError {
     pub fn process(program: impl Into<String>, message: impl Display) -> Self {
         Self::Process { program: program.into(), message: message.to_string() }
     }
+
+    /// Marks `self` as having happened part-way through a state change ([`Self::Interrupted`]).
+    pub fn interrupted(self) -> Self {
+        match self {
+            already @ Self::Interrupted(_) => already,
+            cause => Self::Interrupted(Box::new(cause)),
+        }
+    }
 }
 
 /// Result type returned by every port method.
@@ -159,6 +171,13 @@ mod tests {
         assert_eq!(e.to_string(), "port 80 is already in use by skype.exe (pid 42)");
         let e = PortError::PortInUse { port: 80, owner: None };
         assert_eq!(e.to_string(), "port 80 is already in use");
+    }
+
+    #[test]
+    fn interrupted_wraps_its_cause_once() {
+        let e = PortError::Cancelled.interrupted().interrupted();
+        assert_eq!(e, PortError::Interrupted(Box::new(PortError::Cancelled)));
+        assert_eq!(e.to_string(), "operation cancelled (stopped part-way: the changes already made were kept)");
     }
 
     #[test]
