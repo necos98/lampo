@@ -129,10 +129,15 @@ pub trait PackageInstallHook: Send + Sync {
 }
 
 /// Lists the extensions an installed PHP build ships as loadable modules (`ext\php_<name>.dll`),
-/// so front-ends offer exactly what that PHP minor can load.
+/// so front-ends offer exactly what that PHP minor can load, and the modules compiled into it
+/// (`bcmath`, `ctype`…), which need no php.ini line.
 pub trait PhpExtensionScanner: Send + Sync {
     /// Extension names, sorted. Empty if the folder has no `ext` dir.
     fn bundled_extensions(&self, php_dir: &Path) -> PortResult<Vec<crate::php::ExtensionName>>;
+
+    /// The modules compiled into the build of `php_dir` (what its `php -n -m` lists), sorted.
+    /// It asks the build itself, so adapters cache the answer per build.
+    fn builtin_extensions(&self, php_dir: &Path) -> PortResult<Vec<crate::php::ExtensionName>>;
 }
 
 /// Reads which Visual C++ runtimes are installed (registry). Whether they are sufficient is

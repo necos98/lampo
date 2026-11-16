@@ -145,6 +145,9 @@ pub fn project(p: &ProjectDto) -> String {
             out.push_str(&format!("    {}  {}{}\n", w.site, w.url, if w.stale { "  (stale)" } else { "" }));
         }
     }
+    for notice in &p.notices {
+        out.push_str(&format!("  note:      {notice}\n"));
+    }
     out
 }
 

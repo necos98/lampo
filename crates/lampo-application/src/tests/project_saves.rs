@@ -108,9 +108,10 @@ async fn a_php_switch_rechecks_the_add_ons_but_not_the_bundled_extensions() {
     w.installed.add(PackageKind::XDEBUG, "3.3.2", Some("8.3"));
     w.update_project("shop", |p| {
         p.environment.addons.insert(PackageKind::XDEBUG);
-        // Named as PHP 7.x builds ship GD: a build without it comments the line out, so it never
-        // blocks a switch.
+        // Named as PHP 7.x builds ship GD: the switch renames it. `imap` is not in the new build:
+        // its line is commented out, so it never blocks a switch.
         p.environment.extensions.insert(lampo_domain::php::ExtensionName::new("gd2").unwrap());
+        p.environment.extensions.insert(lampo_domain::php::ExtensionName::new("imap").unwrap());
     });
     w.hosts_in_sync();
     let before = w.projects.list().unwrap();
@@ -123,7 +124,7 @@ async fn a_php_switch_rechecks_the_add_ons_but_not_the_bundled_extensions() {
 
     w.installed.add(PackageKind::XDEBUG, "3.3.2", Some("8.4"));
     let dto = set_php.execute(SetProjectPhpRequest { project_id: "shop".into(), php_version: "8.4".into() }, &cli()).await.unwrap();
-    assert_eq!((dto.environment.php_version.as_str(), dto.environment.extensions.as_slice()), ("8.4", ["gd2".to_string()].as_slice()));
+    assert_eq!((dto.environment.php_version.as_str(), dto.environment.extensions.as_slice()), ("8.4", ["gd".to_string(), "imap".to_string()].as_slice()));
 }
 
 /// `lampo project set --php` switches the minor in the same atomic patch as the other flags,

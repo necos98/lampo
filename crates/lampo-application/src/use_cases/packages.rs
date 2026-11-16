@@ -7,14 +7,15 @@ use lampo_domain::package::{CatalogEntry, InstalledPackage, MergedCatalog, Packa
 use lampo_domain::paths::LampoPaths;
 use lampo_domain::php::PhpMinor;
 use lampo_domain::ports::{
-    ArchiveExtractor, EventPublisher, InstalledPackageRegistry, PackageCatalogSource, PackageDownloader, PackageInstallHook, PackageSlotLock, PhpExtensionScanner, ProgressSink,
-    ProjectRepository, SettingsRepository, SlotReplacement, VcRuntimeDetector, WorktreeRepository,
+    ArchiveExtractor, EventPublisher, InstalledPackageRegistry, PackageCatalogSource, PackageDownloader, PackageInstallHook, PackageSlotLock, ProgressSink, ProjectRepository,
+    SettingsRepository, SlotReplacement, VcRuntimeDetector, WorktreeRepository,
 };
 use lampo_domain::progress::{CancelFlag, Progress, ProgressStage};
 use lampo_domain::vc_runtime::InstalledVcRuntime;
 use lampo_domain::version::{PackageVersion, VersionSeries};
 
 use super::environment::EnvironmentSync;
+use super::php_extensions::PhpExtensionsQuery;
 use super::requirements::{requirements, used_by};
 use super::resolution::SiteResolver;
 use super::service_catalog::ServiceCatalog;
@@ -182,26 +183,6 @@ impl PackageCatalog {
                 })
             })
             .collect())
-    }
-}
-
-/// The extensions an installed PHP minor ships, for the project editor's checkboxes.
-pub struct PhpExtensionsQuery {
-    installed: Arc<dyn InstalledPackageRegistry>,
-    scanner: Arc<dyn PhpExtensionScanner>,
-}
-
-impl PhpExtensionsQuery {
-    pub fn new(installed: Arc<dyn InstalledPackageRegistry>, scanner: Arc<dyn PhpExtensionScanner>) -> Self {
-        Self { installed, scanner }
-    }
-
-    /// Extensions of the newest installed build of `php_version` (`"8.3"`), sorted.
-    /// `PackageMissing` if that minor is not installed.
-    pub fn list(&self, php_version: &str) -> AppResult<Vec<PhpExtensionDto>> {
-        let php = PhpMinor::parse(php_version.trim())?;
-        let dir = super::support::php_dir(&self.installed.list()?, php).ok_or_else(|| super::support::package_missing(format!("PHP {php}")))?;
-        Ok(self.scanner.bundled_extensions(&dir)?.into_iter().map(|name| PhpExtensionDto { zend: lampo_domain::web::is_zend_extension(&name), name: name.to_string() }).collect())
     }
 }
 

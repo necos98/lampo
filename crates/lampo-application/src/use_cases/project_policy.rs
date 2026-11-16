@@ -10,9 +10,11 @@
 //! Bundled extensions are the exception: a name is checked when a save adds it to an existing
 //! project (a mistyped `intll`), not for a new project nor on a PHP switch. A DLL the build lacks
 //! never breaks the site (its php.ini line is commented out and the sync reports it), while
-//! presets and exports are written for other builds and builds name some extensions differently
-//! across minors (GD is `gd2` before PHP 8.0): refusing those would block a legitimate create,
-//! import or PHP switch for nothing.
+//! presets and exports are written for other builds: refusing those would block a legitimate
+//! create, import or PHP switch for nothing. Names the builds changed across minors (GD is `gd2`
+//! before PHP 8.0) are not a problem at all: [`normalize_extensions`] stores them as the
+//! project's PHP names them, and a module compiled into the build (`bcmath`) is accepted with a
+//! notice ([`ProjectEnvironmentPolicy::notices`]) and left out of php.ini.
 //!
 //! [`ProjectWriter`]: super::project_writer::ProjectWriter
 
@@ -20,13 +22,13 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use lampo_domain::package::PackageKind;
-use lampo_domain::php::{ExtensionName, PhpMinor};
+use lampo_domain::php::{ExtensionName, PhpMinor, extensions_for_php};
 use lampo_domain::ports::InstalledPackageRegistry;
 use lampo_domain::project::ProjectEnvironment;
 use lampo_domain::service::ServiceId;
 use lampo_domain::settings::Settings;
 
-use super::packages::PhpExtensionsQuery;
+use super::php_extensions::PhpExtensionsQuery;
 use super::service_catalog::ServiceCatalog;
 use super::support::{newest_of, validation};
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -52,7 +54,8 @@ impl ProjectEnvironmentPolicy {
     /// is never saved again unfixed) and its service kinds and versions. For what it introduces:
     /// `Validation` for an instance the settings do not configure, `PackageMissing` for an add-on
     /// not installed for its PHP minor (a PHP switch re-checks every add-on). `Validation` for a
-    /// bundled extension added to an existing project that its PHP build does not ship.
+    /// bundled extension added to an existing project that its PHP build neither ships nor has
+    /// compiled in (a stored name renamed for a new PHP minor is not an addition).
     pub(crate) fn check(&self, stored: Option<&ProjectEnvironment>, candidate: &ProjectEnvironment, settings: &Settings) -> AppResult<()> {
         candidate.apache_directives.validate()?;
         self.services.validate_environment(candidate)?;
@@ -61,8 +64,22 @@ impl ProjectEnvironmentPolicy {
         let same_php = stored.filter(|s| s.php == candidate.php);
         self.check_addons(&introduced(&candidate.addons, same_php.map(|s| &s.addons)), candidate.php)?;
         match stored {
-            Some(stored) => self.check_bundled(&introduced(&candidate.extensions, Some(&stored.extensions)), candidate.php),
+            Some(stored) => self.check_bundled(&introduced(&candidate.extensions, Some(&extensions_for_php(&stored.extensions, candidate.php))), candidate.php),
             None => Ok(()),
+        }
+    }
+
+    /// What a saved `env` should be told: each extension it names that is compiled into its PHP
+    /// build, so nothing is enabled for it. Empty when the build cannot tell (PHP not installed).
+    pub(crate) fn notices(&self, env: &ProjectEnvironment) -> Vec<String> {
+        let names = extensions_for_php(&env.extensions, env.php);
+        match self.extensions.installed_build_extensions(env.php, &names) {
+            Ok(Some(build)) => build.compiled_in(&names).iter().map(|name| format!("{name} is built into PHP {}, nothing to enable", env.php)).collect(),
+            Ok(None) => Vec::new(),
+            Err(e) => {
+                tracing::warn!("cannot read the extensions of PHP {}: {}", env.php, e.message);
+                Vec::new()
+            }
         }
     }
 
@@ -86,23 +103,21 @@ impl ProjectEnvironmentPolicy {
         }
     }
 
-    /// Bundled extensions must exist in the project's PHP build (`ext\php_<name>.dll`). Skipped
-    /// when the build cannot be scanned (PHP not installed: the sync reports that).
+    /// Bundled extensions must exist in the project's PHP build, as a DLL (`ext\php_<name>.dll`)
+    /// or compiled in. Skipped when the build cannot be scanned (PHP not installed: the sync
+    /// reports that).
     fn check_bundled(&self, names: &BTreeSet<&ExtensionName>, php: PhpMinor) -> AppResult<()> {
         if names.is_empty() {
             return Ok(());
         }
-        let Ok(available) = self.extensions.list(&php.to_string()) else { return Ok(()) };
-        let unknown: Vec<&str> = names.iter().map(|n| n.as_str()).filter(|n| !available.iter().any(|a| a.name == *n)).collect();
+        let wanted: BTreeSet<ExtensionName> = names.iter().map(|n| (*n).clone()).collect();
+        let Ok(Some(build)) = self.extensions.installed_build_extensions(php, &wanted) else { return Ok(()) };
+        let unknown: Vec<String> = wanted.iter().filter(|n| !build.loadable.contains(n) && !build.builtin.contains(n)).map(|n| format!("`{n}`")).collect();
         if unknown.is_empty() {
             return Ok(());
         }
-        let list: Vec<&str> = available.iter().map(|a| a.name.as_str()).collect();
-        Err(validation(format!(
-            "PHP {php} has no bundled extension {} (available: {}); add-on packages such as xdebug go in `--addon`",
-            unknown.iter().map(|n| format!("`{n}`")).collect::<Vec<_>>().join(", "),
-            list.join(", ")
-        )))
+        let list: Vec<&str> = build.loadable.iter().map(ExtensionName::as_str).collect();
+        Err(validation(format!("PHP {php} has no bundled extension {} (available: {}); add-on packages such as xdebug go in `--addon`", unknown.join(", "), list.join(", "))))
     }
 }
 
@@ -112,6 +127,12 @@ pub(crate) fn require_mysql_for_database(env: &ProjectEnvironment) -> AppResult<
         Some(_) => Ok(()),
         None => Err(validation("the project uses no MySQL: add the MySQL service to set a database name")),
     }
+}
+
+/// Stores `env`'s extensions as its PHP builds name them (`gd` ↔ `gd2`), so a project switched to
+/// another minor keeps loading them. Every save runs it before the checks.
+pub(crate) fn normalize_extensions(env: &mut ProjectEnvironment) {
+    env.extensions = extensions_for_php(&env.extensions, env.php);
 }
 
 /// The items of `now` that `before` lacks (all of them without `before`).

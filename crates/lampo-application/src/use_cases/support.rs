@@ -233,6 +233,7 @@ pub(crate) fn project_dto(project: &Project, worktrees: &[WorktreeEnvironment], 
         active: project.active,
         origin_preset: project.origin_preset.as_ref().map(|p| p.to_string()),
         worktrees: worktrees.iter().filter(|w| w.parent == project.id).map(|w| worktree_dto(w, project, settings, fs)).collect(),
+        notices: Vec::new(),
     }
 }
 

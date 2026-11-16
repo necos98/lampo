@@ -9,6 +9,10 @@ use serde::{Deserialize, Serialize};
 use crate::error::DomainError;
 use crate::version::{PackageVersion, VersionSeries};
 
+mod extension_alias;
+
+pub use extension_alias::extensions_for_php;
+
 /// A PHP *minor* version (`8.3`). Projects bind to a minor, never to a patch,
 /// so a patch update is a one-click operation that does not touch any project.
 ///

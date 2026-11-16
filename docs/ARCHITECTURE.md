@@ -81,7 +81,11 @@ installed for the project's PHP, bundled extensions present in its `ext` dir, My
 configured in the settings, checked for what a save introduces (a PHP switch re-checks every
 add-on; a bundled extension is checked when added to an existing project, since a build
 without it only comments its php.ini line out), so a project left outdated by an uninstall can
-still be renamed or switched off. A database name without MySQL is refused, not dropped.
+still be renamed or switched off. Before the checks every save stores the extensions as the
+project's PHP names them (`gd` ↔ `gd2`, the domain's alias table in `php::extension_alias`), so a
+PHP switch renames them; one compiled into the build (`php -n -m`, cached per build by the
+scanner) is accepted, reported in the save's `notices` and gets no php.ini line. A database name
+without MySQL is refused, not dropped.
 `DeleteProject` removes the project first and then its worktree environments, inside the lock,
 so a concurrent edit never brings it back; it returns the worktree databases it leaves in MySQL
 (`orphanedDatabases`). `lampo worktree prune` removes what it can and reports the rest in

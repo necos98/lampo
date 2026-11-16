@@ -23,6 +23,7 @@ pub mod log_rotation;
 pub mod logs;
 pub mod package_uninstall;
 pub mod packages;
+pub mod php_extensions;
 pub mod presets;
 pub mod project_patch;
 pub mod project_policy;
@@ -62,7 +63,8 @@ pub use lifecycle::{FirstRunDeps, FirstRunSetup, Shutdown, ShutdownGate, Startup
 pub use log_rotation::PeriodicLogRotation;
 pub use logs::LogQueries;
 pub use package_uninstall::{UninstallPackage, UninstallPackageDeps};
-pub use packages::{InstallPackage, InstallPackageDeps, PackageCatalog, PackageCatalogDeps, PhpExtensionListing, PhpExtensionsQuery};
+pub use packages::{InstallPackage, InstallPackageDeps, PackageCatalog, PackageCatalogDeps, PhpExtensionListing};
+pub use php_extensions::PhpExtensionsQuery;
 pub use presets::{DeletePreset, PresetQueries, SavePreset};
 pub use project_patch::PatchProjectEnvironment;
 pub use project_policy::ProjectEnvironmentPolicy;

@@ -37,6 +37,7 @@ pub mod http;
 pub mod layout;
 mod leftovers;
 pub mod mirrors;
+mod php_builtin_modules;
 pub mod php_extensions;
 mod pid;
 mod recovery;

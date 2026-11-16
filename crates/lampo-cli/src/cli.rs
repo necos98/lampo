@@ -286,6 +286,8 @@ pub struct ProjectSetArgs {
     pub php: Option<String>,
     /// Enable a bundled PHP extension (`intl`, `gd`, `pdo_mysql`, `opcache`...; `php_intl.dll`
     /// also works). Must ship with the project's PHP (the error lists the available ones).
+    /// `gd` and `gd2` are the same extension: it is saved as the project's PHP names it (`gd2`
+    /// before 8.0). One compiled into PHP (`bcmath`) is accepted with a note: nothing to enable.
     #[arg(long, value_name = "NAME", value_delimiter = ',')]
     pub ext: Vec<String>,
     /// Disable a bundled PHP extension.

@@ -1,12 +1,13 @@
 //! Reconciling the machine with the configuration: the heart of Lampo, and the single owner of
 //! the service lifecycle (full syncs and single-service starts/restarts/stops share one lock).
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use lampo_domain::hosts::HostsBlock;
 use lampo_domain::package::PackageId;
+use lampo_domain::php::{ExtensionName, PhpMinor};
 use lampo_domain::paths::LampoPaths;
 use lampo_domain::ports::{
     EventPublisher, HostsFileReader, HostsFileWriter, InstalledPackageRegistry, PhpIniWriter, PortAvailability, PortProbe, ProjectRepository, ServiceRunner, SettingsRepository,
@@ -19,6 +20,7 @@ use lampo_domain::PortError;
 
 use super::allocation::SiteSnapshot;
 use super::generation::{ConfigSnapshot, php_ini_specs, runner_for, shim_index, web_config};
+use super::php_extensions::PhpExtensionsQuery;
 use super::service_catalog::ServiceCatalog;
 use super::service_leases::{ServiceLease, ServiceLeases};
 use super::support::sync_without_elevation;
@@ -77,6 +79,8 @@ pub struct ApplyEnvironmentDeps {
     pub installed: Arc<dyn InstalledPackageRegistry>,
     pub web_config: Arc<dyn WebServerConfigurator>,
     pub php_ini: Arc<dyn PhpIniWriter>,
+    /// What each PHP build offers: the extensions compiled into it get no php.ini line.
+    pub extensions: Arc<PhpExtensionsQuery>,
     pub hosts_reader: Arc<dyn HostsFileReader>,
     pub hosts_writer: Arc<dyn HostsFileWriter>,
     pub shim_index: Arc<dyn ShimIndexWriter>,
@@ -156,7 +160,25 @@ impl ApplyEnvironment {
             Some(sites) => (sites.projects, sites.worktrees, sites.settings),
             None => (self.deps.projects.list()?, self.deps.worktrees.list_all()?, self.deps.settings.load()?),
         };
-        Ok(ConfigSnapshot { projects, worktrees, settings, installed })
+        let mut snap = ConfigSnapshot { projects, worktrees, settings, installed, compiled_in: BTreeMap::new() };
+        snap.compiled_in = self.compiled_in(&snap);
+        Ok(snap)
+    }
+
+    /// Per PHP minor, the extensions its sites name that its build has compiled in. A build
+    /// that cannot be read is left out (logged): its extensions keep their php.ini lines.
+    fn compiled_in(&self, snap: &ConfigSnapshot) -> BTreeMap<PhpMinor, BTreeSet<ExtensionName>> {
+        snap.wanted_extensions()
+            .into_iter()
+            .filter_map(|(php, wanted)| match self.deps.extensions.build_extensions(&snap.installed, php, &wanted) {
+                Ok(build) => Some((php, build?.compiled_in(&wanted))),
+                Err(e) => {
+                    tracing::warn!("cannot read the extensions of PHP {php}: {}", e.message);
+                    None
+                }
+            })
+            .filter(|(_, built)| !built.is_empty())
+            .collect()
     }
 
     /// Writes the php.ini files and the shim index; returns the specs written.

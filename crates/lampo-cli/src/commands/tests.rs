@@ -778,6 +778,17 @@ async fn project_set_takes_an_explicit_id_and_the_service_id_form() {
 }
 
 #[tokio::test]
+async fn project_set_prints_the_notices_of_the_save() {
+    let fake = Fake::new();
+    let mut saved = project_json();
+    saved["notices"] = serde_json::json!(["bcmath is built into PHP 8.3, nothing to enable"]);
+    fake.reply(Ok(saved));
+    let (code, out, _) = run_cli(&fake, &["project", "set", "--ext", "bcmath"]).await;
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("note:      bcmath is built into PHP 8.3, nothing to enable"), "{out}");
+}
+
+#[tokio::test]
 async fn project_set_errors_keep_their_exit_codes() {
     let fake = Fake::new();
     let (code, out, _) = run_cli(&fake, &["project", "set", "--ini", "memory_limit", "--json"]).await;

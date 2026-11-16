@@ -2,13 +2,14 @@
 //! installed packages) into the models the adapters render: php.ini specs, the shim index, the
 //! Apache configuration and service launches. No port is called here.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use lampo_domain::logs::LogSource;
 use lampo_domain::package::{EntryRole, InstalledPackage, PackageKind};
 use lampo_domain::paths::LampoPaths;
-use lampo_domain::php::{ExtensionName, PhpIniOverrides, PhpMinor, php_ini_overrides};
+use lampo_domain::php::{ExtensionName, PhpIniOverrides, PhpMinor, extensions_for_php, php_ini_overrides};
 use lampo_domain::ports::ServiceRunner;
 use lampo_domain::project::{Project, ProjectEnvironment, ProjectId};
 use lampo_domain::service::{ServiceId, ServiceKind};
@@ -49,11 +50,24 @@ pub(crate) struct ConfigSnapshot {
     pub worktrees: Vec<WorktreeEnvironment>,
     pub settings: Settings,
     pub installed: Vec<InstalledPackage>,
+    /// Per PHP minor, the extensions of [`Self::wanted_extensions`] its build has compiled in:
+    /// they get no php.ini line.
+    pub compiled_in: BTreeMap<PhpMinor, BTreeSet<ExtensionName>>,
 }
 
 impl ConfigSnapshot {
     pub fn sites(&self) -> Vec<SiteRef<'_>> {
         all_sites(&self.projects, &self.worktrees)
+    }
+
+    /// Per PHP minor, the bundled extensions its sites name, as its builds name them.
+    pub fn wanted_extensions(&self) -> BTreeMap<PhpMinor, BTreeSet<ExtensionName>> {
+        let mut wanted: BTreeMap<PhpMinor, BTreeSet<ExtensionName>> = BTreeMap::new();
+        for site in self.sites() {
+            let env = site.environment();
+            wanted.entry(env.php).or_default().extend(extensions_for_php(&env.extensions, env.php));
+        }
+        wanted
     }
 
     /// The PHP used outside projects: the configured default if installed, else the newest.
@@ -79,7 +93,9 @@ pub(crate) fn bundled(name: &ExtensionName) -> ExtensionLoad {
 /// One php.ini per site (projects active or not, so the shims get the right extensions, and
 /// every worktree environment), plus the default CLI one. Sites whose PHP is not installed are
 /// skipped with a warning. A site gets the php.ini values of the services it uses (Mailpit:
-/// `SMTP`/`smtp_port` for `mail()`) between Lampo's base values and its own, which win.
+/// `SMTP`/`smtp_port` for `mail()`) between Lampo's base values and its own, which win. Its
+/// extensions are named as its PHP's builds name them (`gd2` before PHP 8.0, even in a project
+/// saved before that rule); the ones compiled into the build get no line.
 pub(crate) fn php_ini_specs(snap: &ConfigSnapshot, catalog: &ServiceCatalog, paths: &LampoPaths, warnings: &mut Vec<String>) -> Vec<PhpIniSpec> {
     let mut specs = Vec::new();
     for site in snap.sites() {
@@ -88,7 +104,9 @@ pub(crate) fn php_ini_specs(snap: &ConfigSnapshot, catalog: &ServiceCatalog, pat
             warnings.push(format!("PHP {} is not installed: `{}` cannot run until it is", env.php, site.id));
             continue;
         };
-        let mut extensions: Vec<ExtensionLoad> = env.extensions.iter().map(bundled).collect();
+        let compiled_in = snap.compiled_in.get(&env.php);
+        let mut extensions: Vec<ExtensionLoad> =
+            extensions_for_php(&env.extensions, env.php).iter().filter(|name| compiled_in.is_none_or(|built| !built.contains(*name))).map(bundled).collect();
         for addon in &env.addons {
             let found = newest_of(&snap.installed, addon, None, Some(env.php));
             match found.and_then(|pkg| Some((pkg.php_extension.clone()?, pkg.entry(EntryRole::PhpExtension)?))) {

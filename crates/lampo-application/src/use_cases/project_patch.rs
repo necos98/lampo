@@ -15,7 +15,7 @@ use std::sync::Arc;
 use lampo_domain::address::SiteAddress;
 use lampo_domain::mysql::DatabaseName;
 use lampo_domain::package::PackageKind;
-use lampo_domain::php::{ExtensionName, IniKey, PhpMinor, php_ini_overrides};
+use lampo_domain::php::{ExtensionName, IniKey, PhpMinor, extensions_for_php, php_ini_overrides};
 use lampo_domain::ports::InstalledPackageRegistry;
 use lampo_domain::project::{ApacheDirectives, DisplayName, Project, ProjectEnvironment, PublicDir};
 use lampo_domain::service::ServiceKind;
@@ -24,7 +24,7 @@ use lampo_domain::tcp_port::Port;
 use lampo_domain::version::VersionSeries;
 
 use super::allocation::SiteSnapshot;
-use super::project_policy::require_mysql_for_database;
+use super::project_policy::{normalize_extensions, require_mysql_for_database};
 use super::project_writer::ProjectWriter;
 use super::projects::{require_hosts_elevation, require_php_installed};
 use super::service_catalog::ServiceCatalog;
@@ -192,13 +192,16 @@ impl Patch {
     }
 
     /// The PHP minor first (the save checks what follows against it), then removals, then
-    /// additions and replacements.
+    /// additions and replacements. Extensions are compared as that PHP names them, so removing
+    /// `gd` also removes a stored `gd2`.
     fn apply(&self, env: &mut ProjectEnvironment, catalog: &ServiceCatalog, settings: &Settings) -> AppResult<()> {
         if let Some(php) = self.php {
             env.php = php;
         }
-        env.extensions.retain(|e| !self.extensions_remove.contains(e));
-        env.extensions.extend(self.extensions_add.iter().cloned());
+        normalize_extensions(env);
+        let removed = extensions_for_php(&self.extensions_remove, env.php);
+        env.extensions.retain(|e| !removed.contains(e));
+        env.extensions.extend(extensions_for_php(&self.extensions_add, env.php));
         env.addons.retain(|a| !self.addons_remove.contains(a));
         env.addons.extend(self.addons_add.iter().cloned());
         env.php_ini.retain(|k, _| !self.ini_unset.contains(k));

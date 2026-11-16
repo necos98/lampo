@@ -58,6 +58,7 @@ function project(id: string, name: string, root: string, host: string, e: T.Proj
 		active: true,
 		originPreset: null,
 		worktrees: [],
+		notices: [],
 		...over
 	};
 }

@@ -1,4 +1,5 @@
-//! The extensions a Windows PHP build ships: one `ext\php_<name>.dll` per loadable module.
+//! The extensions a Windows PHP build ships: one `ext\php_<name>.dll` per loadable module, plus
+//! the modules compiled into its `php.exe` ([`crate::php_builtin_modules`]).
 
 use std::path::Path;
 
@@ -6,12 +7,22 @@ use lampo_domain::php::ExtensionName;
 use lampo_domain::ports::PhpExtensionScanner;
 use lampo_domain::{PortError, PortResult};
 
+use crate::layout::PHP_CLI;
+use crate::php_builtin_modules::BuiltinModules;
+
 const NOT_USER_EXTENSIONS: &[&str] = &["zend_test", "phpdbg_webhelper", "dl_test"];
 
-#[derive(Debug, Default, Clone, Copy)]
-pub struct FsPhpExtensionScanner;
+/// One per process: it keeps the compiled-in modules of every build it was asked about.
+#[derive(Debug, Default)]
+pub struct FsPhpExtensionScanner {
+    builtin: BuiltinModules,
+}
 
 impl PhpExtensionScanner for FsPhpExtensionScanner {
+    fn builtin_extensions(&self, php_dir: &Path) -> PortResult<Vec<ExtensionName>> {
+        self.builtin.of(&php_dir.join(PHP_CLI))
+    }
+
     fn bundled_extensions(&self, php_dir: &Path) -> PortResult<Vec<ExtensionName>> {
         let ext_dir = php_dir.join("ext");
         let entries = match std::fs::read_dir(&ext_dir) {
@@ -49,8 +60,8 @@ mod tests {
             std::fs::write(ext.join(f), b"").unwrap();
         }
         std::fs::create_dir(ext.join("php_dir.dll")).unwrap();
-        let names: Vec<String> = FsPhpExtensionScanner.bundled_extensions(dir.path()).unwrap().iter().map(|n| n.to_string()).collect();
+        let names: Vec<String> = FsPhpExtensionScanner::default().bundled_extensions(dir.path()).unwrap().iter().map(|n| n.to_string()).collect();
         assert_eq!(names, ["intl", "mbstring", "opcache"]);
-        assert!(FsPhpExtensionScanner.bundled_extensions(&dir.path().join("missing")).unwrap().is_empty());
+        assert!(FsPhpExtensionScanner::default().bundled_extensions(&dir.path().join("missing")).unwrap().is_empty());
     }
 }

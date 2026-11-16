@@ -915,11 +915,40 @@ pub fn add_address(project: &mut Project, address: SiteAddress) {
 /// What the fake scanner finds in every PHP build's `ext` dir.
 pub const FAKE_BUNDLED_EXTENSIONS: &[&str] = &["gd", "intl", "mbstring", "opcache", "pdo_mysql", "zip"];
 
-/// A `PhpExtensionScanner` returning a fixed list.
-pub struct FakeExtensionScanner(pub &'static [&'static str]);
+/// What the fake scanner finds compiled into every PHP build.
+pub const FAKE_BUILTIN_EXTENSIONS: &[&str] = &["bcmath", "ctype", "json"];
+
+/// A `PhpExtensionScanner` returning fixed lists, each name as the build's PHP minor names it
+/// (GD is `gd2` before PHP 8.0; the minor comes from the fake install dir `php-<version>`).
+/// Counts how often the compiled-in modules are asked for (a real build runs `php -m`).
+pub struct FakeExtensionScanner {
+    pub bundled: &'static [&'static str],
+    pub builtin: &'static [&'static str],
+    pub builtin_calls: AtomicUsize,
+}
+
+impl FakeExtensionScanner {
+    pub fn new(bundled: &'static [&'static str]) -> Self {
+        Self { bundled, builtin: FAKE_BUILTIN_EXTENSIONS, builtin_calls: AtomicUsize::new(0) }
+    }
+
+    fn named_for(php_dir: &Path, list: &[&str]) -> Vec<lampo_domain::php::ExtensionName> {
+        let version = php_dir.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_prefix("php-")).and_then(|v| PackageVersion::parse(v).ok());
+        let php = version.and_then(|v| PhpMinor::try_from(v.series()).ok());
+        let mut names: Vec<_> = list.iter().map(|n| lampo_domain::php::ExtensionName::new(n).unwrap()).map(|n| php.map_or(n.clone(), |php| n.for_php(php))).collect();
+        names.sort();
+        names
+    }
+}
+
 impl PhpExtensionScanner for FakeExtensionScanner {
-    fn bundled_extensions(&self, _php_dir: &Path) -> PortResult<Vec<lampo_domain::php::ExtensionName>> {
-        Ok(self.0.iter().map(|n| lampo_domain::php::ExtensionName::new(n).unwrap()).collect())
+    fn bundled_extensions(&self, php_dir: &Path) -> PortResult<Vec<lampo_domain::php::ExtensionName>> {
+        Ok(Self::named_for(php_dir, self.bundled))
+    }
+
+    fn builtin_extensions(&self, php_dir: &Path) -> PortResult<Vec<lampo_domain::php::ExtensionName>> {
+        self.builtin_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(Self::named_for(php_dir, self.builtin))
     }
 }
 
@@ -951,6 +980,8 @@ pub struct World {
     pub allocator: Arc<LoopbackPortAllocator>,
     /// The registered service kinds (the built-ins).
     pub services: Arc<ServiceCatalog>,
+    /// What every installed PHP build offers ([`FAKE_BUNDLED_EXTENSIONS`], [`FAKE_BUILTIN_EXTENSIONS`]).
+    pub scanner: Arc<FakeExtensionScanner>,
 }
 
 impl World {
@@ -979,6 +1010,7 @@ impl World {
         let services = Arc::new(ServiceCatalog::new(kinds));
         let ports = Arc::new(FakePorts::default());
         let events = Arc::new(RecordingEvents::default());
+        let scanner = Arc::new(FakeExtensionScanner::new(FAKE_BUNDLED_EXTENSIONS));
         let mut runners: Vec<Arc<dyn ServiceRunner>> = vec![apache.clone(), mysql.clone(), redis.clone(), mailpit.clone()];
         runners.extend(extra_runners);
         let env = Arc::new(ApplyEnvironment::new(ApplyEnvironmentDeps {
@@ -988,6 +1020,7 @@ impl World {
             installed: installed.clone(),
             web_config: web.clone(),
             php_ini: ini.clone(),
+            extensions: Arc::new(PhpExtensionsQuery::new(installed.clone(), scanner.clone())),
             hosts_reader: hosts.clone(),
             hosts_writer: hosts.clone(),
             shim_index: shim_index.clone(),
@@ -1024,6 +1057,7 @@ impl World {
             service_control,
             allocator,
             services,
+            scanner,
         }
     }
 
@@ -1129,8 +1163,7 @@ impl World {
 
     /// The rules of every project save; every installed PHP ships [`FAKE_BUNDLED_EXTENSIONS`].
     pub fn project_policy(&self) -> Arc<ProjectEnvironmentPolicy> {
-        let scanner = Arc::new(FakeExtensionScanner(FAKE_BUNDLED_EXTENSIONS));
-        Arc::new(ProjectEnvironmentPolicy::new(self.services.clone(), self.installed.clone(), Arc::new(PhpExtensionsQuery::new(self.installed.clone(), scanner))))
+        Arc::new(ProjectEnvironmentPolicy::new(self.services.clone(), self.installed.clone(), Arc::new(PhpExtensionsQuery::new(self.installed.clone(), self.scanner.clone()))))
     }
 
     /// The writer every project-mutating use case takes, syncing through `env`.

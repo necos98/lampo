@@ -367,6 +367,9 @@ fn php_extensions_come_from_the_installed_build_of_that_minor() {
             self.0.lock().unwrap().push(php_dir.to_path_buf());
             Ok(["intl", "opcache"].iter().map(|n| lampo_domain::php::ExtensionName::new(n).unwrap()).collect())
         }
+        fn builtin_extensions(&self, _: &std::path::Path) -> lampo_domain::PortResult<Vec<lampo_domain::php::ExtensionName>> {
+            unreachable!("listing the DLLs never runs the build")
+        }
     }
     let w = World::with_basics();
     let scanner = Arc::new(Scanner(Mutex::new(Vec::new())));
@@ -383,6 +386,9 @@ fn php_extensions_come_from_the_installed_build_of_that_minor() {
 /// `intl` and `opcache` in every PHP build.
 struct TwoExtensions;
 impl lampo_domain::ports::PhpExtensionScanner for TwoExtensions {
+    fn builtin_extensions(&self, _: &std::path::Path) -> lampo_domain::PortResult<Vec<lampo_domain::php::ExtensionName>> {
+        Ok(Vec::new())
+    }
     fn bundled_extensions(&self, _: &std::path::Path) -> lampo_domain::PortResult<Vec<lampo_domain::php::ExtensionName>> {
         Ok(["intl", "opcache"].iter().map(|n| lampo_domain::php::ExtensionName::new(n).unwrap()).collect())
     }

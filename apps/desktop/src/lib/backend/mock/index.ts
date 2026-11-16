@@ -277,7 +277,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 			const suggested = suggest(id);
 			const byMode: Record<T.Addressing, T.SiteAddress[]> = { standard: suggested.standard, 'hosts-only': suggested.hostsOnly, 'no-elevation': suggested.noElevation };
 			const addresses = r.addresses ?? byMode[r.addressing ?? 'no-elevation'];
-			const next = rebuild({ id, name, root: r.root, folderExists: true, addresses, url: '', urls: [], documentRoot: '', environment, databaseName: mysqlOf(environment) ? id.replace(/-/g, '_') : null, database: null, tls: 'disabled', active: r.activate ?? true, originPreset: preset.id, worktrees: [] });
+			const next = rebuild({ id, name, root: r.root, folderExists: true, addresses, url: '', urls: [], documentRoot: '', environment, databaseName: mysqlOf(environment) ? id.replace(/-/g, '_') : null, database: null, tls: 'disabled', active: r.activate ?? true, originPreset: preset.id, worktrees: [], notices: [] });
 			projects = [...projects, next];
 			if (hasHostname(next)) hostsInSync = false;
 			syncProject(id);

@@ -6,6 +6,7 @@ mod environment;
 mod external_apps;
 mod misc;
 mod packages;
+mod php_extension_names;
 mod project_saves;
 mod projects;
 mod scaffold;

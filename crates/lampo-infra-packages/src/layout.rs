@@ -11,6 +11,9 @@ use std::path::{Path, PathBuf};
 use lampo_domain::package::{EntryRole, InstalledPackage, PackageKind};
 use lampo_domain::php::ExtensionName;
 
+/// PHP's command-line executable, at the root of its install dir.
+pub(crate) const PHP_CLI: &str = "php.exe";
+
 /// One kind's layout: files by role, relative to the install dir, and the extension name of a
 /// PHP add-on.
 struct Layout {
@@ -20,7 +23,7 @@ struct Layout {
 }
 
 const LAYOUTS: &[Layout] = &[
-    Layout { kind: "php", entries: &[(EntryRole::Cli, "php.exe"), (EntryRole::FastCgi, "php-cgi.exe")], php_extension: None },
+    Layout { kind: "php", entries: &[(EntryRole::Cli, PHP_CLI), (EntryRole::FastCgi, "php-cgi.exe")], php_extension: None },
     Layout { kind: "mod-fcgid", entries: &[(EntryRole::ApacheModule, "mod_fcgid.so")], php_extension: None },
     Layout { kind: "mysql", entries: &[(EntryRole::ClientDir, "bin")], php_extension: None },
     Layout { kind: "redis", entries: &[(EntryRole::Cli, "redis-cli.exe"), (EntryRole::ClientDir, "")], php_extension: None },

@@ -60,7 +60,7 @@ pub fn build() -> AppResult<CliContext> {
     let php_extensions = Arc::new(PhpExtensionListing::new(
         resolver.clone(),
         projects_repo.clone(),
-        Arc::new(PhpExtensionsQuery::new(installed.clone(), Arc::new(lampo_infra_packages::FsPhpExtensionScanner))),
+        Arc::new(PhpExtensionsQuery::new(installed.clone(), Arc::new(lampo_infra_packages::FsPhpExtensionScanner::default()))),
     ));
     let app = Arc::new(ControlClient::new(channel.clone(), launcher, Arc::new(store::SystemClock), Arc::new(TokioTimer)));
     let running_channel = channel.clone();

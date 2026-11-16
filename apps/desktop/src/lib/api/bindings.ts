@@ -146,7 +146,12 @@ mail?: MailConnection | null, tls: TlsMode, active: boolean, originPreset: strin
 /**
  * Worktree environments of this project.
  */
-worktrees: Array<WorktreeEnvironment>, };
+worktrees: Array<WorktreeEnvironment>, 
+/**
+ * What a save has to tell about the saved project (`bcmath is built into PHP 8.3, nothing
+ * to enable`); always empty outside a save's answer.
+ */
+notices: Array<string>, };
 
 /**
  * A project file that does not load (malformed, or edited into invalid values). The project is
@@ -244,7 +249,12 @@ mail?: MailConnection | null, tls: TlsMode, active: boolean, originPreset: strin
 /**
  * Worktree environments of this project.
  */
-worktrees: Array<WorktreeEnvironment>, };
+worktrees: Array<WorktreeEnvironment>, 
+/**
+ * What a save has to tell about the saved project (`bcmath is built into PHP 8.3, nothing
+ * to enable`); always empty outside a save's answer.
+ */
+notices: Array<string>, };
 
 /**
  * Result of removing a project: what was kept on purpose and is no longer reachable from Lampo.
@@ -313,7 +323,12 @@ mail?: MailConnection | null, tls: TlsMode, active: boolean, originPreset: strin
 /**
  * Worktree environments of this project.
  */
-worktrees: Array<WorktreeEnvironment>, };
+worktrees: Array<WorktreeEnvironment>, 
+/**
+ * What a save has to tell about the saved project (`bcmath is built into PHP 8.3, nothing
+ * to enable`); always empty outside a save's answer.
+ */
+notices: Array<string>, };
 
 /**
  * Result of analysing a folder before creating a project.

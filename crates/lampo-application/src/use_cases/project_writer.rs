@@ -13,7 +13,7 @@ use lampo_domain::tcp_port::Port;
 
 use super::allocation::{LoopbackPortAllocator, SiteSnapshot};
 use super::environment::EnvironmentSync;
-use super::project_policy::ProjectEnvironmentPolicy;
+use super::project_policy::{ProjectEnvironmentPolicy, normalize_extensions};
 use super::projects::ProjectQueries;
 use super::service_catalog::ServiceCatalog;
 use super::support::{load_project, parse_project_id};
@@ -118,9 +118,11 @@ impl ProjectWriter {
     }
 
     /// Syncs, then returns the full view of the saved project, both from the registry the save
-    /// handed on (nothing is read again).
+    /// handed on (nothing is read again), with the policy's notices on what was saved (an
+    /// extension compiled into its PHP).
     pub(crate) async fn finish(&self, saved: SavedProject, ctx: &CallContext) -> AppResult<ProjectDto> {
-        let view = self.queries.present(&saved.project, &saved.sites);
+        let mut view = self.queries.present(&saved.project, &saved.sites);
+        view.notices = self.policy.notices(&saved.project.environment);
         self.sync(saved.sites, ctx).await?;
         Ok(view)
     }
@@ -135,8 +137,8 @@ impl ProjectWriter {
         }
     }
 
-    fn commit_new(&self, snap: &SiteSnapshot, project: Project) -> AppResult<SavedProject> {
-        self.save_checked(snap, &project, true)?;
+    fn commit_new(&self, snap: &SiteSnapshot, mut project: Project) -> AppResult<SavedProject> {
+        self.save_checked(snap, &mut project, true)?;
         Ok(SavedProject { sites: snap.with_project(&project), project })
     }
 
@@ -145,15 +147,16 @@ impl ProjectWriter {
         if !change(&mut project, snap)? {
             return Ok(SavedProject { sites: snap.unchanged(), project });
         }
-        self.save_checked(snap, &project, false)?;
+        self.save_checked(snap, &mut project, false)?;
         self.changed(&project.id);
         Ok(SavedProject { sites: snap.with_project(&project), project })
     }
 
-    /// Validates `candidate` (the environment policy against the stored version, its conflicts
-    /// with every project and worktree environment) and saves it. Only inside an allocator
-    /// commit (`snap` comes from it).
-    fn save_checked(&self, snap: &SiteSnapshot, candidate: &Project, is_new: bool) -> AppResult<()> {
+    /// Names `candidate`'s extensions as its PHP does, validates it (the environment policy
+    /// against the stored version, its conflicts with every project and worktree environment)
+    /// and saves it. Only inside an allocator commit (`snap` comes from it).
+    fn save_checked(&self, snap: &SiteSnapshot, candidate: &mut Project, is_new: bool) -> AppResult<()> {
+        normalize_extensions(&mut candidate.environment);
         let stored = snap.projects.iter().filter(|_| !is_new).find(|p| p.id == candidate.id);
         self.policy.check(stored.map(|p| &p.environment), &candidate.environment, &snap.settings)?;
         check_conflicts(&snap.projects, &snap.worktrees, candidate, is_new, &snap.settings)?;

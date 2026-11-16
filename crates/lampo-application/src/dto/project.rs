@@ -92,6 +92,10 @@ pub struct ProjectDto {
     pub origin_preset: Option<String>,
     /// Worktree environments of this project.
     pub worktrees: Vec<WorktreeEnvironmentDto>,
+    /// What a save has to tell about the saved project (`bcmath is built into PHP 8.3, nothing
+    /// to enable`); always empty outside a save's answer.
+    #[serde(default)]
+    pub notices: Vec<String>,
 }
 
 /// A project file that does not load (malformed, or edited into invalid values). The project is

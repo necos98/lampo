@@ -102,6 +102,8 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let php_ini: Arc<dyn PhpIniWriter> = Arc::new(web::PhpIniRenderer);
 
     // --- use cases ---
+    // One scanner for the whole app: it caches the modules compiled into each PHP build.
+    let php_extensions = Arc::new(PhpExtensionsQuery::new(installed.clone(), Arc::new(packages::FsPhpExtensionScanner::default())));
     let environment = Arc::new(ApplyEnvironment::new(ApplyEnvironmentDeps {
         projects: projects.clone(),
         worktrees: worktrees.clone(),
@@ -109,6 +111,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         installed: installed.clone(),
         web_config: Arc::new(web::ApacheConfigurator::new(commands.clone())),
         php_ini: php_ini.clone(),
+        extensions: php_extensions.clone(),
         hosts_reader: hosts.clone(),
         hosts_writer: hosts.clone(),
         shim_index: shim_index.clone(),
@@ -126,7 +129,6 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let project_queries = Arc::new(ProjectQueries::new(projects.clone(), worktrees.clone(), settings.clone(), fs.clone()));
     // One allocator for the whole app: projects and worktree environments share its lock.
     let allocator = Arc::new(LoopbackPortAllocator::new(projects.clone(), worktrees.clone(), settings.clone(), port_probe.clone()));
-    let php_extensions = Arc::new(PhpExtensionsQuery::new(installed.clone(), Arc::new(packages::FsPhpExtensionScanner)));
     // Every project save and removal (GUI, CLI patch, create, import, PHP switch, delete) goes
     // through this writer: the allocator lock plus the environment policy and the conflict checks.
     let project_writer = ProjectWriter::new(ProjectWriterDeps {
