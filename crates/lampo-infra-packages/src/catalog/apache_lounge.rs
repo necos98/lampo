@@ -2,76 +2,112 @@
 //!
 //! Apache Lounge keeps only the newest build of each Visual Studio toolset online, so pinned
 //! URLs rot; this source reads the download page, picks the Win64 httpd zip(s) and takes the
-//! SHA-256 from the `<zip>.txt` checksum file published next to each binary.
+//! SHA-256 from the `<zip>.txt` checksum file published next to each binary (all in parallel;
+//! a build without a readable checksum is skipped).
+//!
+//! Served from a stale-while-revalidate cache ([`super::revalidating_cache`]). There is no disk
+//! cache: until the first refresh, the pinned Apache entries of the embedded catalog cover offline
+//! machines.
 //!
 //! mod_fcgid is *not* served here: Apache Lounge publishes no checksum for modules, so its entry
 //! is pinned in the embedded catalog with a SHA-256 computed from the file.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use futures_util::future::join_all;
 use lampo_domain::package::{CatalogChannel, CatalogEntry, DownloadUrl, PackageId, PackageKind, PackagePayload, Sha256Digest};
 use lampo_domain::ports::PackageCatalogSource;
+use lampo_domain::progress::CancelFlag;
 use lampo_domain::vc_runtime::VcRuntime;
 use lampo_domain::version::PackageVersion;
 use lampo_domain::{PortError, PortResult};
 
-use super::{TtlCache, hrefs};
+use super::hrefs;
+use super::revalidating_cache::{LiveCatalog, RevalidatingCache};
+use crate::http::{FetchPolicy, get_text};
 
 pub const SITE_URL: &str = "https://www.apachelounge.com";
 const TTL: Duration = Duration::from_secs(60 * 60);
+const SOURCE_NAME: &str = "apachelounge.com";
 
 pub struct ApacheLoungeSource {
+    live: Arc<ApacheLoungeSite>,
+    cache: RevalidatingCache,
+}
+
+/// Where the download page and the checksum files come from.
+#[derive(Clone)]
+struct ApacheLoungeSite {
     client: reqwest::Client,
     base_url: String,
-    attempts: u32,
-    cache: TtlCache,
+    checksum_policy: FetchPolicy,
 }
 
 impl ApacheLoungeSource {
     pub fn new(client: reqwest::Client) -> Self {
-        Self { client, base_url: SITE_URL.to_string(), attempts: 3, cache: TtlCache::new() }
+        let live = ApacheLoungeSite { client, base_url: SITE_URL.to_string(), checksum_policy: FetchPolicy::CHECKSUM };
+        Self { live: Arc::new(live), cache: RevalidatingCache::new(SOURCE_NAME, TTL) }
     }
 
     /// Overrides the site root and disables retries (tests).
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
-        self.base_url = base_url.into();
-        self.attempts = 1;
+        let live = Arc::make_mut(&mut self.live);
+        live.base_url = base_url.into();
+        live.checksum_policy = FetchPolicy { attempts: 1, ..FetchPolicy::CHECKSUM };
         self
     }
+}
 
-    async fn load(&self) -> PortResult<(Vec<CatalogEntry>, Duration)> {
-        let page = crate::http::get_text(&self.client, &format!("{}/download/", self.base_url), self.attempts).await?;
+impl ApacheLoungeSite {
+    /// The catalog entry of `build`, `None` (logged) when its checksum cannot be read.
+    async fn entry(&self, build: HttpdBuild, cancel: &CancelFlag) -> PortResult<Option<CatalogEntry>> {
+        let txt_url = format!("{}{}.txt", self.base_url, build.path);
+        let txt = match get_text(&self.client, &txt_url, self.checksum_policy, cancel).await {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(url = %txt_url, error = %e, "no checksum for Apache Lounge build; skipping it");
+                return Ok(None);
+            }
+        };
+        let Some(sha256) = parse_sha256_txt(&txt) else {
+            tracing::warn!(url = %txt_url, "checksum file without SHA-256; skipping the build");
+            return Ok(None);
+        };
+        Ok(Some(CatalogEntry {
+            id: PackageId::new(PackageKind::APACHE, build.version),
+            url: DownloadUrl::new(format!("{SITE_URL}{}", build.path))?,
+            sha256: Some(sha256),
+            size_bytes: None,
+            vc_runtime: Some(build.vc_runtime),
+            channel: CatalogChannel::Live,
+            end_of_life: false,
+            payload: PackagePayload::Zip { strip_prefix: Some("Apache24".into()) },
+        }))
+    }
+}
+
+#[async_trait]
+impl LiveCatalog for ApacheLoungeSite {
+    async fn stored(&self) -> Option<Vec<CatalogEntry>> {
+        None
+    }
+
+    async fn fetch_live(&self, cancel: &CancelFlag) -> PortResult<Vec<CatalogEntry>> {
+        let page = get_text(&self.client, &format!("{}/download/", self.base_url), FetchPolicy::LIST, cancel).await?;
         let builds = find_httpd_builds(&page);
         if builds.is_empty() {
             return Err(PortError::invalid_data("apachelounge.com download page", "no Win64 httpd build found"));
         }
-        let mut entries = Vec::new();
-        for build in builds {
-            let txt_url = format!("{}{}.txt", self.base_url, build.path);
-            let txt = match crate::http::get_text(&self.client, &txt_url, self.attempts).await {
-                Ok(t) => t,
-                Err(e) => {
-                    tracing::warn!(url = %txt_url, error = %e, "no checksum for Apache Lounge build; skipping it");
-                    continue;
-                }
-            };
-            let Some(sha256) = parse_sha256_txt(&txt) else {
-                tracing::warn!(url = %txt_url, "checksum file without SHA-256; skipping the build");
-                continue;
-            };
-            entries.push(CatalogEntry {
-                id: PackageId::new(PackageKind::APACHE, build.version),
-                url: DownloadUrl::new(format!("{SITE_URL}{}", build.path))?,
-                sha256: Some(sha256),
-                size_bytes: None,
-                vc_runtime: Some(build.vc_runtime),
-                channel: CatalogChannel::Live,
-                end_of_life: false,
-                payload: PackagePayload::Zip { strip_prefix: Some("Apache24".into()) },
-            });
+        let entries = join_all(builds.into_iter().map(|build| self.entry(build, cancel))).await;
+        cancel.check()?;
+        let entries: Vec<CatalogEntry> = entries.into_iter().filter_map(Result::transpose).collect::<PortResult<_>>()?;
+        if entries.is_empty() {
+            // An error, not an empty list: the cache keeps the builds it already knows.
+            return Err(PortError::Network(format!("{SOURCE_NAME}: no build checksum could be read")));
         }
-        Ok((entries, TTL))
+        Ok(entries)
     }
 }
 
@@ -135,7 +171,7 @@ pub fn parse_sha256_txt(text: &str) -> Option<Sha256Digest> {
 #[async_trait]
 impl PackageCatalogSource for ApacheLoungeSource {
     fn name(&self) -> &str {
-        "apachelounge.com"
+        SOURCE_NAME
     }
 
     fn kinds(&self) -> Vec<PackageKind> {
@@ -146,7 +182,7 @@ impl PackageCatalogSource for ApacheLoungeSource {
         if kind != &PackageKind::APACHE {
             return Ok(Vec::new());
         }
-        self.cache.get_or_load(|| self.load()).await
+        self.cache.get(&self.live).await
     }
 }
 
@@ -191,6 +227,24 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].url.as_str(), "https://www.apachelounge.com/download/VS18/binaries/httpd-2.4.71-261112-Win64-VS18.zip");
         assert!(source.fetch(&PackageKind::MOD_FCGID).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn skips_builds_without_checksum_and_fails_when_none_has_one() {
+        let page = format!("{PAGE}<a href=\"/download/VS17/binaries/httpd-2.4.70-250101-Win64-VS17.zip\">older toolset</a>");
+        let server = TestServer::start(move |req| match req.path.as_str() {
+            "/download/" => Reply::text(&page),
+            "/download/VS18/binaries/httpd-2.4.71-261112-Win64-VS18.zip.txt" => Reply::text(TXT),
+            _ => Reply::status(404),
+        })
+        .await;
+        let source = ApacheLoungeSource::new(reqwest::Client::new()).with_base_url(server.url(""));
+        let entries = source.fetch(&PackageKind::APACHE).await.unwrap();
+        assert_eq!(entries.iter().map(|e| e.id.version.as_str()).collect::<Vec<_>>(), ["2.4.71-261112"]);
+
+        let no_checksums = TestServer::start(|req| if req.path == "/download/" { Reply::text(PAGE) } else { Reply::status(404) }).await;
+        let source = ApacheLoungeSource::new(reqwest::Client::new()).with_base_url(no_checksums.url(""));
+        assert!(source.fetch(&PackageKind::APACHE).await.is_err());
     }
 
     #[tokio::test]

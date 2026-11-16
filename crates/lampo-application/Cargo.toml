@@ -17,6 +17,8 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 # Only `sync`/`time` primitives (task registry, timeouts) and `join!`; no IO.
 tokio = { workspace = true, features = ["sync", "time", "macros"] }
+# `join_all` to query the package catalog sources concurrently.
+futures-util = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }

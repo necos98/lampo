@@ -487,6 +487,42 @@ async fn a_failing_live_catalog_degrades_to_the_others() {
     assert_eq!(unknown.code, ErrorCode::Network);
 }
 
+/// A source that answers only once every source of the test has been asked: listings that
+/// queried the sources one after the other would never finish.
+struct RendezvousSource {
+    inner: Arc<FakeSource>,
+    all_asked: Arc<tokio::sync::Barrier>,
+}
+
+#[async_trait::async_trait]
+impl PackageCatalogSource for RendezvousSource {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn kinds(&self) -> Vec<PackageKind> {
+        self.inner.kinds()
+    }
+    async fn fetch(&self, kind: &PackageKind) -> lampo_domain::PortResult<Vec<lampo_domain::package::CatalogEntry>> {
+        self.all_asked.wait().await;
+        self.inner.fetch(kind).await
+    }
+}
+
+#[tokio::test]
+async fn catalog_sources_are_queried_concurrently_and_merged_in_order() {
+    let mut live = catalog_entry(PackageKind::PHP, "8.4.2", None);
+    live.url = lampo_domain::package::DownloadUrl::new("https://example.invalid/moved.zip").unwrap();
+    let pinned = catalog_entry(PackageKind::PHP, "8.4.2", None);
+    let all_asked = Arc::new(tokio::sync::Barrier::new(2));
+    let sources: Vec<Arc<dyn PackageCatalogSource>> = [FakeSource::new("live", vec![live]), FakeSource::new("embedded", vec![pinned])]
+        .into_iter()
+        .map(|inner| Arc::new(RendezvousSource { inner, all_asked: all_asked.clone() }) as Arc<dyn PackageCatalogSource>)
+        .collect();
+    let catalog = tokio::time::timeout(std::time::Duration::from_secs(5), packages::fetch_catalog(&sources, Some(&PackageKind::PHP))).await.expect("sources queried concurrently").unwrap();
+    assert_eq!(catalog.entries.len(), 1);
+    assert_eq!(catalog.entries[0].url.as_str(), "https://example.invalid/moved.zip", "the first source still wins on duplicates");
+}
+
 #[tokio::test]
 async fn updates_and_usage_are_reported_per_series() {
     let k = Kit::new(World::with_basics());

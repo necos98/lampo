@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use futures_util::future::join_all;
 use lampo_domain::events::DomainEvent;
 use lampo_domain::package::{CatalogEntry, InstalledPackage, MergedCatalog, PackageId, PackageKind, PackagePayload, Sha256Digest, latest, latest_in_series, merge_catalogs, verify_checksum};
 use lampo_domain::paths::LampoPaths;
@@ -23,27 +24,32 @@ use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::mapping::package_id_to_dto;
 
-/// Fetches `kind` (every kind each source serves when `None`) from all sources. A failing
-/// source is logged and skipped; the call fails (`Network`) only if every relevant source failed.
-/// Integrity conflicts between live and pinned hashes are logged and returned with the catalog.
+/// Fetches `kind` (every kind each source serves when `None`) from all sources, concurrently;
+/// the lists keep the order of `sources` for the merge. A failing source is logged and skipped;
+/// the call fails (`Network`) only if every relevant source failed. Integrity conflicts between
+/// live and pinned hashes are logged and returned with the catalog.
 pub(crate) async fn fetch_catalog(sources: &[Arc<dyn PackageCatalogSource>], kind: Option<&PackageKind>) -> AppResult<MergedCatalog> {
+    let requests: Vec<(&Arc<dyn PackageCatalogSource>, PackageKind)> = sources
+        .iter()
+        .flat_map(|source| {
+            let kinds: Vec<PackageKind> = match kind {
+                Some(k) if source.kinds().contains(k) => vec![k.clone()],
+                Some(_) => Vec::new(),
+                None => source.kinds(),
+            };
+            kinds.into_iter().map(move |k| (source, k))
+        })
+        .collect();
+    let attempted = requests.len();
+    let results = join_all(requests.iter().map(|(source, k)| source.fetch(k))).await;
     let mut lists = Vec::new();
     let mut failures = Vec::new();
-    let mut attempted = 0;
-    for source in sources {
-        let kinds: Vec<PackageKind> = match kind {
-            Some(k) if source.kinds().contains(k) => vec![k.clone()],
-            Some(_) => continue,
-            None => source.kinds(),
-        };
-        for k in kinds {
-            attempted += 1;
-            match source.fetch(&k).await {
-                Ok(entries) => lists.push(entries),
-                Err(e) => {
-                    tracing::warn!("catalog source `{}` failed for {k}: {e}", source.name());
-                    failures.push(format!("{}: {e}", source.name()));
-                }
+    for ((source, k), result) in requests.iter().zip(results) {
+        match result {
+            Ok(entries) => lists.push(entries),
+            Err(e) => {
+                tracing::warn!("catalog source `{}` failed for {k}: {e}", source.name());
+                failures.push(format!("{}: {e}", source.name()));
             }
         }
     }

@@ -6,15 +6,16 @@
 //! | Source                     | Origin                                   | Kinds |
 //! |----------------------------|------------------------------------------|-------|
 //! | [`php_net`]                | windows.php.net `releases.json` (+ disk cache + embedded snapshot) | php |
-//! | [`composer`]               | getcomposer.org `/versions` + `.sha256sum` | composer |
+//! | [`composer`]               | getcomposer.org `/versions` + `.sha256sum` (+ disk cache) | composer |
 //! | [`apache_lounge`]          | apachelounge.com download page + `.txt` checksums | apache |
 //! | [`embedded`]               | `frozen.toml` compiled in                | all kinds, pinned |
+//!
+//! The live sources answer from a stale-while-revalidate cache ([`revalidating_cache`]): a
+//! listing is served at once from what is known and refreshed from the network in background.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
-use lampo_domain::package::CatalogEntry;
 use lampo_domain::paths::LampoPaths;
 use lampo_domain::ports::PackageCatalogSource;
 
@@ -22,12 +23,14 @@ pub mod apache_lounge;
 pub mod composer;
 pub mod embedded;
 pub mod php_net;
+mod revalidating_cache;
 
 /// Every source, live ones first, the embedded catalog last (offline fallback).
 pub fn default_sources(client: reqwest::Client, paths: &LampoPaths) -> Vec<Arc<dyn PackageCatalogSource>> {
+    let cache = cache_dir(paths);
     vec![
-        Arc::new(php_net::PhpNetReleasesSource::new(client.clone()).with_cache_file(cache_dir(paths).join("windows.php.net-releases.json"))),
-        Arc::new(composer::ComposerSource::new(client.clone())),
+        Arc::new(php_net::PhpNetReleasesSource::new(client.clone()).with_cache_file(cache.join("windows.php.net-releases.json"))),
+        Arc::new(composer::ComposerSource::new(client.clone()).with_cache_file(cache.join("getcomposer.org-versions.json"))),
         Arc::new(apache_lounge::ApacheLoungeSource::new(client)),
         Arc::new(embedded::EmbeddedCatalog::new()),
     ]
@@ -38,41 +41,21 @@ pub fn cache_dir(paths: &LampoPaths) -> PathBuf {
     paths.packages_dir().join("catalog-cache")
 }
 
-/// How long a failed live fetch is remembered, so an offline machine does not wait for the
-/// network on every catalog listing.
-const FAILURE_TTL: Duration = Duration::from_secs(60);
-
-type CachedResult = lampo_domain::PortResult<Vec<CatalogEntry>>;
-
-/// In-memory cache of one source's entries (or its last failure) with a time-to-live.
-pub(crate) struct TtlCache {
-    inner: tokio::sync::Mutex<Option<(Instant, Duration, CachedResult)>>,
-}
-
-impl TtlCache {
-    pub(crate) fn new() -> Self {
-        Self { inner: tokio::sync::Mutex::new(None) }
-    }
-
-    /// Returns the cached result if fresh, else runs `load` (serialised: concurrent callers wait
-    /// for one fetch) and caches its result for the TTL it returns (failures for a minute).
-    pub(crate) async fn get_or_load<F, Fut>(&self, load: F) -> CachedResult
-    where
-        F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = lampo_domain::PortResult<(Vec<CatalogEntry>, Duration)>>,
-    {
-        let mut guard = self.inner.lock().await;
-        if let Some((at, ttl, result)) = guard.as_ref() {
-            if at.elapsed() < *ttl {
-                return result.clone();
-            }
+/// Replaces `file` with `text` atomically (temporary sibling + rename), creating its directory.
+/// A failure is logged, not returned: the cache file is only an offline fallback.
+pub(crate) async fn write_cache_file(file: &Path, text: &str) {
+    let write = async {
+        if let Some(dir) = file.parent() {
+            tokio::fs::create_dir_all(dir).await?;
         }
-        let (result, ttl) = match load().await {
-            Ok((entries, ttl)) => (Ok(entries), ttl),
-            Err(e) => (Err(e), FAILURE_TTL),
-        };
-        *guard = Some((Instant::now(), ttl, result.clone()));
-        result
+        let mut tmp = file.as_os_str().to_owned();
+        tmp.push(".tmp");
+        let tmp = PathBuf::from(tmp);
+        tokio::fs::write(&tmp, text).await?;
+        tokio::fs::rename(&tmp, file).await
+    };
+    if let Err(e) = write.await {
+        tracing::warn!(file = %file.display(), error = %e, "cannot write the catalog cache file");
     }
 }
 

@@ -26,11 +26,13 @@ pub struct Reply {
     unannounced: bool,
     /// Close the connection after this many body bytes (a dropped connection).
     cut_after: Option<usize>,
+    /// Wait this long before answering (a slow server).
+    delay: Option<Duration>,
 }
 
 impl Reply {
     pub fn ok(body: Vec<u8>) -> Self {
-        Self { status: 200, headers: Vec::new(), body, slow: false, unannounced: false, cut_after: None }
+        Self { status: 200, headers: Vec::new(), body, slow: false, unannounced: false, cut_after: None, delay: None }
     }
 
     pub fn text(body: &str) -> Self {
@@ -74,6 +76,12 @@ impl Reply {
         self
     }
 
+    /// Waits `delay` before sending anything (a slow or stalled server).
+    pub fn delayed(mut self, delay: Duration) -> Self {
+        self.delay = Some(delay);
+        self
+    }
+
     /// Announces the whole body but drops the connection after `bytes` of it.
     pub fn cut_after(mut self, bytes: usize) -> Self {
         self.cut_after = Some(bytes);
@@ -108,6 +116,9 @@ impl TestServer {
                     let path = lines.next().unwrap_or("").split(' ').nth(1).unwrap_or("/").to_string();
                     let headers = lines.take_while(|l| !l.is_empty()).filter_map(|l| l.split_once(':')).map(|(k, v)| (k.trim().to_string(), v.trim().to_string())).collect();
                     let reply = handler(Request { path, headers });
+                    if let Some(delay) = reply.delay {
+                        tokio::time::sleep(delay).await;
+                    }
                     let mut head = format!("HTTP/1.1 {} X\r\nConnection: close\r\n", reply.status);
                     if !reply.unannounced {
                         head.push_str(&format!("Content-Length: {}\r\n", reply.body.len()));

@@ -1,11 +1,11 @@
 //! Live list of PHP releases from `https://windows.php.net/downloads/releases/releases.json`
 //! (NTS x64 zips only; sha256 and VS toolset read from the JSON).
 //!
-//! * Cached in memory for [`TTL`].
-//! * Every successful download is written to a cache file (when configured); when the site is
-//!   unreachable the cache file is used, and failing that the copy embedded at build time
-//!   (`php_net_snapshot.json`), so the newest known patch of each supported series stays
-//!   installable offline.
+//! * Served from a stale-while-revalidate cache ([`super::revalidating_cache`]), fresh for
+//!   [`TTL`]: until the first refresh succeeds, listings get the cache file (when configured)
+//!   or failing that the copy embedded at build time (`php_net_snapshot.json`), so the newest
+//!   known patch of each supported series is listed at once and stays installable offline.
+//! * Every successful download is written to the cache file.
 //! * URLs point at `/downloads/releases/archives/`, which holds every build including the
 //!   current ones, so an entry stays valid after the next patch release moves the file out of
 //!   `/downloads/releases/`.
@@ -13,17 +13,21 @@
 //!   compared with today's date, so a series turns EOL on its own when its date passes.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use lampo_domain::package::{CatalogChannel, CatalogEntry, DownloadUrl, PackageId, PackageKind, PackagePayload, Sha256Digest};
 use lampo_domain::php::PhpMinor;
 use lampo_domain::ports::PackageCatalogSource;
+use lampo_domain::progress::CancelFlag;
 use lampo_domain::vc_runtime::VcRuntime;
 use lampo_domain::version::PackageVersion;
 use lampo_domain::{PortError, PortResult};
 
-use super::TtlCache;
+use super::revalidating_cache::{LiveCatalog, RevalidatingCache};
+use super::write_cache_file;
+use crate::http::{FetchPolicy, get_text};
 
 pub const RELEASES_JSON_URL: &str = "https://windows.php.net/downloads/releases/releases.json";
 pub const ARCHIVES_BASE_URL: &str = "https://windows.php.net/downloads/releases/archives/";
@@ -31,80 +35,79 @@ pub const ARCHIVES_BASE_URL: &str = "https://windows.php.net/downloads/releases/
 pub const SNAPSHOT_JSON: &str = include_str!("php_net_snapshot.json");
 
 const TTL: Duration = Duration::from_secs(15 * 60);
-/// After a failed fetch, retry the network this soon.
-const FALLBACK_TTL: Duration = Duration::from_secs(60);
+const SOURCE_NAME: &str = "windows.php.net";
 
 pub struct PhpNetReleasesSource {
+    live: Arc<ReleasesJson>,
+    cache: RevalidatingCache,
+}
+
+/// Where `releases.json` comes from and where its last good copy is kept.
+#[derive(Clone)]
+struct ReleasesJson {
     client: reqwest::Client,
-    cache: TtlCache,
     cache_file: Option<PathBuf>,
     url: String,
-    attempts: u32,
 }
 
 impl PhpNetReleasesSource {
     pub fn new(client: reqwest::Client) -> Self {
-        Self { client, cache: TtlCache::new(), cache_file: None, url: RELEASES_JSON_URL.to_string(), attempts: 4 }
+        let live = ReleasesJson { client, cache_file: None, url: RELEASES_JSON_URL.to_string() };
+        Self { live: Arc::new(live), cache: RevalidatingCache::new(SOURCE_NAME, TTL) }
     }
 
     /// Keeps the last good `releases.json` in `file` as offline fallback.
     pub fn with_cache_file(mut self, file: impl Into<PathBuf>) -> Self {
-        self.cache_file = Some(file.into());
+        Arc::make_mut(&mut self.live).cache_file = Some(file.into());
         self
     }
 
-    /// Overrides the list URL and disables retries (tests).
+    /// Overrides the list URL (tests).
     pub fn with_url(mut self, url: impl Into<String>) -> Self {
-        self.url = url.into();
-        self.attempts = 1;
+        Arc::make_mut(&mut self.live).url = url.into();
         self
     }
+}
 
-    async fn load(&self) -> PortResult<(Vec<CatalogEntry>, Duration)> {
+#[async_trait]
+impl LiveCatalog for ReleasesJson {
+    /// The cache file, else the embedded snapshot.
+    async fn stored(&self) -> Option<Vec<CatalogEntry>> {
         let today = Date::today();
-        let live = match crate::http::get_text(&self.client, &self.url, self.attempts).await {
-            Ok(text) => parse_releases(&text, today).map(|entries| (text, entries)),
-            Err(e) => Err(e),
-        };
-        match live {
-            Ok((text, entries)) if !entries.is_empty() => {
-                self.store_cache(&text).await;
-                return Ok((entries, TTL));
-            }
-            Ok(_) => tracing::warn!(url = %self.url, "releases.json listed no NTS x64 builds; using the cached copy"),
-            Err(e) => tracing::warn!(url = %self.url, error = %e, "cannot read the live PHP release list; using the cached copy"),
-        }
         if let Some(file) = &self.cache_file {
             if let Ok(text) = tokio::fs::read_to_string(file).await {
                 match parse_releases(&text, today) {
-                    Ok(entries) if !entries.is_empty() => return Ok((entries, FALLBACK_TTL)),
-                    _ => tracing::warn!(file = %file.display(), "cached releases.json is unusable"),
+                    Ok(entries) if !entries.is_empty() => return Some(entries),
+                    _ => tracing::warn!(file = %file.display(), "cached releases.json is unusable; using the embedded snapshot"),
                 }
             }
         }
-        Ok((parse_releases(SNAPSHOT_JSON, today)?, FALLBACK_TTL))
+        match parse_releases(SNAPSHOT_JSON, today) {
+            Ok(entries) => Some(entries),
+            Err(e) => {
+                tracing::error!(error = %e, "the embedded releases.json snapshot is unusable");
+                None
+            }
+        }
     }
 
-    async fn store_cache(&self, text: &str) {
-        let Some(file) = &self.cache_file else { return };
-        let write = async {
-            if let Some(dir) = file.parent() {
-                tokio::fs::create_dir_all(dir).await?;
-            }
-            let tmp = file.with_extension("json.tmp");
-            tokio::fs::write(&tmp, text).await?;
-            tokio::fs::rename(&tmp, file).await
-        };
-        if let Err(e) = write.await {
-            tracing::warn!(file = %file.display(), error = %e, "cannot write the releases.json cache");
+    async fn fetch_live(&self, cancel: &CancelFlag) -> PortResult<Vec<CatalogEntry>> {
+        let text = get_text(&self.client, &self.url, FetchPolicy::LIST, cancel).await?;
+        let entries = parse_releases(&text, Date::today())?;
+        if entries.is_empty() {
+            return Err(PortError::invalid_data(SOURCE_NAME, "releases.json lists no NTS x64 build"));
         }
+        if let Some(file) = &self.cache_file {
+            write_cache_file(file, &text).await;
+        }
+        Ok(entries)
     }
 }
 
 #[async_trait]
 impl PackageCatalogSource for PhpNetReleasesSource {
     fn name(&self) -> &str {
-        "windows.php.net"
+        SOURCE_NAME
     }
 
     fn kinds(&self) -> Vec<PackageKind> {
@@ -115,7 +118,7 @@ impl PackageCatalogSource for PhpNetReleasesSource {
         if kind != &PackageKind::PHP {
             return Ok(Vec::new());
         }
-        self.cache.get_or_load(|| self.load()).await
+        self.cache.get(&self.live).await
     }
 }
 
@@ -278,24 +281,57 @@ mod tests {
         assert!(parse_releases("not json", NOV_2026).is_err());
     }
 
+    const LIVE_JSON: &str = r#"{"8.3": {"version": "8.3.99", "nts-vs16-x64": {"zip": {"path": "php-8.3.99-nts-Win32-vs16-x64.zip", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}"#;
+    const CACHED_JSON: &str = r#"{"8.3": {"version": "8.3.98", "nts-vs16-x64": {"zip": {"path": "php-8.3.98-nts-Win32-vs16-x64.zip", "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}}"#;
+    /// Longer than any prompt answer may take, shorter than the test timeout.
+    const SLOW_SERVER: Duration = Duration::from_secs(3);
+    const PROMPT: Duration = Duration::from_millis(500);
+
+    fn versions(entries: &[CatalogEntry]) -> Vec<&str> {
+        entries.iter().map(|e| e.id.version.as_str()).collect()
+    }
+
     #[tokio::test]
-    async fn live_fetch_then_cache_file_fallback() {
-        let json = r#"{"8.3": {"version": "8.3.99", "nts-vs16-x64": {"zip": {"path": "php-8.3.99-nts-Win32-vs16-x64.zip", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}"#;
-        let server = TestServer::start(move |_| Reply::text(json)).await;
+    async fn answers_with_the_snapshot_then_the_live_list_and_refreshes_the_cache_file() {
+        let server = TestServer::start(move |_| Reply::text(LIVE_JSON)).await;
         let dir = tempfile::tempdir().unwrap();
         let cache = dir.path().join("cache").join("releases.json");
         let live = PhpNetReleasesSource::new(reqwest::Client::new()).with_url(server.url("/releases.json")).with_cache_file(&cache);
-        let entries = live.fetch(&PackageKind::PHP).await.unwrap();
-        assert_eq!(entries[0].id.version.as_str(), "8.3.99");
-        assert!(cache.exists(), "a successful fetch refreshes the cache file");
+        let first = live.fetch(&PackageKind::PHP).await.unwrap();
+        assert!(versions(&first).contains(&"8.3.36-1"), "no cache file yet: the embedded snapshot");
+        live.cache.settled().await;
+        assert_eq!(versions(&live.fetch(&PackageKind::PHP).await.unwrap()), ["8.3.99"]);
+        assert_eq!(std::fs::read_to_string(&cache).unwrap(), LIVE_JSON, "a successful fetch refreshes the cache file");
         assert!(live.fetch(&PackageKind::APACHE).await.unwrap().is_empty());
+    }
 
-        // Offline: an unreachable URL falls back to the cache fileâ€¦
+    #[tokio::test]
+    async fn offline_keeps_the_cache_file_then_the_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("releases.json");
+        std::fs::write(&cache, CACHED_JSON).unwrap();
         let offline = PhpNetReleasesSource::new(reqwest::Client::new()).with_url("http://127.0.0.1:9/releases.json").with_cache_file(&cache);
-        assert_eq!(offline.fetch(&PackageKind::PHP).await.unwrap()[0].id.version.as_str(), "8.3.99");
-        // â€¦and without a cache file to the embedded snapshot.
+        assert_eq!(versions(&offline.fetch(&PackageKind::PHP).await.unwrap()), ["8.3.98"]);
+        offline.cache.settled().await;
+        assert_eq!(versions(&offline.fetch(&PackageKind::PHP).await.unwrap()), ["8.3.98"], "a failed refresh keeps the cache file's entries");
+
         let snapshot = PhpNetReleasesSource::new(reqwest::Client::new()).with_url("http://127.0.0.1:9/releases.json");
-        assert!(snapshot.fetch(&PackageKind::PHP).await.unwrap().iter().any(|e| e.id.version.as_str() == "8.3.36-1"));
+        assert!(versions(&snapshot.fetch(&PackageKind::PHP).await.unwrap()).contains(&"8.3.36-1"));
+    }
+
+    #[tokio::test]
+    async fn a_slow_server_does_not_delay_the_listing() {
+        let server = TestServer::start(move |_| Reply::text(LIVE_JSON).delayed(SLOW_SERVER)).await;
+        let dir = tempfile::tempdir().unwrap();
+        let cache = dir.path().join("releases.json");
+        std::fs::write(&cache, CACHED_JSON).unwrap();
+        let source = PhpNetReleasesSource::new(reqwest::Client::new()).with_url(server.url("/releases.json")).with_cache_file(&cache);
+        for _ in 0..3 {
+            let entries = tokio::time::timeout(PROMPT, source.fetch(&PackageKind::PHP)).await.expect("answered from the cache file").unwrap();
+            assert_eq!(versions(&entries), ["8.3.98"]);
+        }
+        source.cache.settled().await;
+        assert_eq!(versions(&source.fetch(&PackageKind::PHP).await.unwrap()), ["8.3.99"]);
     }
 
     /// Live check against windows.php.net (run with `--ignored`).
@@ -303,9 +339,7 @@ mod tests {
     #[ignore = "network"]
     async fn live_releases_json_is_parseable() {
         let source = PhpNetReleasesSource::new(crate::http::build_client().unwrap());
-        let entries = source.load().await.unwrap();
-        assert_eq!(entries.1, TTL, "came from the network, not a fallback");
-        let entries = entries.0;
+        let entries = source.live.fetch_live(&CancelFlag::new()).await.unwrap();
         assert!(entries.iter().any(|e| !e.end_of_life), "at least one supported series");
         for e in &entries {
             assert!(e.sha256.is_some() && e.vc_runtime.is_some(), "{}", e.id);

@@ -2117,6 +2117,7 @@ name = "lampo-application"
 version = "0.1.2"
 dependencies = [
  "async-trait",
+ "futures-util",
  "lampo-domain",
  "serde",
  "serde_json",

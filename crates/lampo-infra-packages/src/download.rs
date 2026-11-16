@@ -32,7 +32,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
 use crate::checksum::IncrementalSha256;
-use crate::http::{FALLBACK_USER_AGENT, is_retryable};
+use crate::http::{FALLBACK_USER_AGENT, is_retryable, sleep_cancellable};
 use crate::mirrors::{self, UrlFallback};
 
 /// Appended to the destination's name for the file being downloaded.
@@ -224,13 +224,7 @@ impl HttpDownloader {
     async fn pause(&self, backoff: &mut Duration, retry_after: Option<Duration>, cancel: &CancelFlag) -> Result<(), Attempt> {
         let wait = retry_after.unwrap_or(*backoff).min(self.retry.max_backoff);
         *backoff = (*backoff * 2).min(self.retry.max_backoff);
-        // Sleep in small steps so cancellation stays responsive.
-        let deadline = Instant::now() + wait;
-        while Instant::now() < deadline {
-            cancel.check().map_err(Attempt::Fatal)?;
-            tokio::time::sleep(Duration::from_millis(100).min(deadline - Instant::now())).await;
-        }
-        cancel.check().map_err(Attempt::Fatal)
+        sleep_cancellable(wait, cancel).await.map_err(Attempt::Fatal)
     }
 }
 
