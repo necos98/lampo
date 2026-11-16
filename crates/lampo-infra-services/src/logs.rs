@@ -5,6 +5,7 @@ use std::path::Path;
 use lampo_domain::logs::{LogChunk, LogLine, LogQuery};
 use lampo_domain::ports::LogFileReader;
 use lampo_domain::{PortError, PortResult};
+use lampo_infra_fs::log_rotation::current_log_file;
 
 /// Block size for reading backwards.
 const BLOCK: u64 = 64 * 1024;
@@ -17,6 +18,11 @@ const MAX_FOLLOW_READ: u64 = 1024 * 1024;
 /// Only complete (newline-terminated) lines are returned, so `next_offset` is the end of the
 /// last complete line: the end of file in the usual case, and the start of a line still being
 /// written otherwise (so `--follow` never returns half a line).
+///
+/// A rotated log is read from the member of its set being written (`current_log_file`): Apache
+/// logs go round `error.log`, `error.log.1`, `error.log.2`, and right after a rotation the
+/// previous file is the newest one. When `--follow` moves to a new file, that file is shorter
+/// than the offset and `read_from` restarts from its beginning.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct FileLogReader;
 
@@ -98,6 +104,7 @@ impl ReverseLines {
 
 impl LogFileReader for FileLogReader {
     fn tail(&self, file: &Path, query: &LogQuery) -> PortResult<LogChunk> {
+        let file = &current_log_file(file);
         let Some(f) = open(file)? else { return Ok(LogChunk::default()) };
         let err = |e| PortError::io(format!("reading {}", file.display()), e);
         let mut lines = ReverseLines::new(f).map_err(err)?;
@@ -118,6 +125,7 @@ impl LogFileReader for FileLogReader {
     }
 
     fn read_from(&self, file: &Path, offset: u64) -> PortResult<LogChunk> {
+        let file = &current_log_file(file);
         let Some(mut f) = open(file)? else { return Ok(LogChunk::default()) };
         let err = |e| PortError::io(format!("reading {}", file.display()), e);
         let len = f.metadata().map_err(err)?.len();
@@ -341,6 +349,23 @@ mod tests {
         let texts: Vec<_> = chunk.lines.iter().map(|l| l.text.as_str()).collect();
         assert_eq!(texts, ["2026-11-13T10:05:00Z 0 [ERROR] new", "continuation", "2026-11-13T10:06:00Z 0 [Note] newer"]);
         assert_eq!(chunk.lines[1].at_unix_ms, None);
+    }
+
+    #[test]
+    fn reads_the_member_of_a_rotation_set_being_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = write(dir.path(), "access.log", "old 1\nold 2\n");
+        let first = FileLogReader.tail(&p, &LogQuery { max_lines: 10, since_unix_ms: None }).unwrap();
+        // rotatelogs moved on to `access.log.1`: the base file is now the older one.
+        let older = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+        std::fs::File::options().write(true).open(&p).unwrap().set_modified(older).unwrap();
+        write(dir.path(), "access.log.1", "new\n");
+        let chunk = FileLogReader.tail(&p, &LogQuery { max_lines: 10, since_unix_ms: None }).unwrap();
+        assert_eq!(chunk.lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["new"]);
+        // `--follow` from the old file's offset restarts at the top of the new one.
+        let followed = FileLogReader.read_from(&p, first.next_offset).unwrap();
+        assert_eq!(followed.lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>(), ["new"]);
+        assert_eq!(followed.next_offset, 4);
     }
 
     #[test]

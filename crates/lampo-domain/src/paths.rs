@@ -23,6 +23,7 @@
 //!   generated\php\<site-id>\php.ini
 //!   logs\<service-id>\{output,error}.log          (see logs::LogSource)
 //!   logs\projects\<site-id>\{access,error,php_errors}.log
+//!   logs\php-cli\php_errors.log                 PHP outside sites (shims, Lampo's own tools)
 //!   bin\                           shims: php.exe composer.exe mysql.exe mysqldump.exe redis-cli.exe
 //!                                  (copies of lampo-shim.exe) and lampo.exe (copy of the CLI) —
 //!                                  added to the user PATH
@@ -146,6 +147,11 @@ impl LampoPaths {
 
     pub fn site_log_dir(&self, site: &SiteId) -> PathBuf {
         self.logs_dir().join("projects").join(site.file_key())
+    }
+
+    /// PHP `error_log` of the php.ini files used outside sites (shims, Lampo's own tools).
+    pub fn cli_php_error_log(&self) -> PathBuf {
+        self.logs_dir().join("php-cli").join("php_errors.log")
     }
 
     pub fn shim_dir(&self) -> PathBuf {

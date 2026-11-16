@@ -306,6 +306,7 @@ async fn real_apache_serves_php_sites() {
     options.fcgid.idle_timeout_secs = 3;
     options.fcgid.idle_scan_interval_secs = 1;
     let configurator = ApacheConfigurator::with_options(Arc::new(TokioCommands), options);
+    let shop_access_log = shop.vhost.access_log.clone();
     let mut config = WebServerConfig {
         server_root: apache.clone(),
         mod_fcgid: fcgid.clone(),
@@ -433,6 +434,9 @@ async fn real_apache_serves_php_sites() {
         std::panic::resume_unwind(panic);
     }
     assert_eq!(left, 0);
+    // 9. The logs went through rotatelogs into the files the log reader shows.
+    let access = std::fs::read_to_string(&shop_access_log).expect("the site's access log exists");
+    assert!(access.contains("\"GET /products/42?color=red HTTP/1.0\" 200 "), "access log not written through rotatelogs:\n{access}");
 }
 
 /// Runs the future, capturing a panic so httpd is always stopped.

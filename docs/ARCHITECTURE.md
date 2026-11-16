@@ -361,6 +361,12 @@ cd apps/desktop; pnpm check; pnpm tauri dev
 
 Data lives in `%APPDATA%\Lampo` (config, one TOML per project) and `%LOCALAPPDATA%\Lampo`
 (packages, MySQL data, logs, generated configs, shims). `LAMPO_HOME` overrides both (tests).
+Logs stay below 10 MiB per file (`lampo_infra_fs::log_rotation`): Apache's error and access
+logs are piped through `<SRVROOT>\bin\rotatelogs.exe -n 3` (`error.log`, `error.log.1`,
+`error.log.2`, round again), a service's `output.log` is moved to `output.log.1` as it is
+written, MySQL's error log at each start, and PHP's `php_errors.log` files when their php.ini
+is written and every hour while the app runs (`PeriodicLogRotation`). The log reader shows the
+most recently written file of each set.
 The app itself is installed elsewhere, in `%LOCALAPPDATA%\Programs\Lampo` (per user, no admin):
 Tauri's per-user NSIS default is `%LOCALAPPDATA%\<productName>`, which is the data root, so
 `apps/desktop/src-tauri/windows/installer-hooks.nsh` redirects exactly that folder and the

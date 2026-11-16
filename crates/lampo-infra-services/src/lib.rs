@@ -11,6 +11,7 @@
 //! | [`MailpitRunner`]            | `ServiceRunner` for `ServiceKind::MAILPIT`   |
 //! | [`TcpPortProbe`]             | `PortProbe`                                  |
 //! | [`FileLogReader`]            | `LogFileReader`                              |
+//! | [`SizeLogRotator`]           | `LogRotator`                                 |
 //! | [`MysqlCliAdmin`]            | `DatabaseAdmin` (compressed dumps via [`compression`]) |
 //! | [`NamedPipeControlServer`]   | `ControlChannelServer`                       |
 //! | [`NamedPipeControlClient`]   | `ControlChannelClient`                       |
@@ -20,6 +21,7 @@
 //!
 //! Internal modules: `process` (process creation inside the job, IOCP stdio pipes),
 //! `service_host` (what every supervised runner shares; runners only describe their service),
+//! `rotating_log` (captured service output, rotated by size while it is written),
 //! `startup_deadline` (when a slow but progressing start gives up), `last_resort` (synchronous
 //! clean MySQL shutdown when the app goes away without the graceful stop),
 //! `win` (thin Win32 wrappers). Windows only.
@@ -39,6 +41,7 @@ pub mod mysql;
 pub mod ports;
 mod process;
 pub mod redis;
+mod rotating_log;
 mod service_host;
 #[cfg(test)]
 mod service_host_tests;
@@ -57,5 +60,6 @@ pub use mailpit::MailpitRunner;
 pub use mysql::MysqlRunner;
 pub use ports::TcpPortProbe;
 pub use redis::RedisRunner;
+pub use rotating_log::SizeLogRotator;
 pub use supervisor::JobObjectSupervisor;
 pub use timer::TokioTimer;

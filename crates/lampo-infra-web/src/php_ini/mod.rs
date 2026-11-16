@@ -15,6 +15,7 @@ use lampo_domain::php::{ExtensionName, PhpMinor};
 use lampo_domain::ports::PhpIniWriter;
 use lampo_domain::web::{ExtensionLoad, PhpIniSpec};
 use lampo_domain::PortResult;
+use lampo_infra_fs::log_rotation::{MAX_LOG_BYTES, rotate_if_large};
 
 use self::syntax::{ini_path, ini_value};
 use self::xdebug::XdebugGeneration;
@@ -38,7 +39,8 @@ pub struct IniInputs {
 }
 
 /// Renders and writes php.ini files. Rendering ([`PhpIniRenderer::render`]) is pure; the
-/// [`PhpIniWriter`] implementation gathers [`IniInputs`] from disk and writes atomically.
+/// [`PhpIniWriter`] implementation gathers [`IniInputs`] from disk, writes atomically and rotates the
+/// site's error log when it is too large.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PhpIniRenderer;
 
@@ -136,6 +138,11 @@ impl PhpIniWriter for PhpIniRenderer {
         ensure_dir(&site_layout::temp_dir(&spec.output_dir))?;
         if let Some(dir) = spec.error_log.parent() {
             ensure_dir(dir)?;
+        }
+        // PHP opens the log for every entry, so it can be moved aside while sites run too
+        // (`PeriodicLogRotation` in the application does that).
+        if let Err(e) = rotate_if_large(&spec.error_log, MAX_LOG_BYTES) {
+            tracing::warn!("cannot rotate {}: {e}", spec.error_log.display());
         }
         write_atomic(&spec.output_dir.join("php.ini"), text.as_bytes())
     }

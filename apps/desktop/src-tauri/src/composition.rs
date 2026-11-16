@@ -21,6 +21,8 @@ pub struct Built {
     pub state: AppState,
     pub control_server: Arc<dyn ControlChannelServer>,
     pub control_handler: Arc<dyn ControlRequestHandler>,
+    /// Rotates the PHP error logs while the app runs (spawned by the app setup).
+    pub log_rotation: Arc<PeriodicLogRotation>,
 }
 
 /// Folder of the running executable. The helper executables (`lampo.exe`, `lampo-shim.exe`,
@@ -251,6 +253,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         gate: shutdown.gate(),
     }));
 
+    let log_rotation = Arc::new(PeriodicLogRotation::new(Arc::new(services::SizeLogRotator), Arc::new(services::TokioTimer), projects.clone(), worktrees.clone(), paths.clone()));
     let state = AppState {
         events: events.clone(),
         tasks,
@@ -326,7 +329,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         shutdown,
     };
 
-    Ok(Built { state, control_server, control_handler })
+    Ok(Built { state, control_server, control_handler, log_rotation })
 }
 
 /// Last-resort clean shutdown of the MySQL servers this app started, waiting up to `timeout`

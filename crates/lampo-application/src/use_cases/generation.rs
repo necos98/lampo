@@ -109,15 +109,7 @@ pub(crate) fn php_ini_specs(snap: &ConfigSnapshot, catalog: &ServiceCatalog, pat
     if let Some(php) = snap.default_php() {
         let dir = php_dir(&snap.installed, php).expect("default PHP is installed");
         let extensions = DEFAULT_CLI_EXTENSIONS.iter().map(|n| bundled(&ExtensionName::new(n).expect("valid"))).collect();
-        specs.push(PhpIniSpec {
-            site: default_ini_site(),
-            php,
-            php_dir: dir,
-            output_dir: paths.default_php_ini_dir(),
-            extensions,
-            values: base_ini(),
-            error_log: paths.logs_dir().join("php-cli").join("php_errors.log"),
-        });
+        specs.push(PhpIniSpec { site: default_ini_site(), php, php_dir: dir, output_dir: paths.default_php_ini_dir(), extensions, values: base_ini(), error_log: paths.cli_php_error_log() });
     }
     specs
 }

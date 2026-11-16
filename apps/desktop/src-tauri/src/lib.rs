@@ -52,6 +52,11 @@ pub fn run() {
             // service, applied once the operation finishes.
             tauri::async_runtime::spawn(async move { environment.apply_deferred_changes().await });
 
+            // PHP error logs stay bounded during long sessions (Apache and service logs rotate
+            // themselves).
+            let log_rotation = built.log_rotation;
+            tauri::async_runtime::spawn(async move { log_rotation.run().await });
+
             // Control pipe for the CLI (single owner of service processes).
             let (server, handler) = (built.control_server, built.control_handler);
             tauri::async_runtime::spawn(async move {

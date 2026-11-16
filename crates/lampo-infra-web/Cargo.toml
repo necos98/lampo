@@ -14,6 +14,7 @@ path = "src/bin/lampo-hosts-helper.rs"
 
 [dependencies]
 lampo-domain = { workspace = true }
+lampo-infra-fs = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -97,7 +97,9 @@ fn fixture() -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let install = dir.path().join("apache 2.4");
     std::fs::create_dir_all(install.join("bin")).unwrap();
-    std::fs::write(install.join("bin").join("httpd.exe"), b"").unwrap();
+    for exe in ["httpd.exe", "rotatelogs.exe"] {
+        std::fs::write(install.join("bin").join(exe), b"").unwrap();
+    }
     let config_dir = dir.path().join("generated").join("apache");
     std::fs::create_dir_all(&config_dir).unwrap();
     std::fs::write(config_dir.join("httpd.conf"), format!("Listen 127.0.0.1:{SHARED_PORT}\nListen [::1]:{SHARED_PORT}\n")).unwrap();
@@ -171,6 +173,16 @@ async fn missing_config_is_reported_before_spawning() {
     std::fs::remove_file(f.launch.config_dir.join("httpd.conf")).unwrap();
     let err = f.runner.start(&f.launch).await.unwrap_err();
     assert!(matches!(err, PortError::NotFound { entity: "Apache configuration", .. }));
+    assert!(f.supervisor.specs.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn missing_rotatelogs_is_reported_before_spawning() {
+    let f = fixture();
+    std::fs::remove_file(f.launch.install_dir.join("bin").join("rotatelogs.exe")).unwrap();
+    let err = f.runner.prepare(&f.launch).await.unwrap_err();
+    assert!(matches!(err, PortError::NotFound { entity: "Apache rotatelogs", .. }));
+    assert!(f.runner.start(&f.launch).await.is_err());
     assert!(f.supervisor.specs.lock().unwrap().is_empty());
 }
 

@@ -151,7 +151,7 @@ impl ScaffoldProject {
             output_dir: ini_dir.clone(),
             extensions: scaffold::TOOL_PHP_EXTENSIONS.iter().map(|n| bundled(&ExtensionName::new(n).expect("valid extension name"))).collect(),
             values: base_ini(),
-            error_log: self.deps.paths.logs_dir().join("php-cli").join("php_errors.log"),
+            error_log: self.deps.paths.cli_php_error_log(),
         })?;
         let composer_dir = self.deps.paths.tool_composer_dir(php);
         self.deps.files.write_file(&composer_dir.join("composer.bat"), &scaffold::composer_wrapper_script(&php_exe, &phar))?;

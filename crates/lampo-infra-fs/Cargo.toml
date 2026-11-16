@@ -1,6 +1,6 @@
 [package]
 name = "lampo-infra-fs"
-description = "Lampo filesystem primitives shared by the infrastructure adapters: durable atomic file writes and backup names of unreadable files."
+description = "Lampo filesystem primitives shared by the infrastructure adapters: durable atomic file writes, backup names of unreadable files and size-bounded log files."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

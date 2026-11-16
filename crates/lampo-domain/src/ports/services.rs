@@ -168,6 +168,15 @@ pub trait LogFileReader: Send + Sync {
     fn read_from(&self, file: &Path, offset: u64) -> PortResult<LogChunk>;
 }
 
+/// Keeps log files bounded, for the logs whose writer reopens them for every entry (PHP's
+/// `error_log`) and so cannot rotate them itself. The current file stays where
+/// [`LogFileReader`] finds it.
+pub trait LogRotator: Send + Sync {
+    /// Moves `file` aside when it is over the size limit; a missing or small file is left
+    /// alone.
+    fn rotate_if_large(&self, file: &Path) -> PortResult<()>;
+}
+
 /// Where to reach a MySQL instance with its command-line clients.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MysqlEndpoint {

@@ -21,7 +21,8 @@ use lampo_domain::{PortError, PortResult};
 use tokio::io::AsyncReadExt;
 use windows_sys::Win32::System::Threading::{EVENT_MODIFY_STATE, OpenEventW, SetEvent};
 
-use crate::service_host::{MAX_LOG_BYTES, ServiceDriver, ServiceHost, create_dir, find_executable, rotate_if_large, write_if_changed};
+use crate::rotating_log::rotate_closed_log;
+use crate::service_host::{ServiceDriver, ServiceHost, create_dir, find_executable, write_if_changed};
 use crate::win::{owned, raw, wide};
 
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
@@ -312,7 +313,7 @@ impl ServiceRunner for MysqlRunner {
         if let Some(parent) = data_dir.parent() {
             create_dir(parent)?;
         }
-        rotate_if_large(&error_log(launch), MAX_LOG_BYTES);
+        rotate_closed_log(&error_log(launch));
         write_if_changed(&my_ini(launch), &self.render_my_ini(launch))?;
         if is_empty_dir(data_dir) {
             self.initialize(launch, data_dir).await?;

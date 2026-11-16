@@ -1,14 +1,12 @@
 //! What every supervised service runner shares: the status table and its events, the observer
-//! that writes captured output to `<log_dir>\output.log`, and the start/stop sequence
-//! (port check → spawn via [`ProcessSupervisor`] → health check → running, the deadline pushed
-//! forward while a slow start keeps making progress; graceful request →
-//! `terminate`). A runner only describes its service through [`ServiceDriver`]: command line,
+//! that writes captured output to `<log_dir>\output.log` (rotated by size), and the start/stop
+//! sequence (port check → spawn via [`ProcessSupervisor`] → health check → running, the deadline
+//! pushed forward while a slow start keeps making progress; graceful request → `terminate`).
+//! A runner only describes its service through [`ServiceDriver`]: command line,
 //! readiness probe, shutdown request, failure diagnostics. Adding a service kind means adding a
 //! driver and a runner type; this module does not change.
 
 use std::collections::{HashMap, VecDeque};
-use std::fs::{File, OpenOptions};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -21,11 +19,12 @@ use lampo_domain::{PortError, PortResult};
 use tokio::sync::watch;
 use tokio::time::Instant;
 
+use crate::rotating_log::RotatingLog;
 use crate::startup_deadline::StartupDeadline;
 use crate::win;
 
-/// Rotated to `<name>.1` at start when bigger than this.
-pub(crate) const MAX_LOG_BYTES: u64 = 10 * 1024 * 1024;
+/// Captured stdout/stderr of a service, in its log dir (`LogSource::ServiceOutput`).
+const OUTPUT_LOG: &str = "output.log";
 const RECENT_LINES: usize = 20;
 const READY_POLL: Duration = Duration::from_millis(250);
 /// Longest start, however long [`ServiceDriver::startup_progress`] keeps moving.
@@ -130,24 +129,13 @@ pub(crate) fn iso_utc(ms: u64) -> String {
     format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}.{:03}Z", rem / 3600, rem % 3600 / 60, rem % 60, ms % 1000)
 }
 
-/// Moves `path` to `path.1` when it is larger than `max` (keeps one previous file).
-pub(crate) fn rotate_if_large(path: &Path, max: u64) {
-    if std::fs::metadata(path).is_ok_and(|m| m.len() > max) {
-        let mut old = path.as_os_str().to_owned();
-        old.push(".1");
-        let _ = std::fs::rename(path, PathBuf::from(old));
-    }
-}
-
-/// Writes `content` unless the file already holds exactly that.
+/// Writes `content` atomically (a crash or a concurrent reader never sees half a file) unless
+/// the file already holds exactly that.
 pub(crate) fn write_if_changed(path: &Path, content: &str) -> PortResult<()> {
     if std::fs::read_to_string(path).is_ok_and(|c| c == content) {
         return Ok(());
     }
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| PortError::io(format!("creating {}", dir.display()), e))?;
-    }
-    std::fs::write(path, content).map_err(|e| PortError::io(format!("writing {}", path.display()), e))
+    lampo_infra_fs::write_atomic(path, content.as_bytes())
 }
 
 pub(crate) fn create_dir(dir: &Path) -> PortResult<()> {
@@ -174,7 +162,7 @@ struct ServiceObserver {
     service: ServiceId,
     generation: u64,
     board: Arc<StatusBoard>,
-    log: Mutex<Option<File>>,
+    log: Mutex<RotatingLog>,
     recent: Mutex<VecDeque<String>>,
     exited: watch::Sender<bool>,
 }
@@ -189,8 +177,8 @@ impl ProcessObserver for ServiceObserver {
     fn on_output(&self, stream: LogStream, line: &str) {
         let at = now_ms();
         if let Ok(mut log) = self.log.lock() {
-            if let Some(f) = log.as_mut() {
-                let _ = f.write_all(format!("{} {line}\n", iso_utc(at)).as_bytes());
+            if let Err(e) = log.write(format!("{} {line}\n", iso_utc(at)).as_bytes()) {
+                tracing::warn!("{}: output line not written to {OUTPUT_LOG}: {e}", self.service);
             }
         }
         if let Ok(mut recent) = self.recent.lock() {
@@ -277,9 +265,7 @@ impl ServiceHost {
         let spec = driver.command(launch)?;
         let marker = driver.start_marker(launch);
         create_dir(&launch.log_dir)?;
-        let log_path = launch.log_dir.join("output.log");
-        rotate_if_large(&log_path, MAX_LOG_BYTES);
-        let log = OpenOptions::new().create(true).append(true).open(&log_path).map_err(|e| PortError::io(format!("opening {}", log_path.display()), e))?;
+        let log = RotatingLog::open(&launch.log_dir.join(OUTPUT_LOG))?;
 
         let mut generation = 0;
         self.board.update(service, |inst| {
@@ -290,7 +276,7 @@ impl ServiceHost {
             inst.status = ServiceStatus { service: service.clone(), state: ServiceState::Starting, pid: None, port: Some(launch.port), message: None };
         });
         let (exited_tx, mut exited) = watch::channel(false);
-        let observer = Arc::new(ServiceObserver { service: service.clone(), generation, board: self.board.clone(), log: Mutex::new(Some(log)), recent: Mutex::default(), exited: exited_tx });
+        let observer = Arc::new(ServiceObserver { service: service.clone(), generation, board: self.board.clone(), log: Mutex::new(log), recent: Mutex::default(), exited: exited_tx });
         let spawned = match self.supervisor.spawn(spec, observer.clone()).await {
             Ok(s) => s,
             Err(e) => {

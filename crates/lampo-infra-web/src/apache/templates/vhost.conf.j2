@@ -15,8 +15,9 @@
     ServerAlias {{ alias }}
 {% endfor %}
     DocumentRoot "{{ vhost.document_root }}"
-    ErrorLog "{{ vhost.error_log }}"
-    CustomLog "{{ vhost.access_log }}" lampo
+    # Logs go through rotatelogs: a circular set of size-bounded files (error.log, error.log.1, …).
+    ErrorLog {{ vhost.error_log }}
+    CustomLog {{ vhost.access_log }} lampo
 
     # PHP ({{ vhost.php_label }}): this site's own php-cgi.exe and php.ini (PHPRC).
     FcgidWrapper {{ vhost.fcgid_wrapper }} .php

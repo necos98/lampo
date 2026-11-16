@@ -12,7 +12,7 @@ use lampo_domain::{PortError, PortResult};
 use super::config::main_conf_path;
 use super::listen::ports_to_own;
 use super::signal::{HttpdSignal, HttpdSignals, NamedEventSignals};
-use super::validation::httpd_exe;
+use super::validation::{httpd_exe, rotatelogs_exe};
 use crate::fs_util::ensure_dir;
 
 /// How long to wait for a started (or restarted) httpd to listen on every configured port.
@@ -229,11 +229,17 @@ impl ServiceRunner for ApacheRunner {
     }
 }
 
-/// `(httpd.exe, httpd.conf)` or a `NotFound` naming what is missing.
+/// `(httpd.exe, httpd.conf)`, once they and `rotatelogs.exe` exist, or a `NotFound` naming what is
+/// missing.
 fn check_installation(launch: &ServiceLaunch) -> PortResult<(std::path::PathBuf, std::path::PathBuf)> {
     let program = httpd_exe(&launch.install_dir);
     if !program.is_file() {
         return Err(PortError::not_found("Apache executable", program.display().to_string()));
+    }
+    // The generated logs are piped through it: without it httpd would exit at start-up.
+    let rotatelogs = rotatelogs_exe(&launch.install_dir);
+    if !rotatelogs.is_file() {
+        return Err(PortError::not_found("Apache rotatelogs", rotatelogs.display().to_string()));
     }
     let conf = main_conf_path(&launch.config_dir);
     if !Path::new(&conf).is_file() {

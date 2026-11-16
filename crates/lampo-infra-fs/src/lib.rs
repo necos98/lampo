@@ -2,13 +2,16 @@
 //!
 //! Filesystem primitives every infrastructure adapter that persists files shares, so that the
 //! store (`lampo-infra-store`) and the package registry (`lampo-infra-packages`) write and back
-//! up their files the same way without depending on each other.
+//! up their files the same way without depending on each other, and the size-bounded log files
+//! ([`log_rotation`]) the service and web adapters write and the log reader follows.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lampo_domain::{PortError, PortResult};
+
+pub mod log_rotation;
 
 /// Prefix of the temp files of in-flight atomic writes, so listings can never mistake them for
 /// data files.

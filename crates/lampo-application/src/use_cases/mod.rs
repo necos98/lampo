@@ -18,6 +18,7 @@ pub mod diagnostics;
 pub mod environment;
 pub(crate) mod generation;
 pub mod lifecycle;
+pub mod log_rotation;
 pub mod logs;
 pub mod package_uninstall;
 pub mod packages;
@@ -55,6 +56,7 @@ pub use diagnostics::{
 };
 pub use environment::{ApplyEnvironment, ApplyEnvironmentDeps, EnvironmentSync, ServiceLifecycle};
 pub use lifecycle::{FirstRunDeps, FirstRunSetup, Shutdown, ShutdownGate, Startup};
+pub use log_rotation::PeriodicLogRotation;
 pub use logs::LogQueries;
 pub use package_uninstall::{UninstallPackage, UninstallPackageDeps};
 pub use packages::{InstallPackage, InstallPackageDeps, PackageCatalog, PackageCatalogDeps, PhpExtensionListing, PhpExtensionsQuery};
