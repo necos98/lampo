@@ -286,6 +286,25 @@ fn logs_sources_tail_and_follow() {
     assert_eq!(logs.tail(&LogTailRequest { source: "nginx".into(), lines: 1, since_unix_ms: None }).unwrap_err().code, ErrorCode::Validation);
 }
 
+/// The full list (the GUI's) ends with the site logs of every project, served or not, so a
+/// project's log link always finds its source.
+#[test]
+fn logs_sources_without_a_site_list_the_site_logs_of_every_project() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", true);
+    w.project("blog", "C:\\sites\\blog", false);
+    let logs = LogQueries::new(Arc::new(FakeLogs::default()), w.projects.clone(), w.settings.clone(), w.services.clone(), w.paths.clone());
+
+    let all = logs.sources(None).unwrap();
+    let ids: Vec<&str> = all.iter().map(|s| s.id.as_str()).collect();
+    let first_site = ids.iter().position(|id| id.contains(':')).unwrap();
+
+    assert!(ids[..first_site].iter().all(|id| !id.contains(':')), "service sources come first: {ids:?}");
+    assert_eq!(ids[first_site..], ["access:blog", "error:blog", "php:blog", "access:shop", "error:shop", "php:shop"]);
+    let blog_error = &all[first_site + 1];
+    assert_eq!(blog_error.file, w.paths.site_log_dir(&"blog".parse().unwrap()).join("error.log").display().to_string());
+}
+
 // --- services, status, settings --------------------------------------------------------------
 
 #[tokio::test]

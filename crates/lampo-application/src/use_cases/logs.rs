@@ -5,7 +5,9 @@ use std::sync::Arc;
 use lampo_domain::logs::{LogChunk, LogQuery, LogSource};
 use lampo_domain::paths::LampoPaths;
 use lampo_domain::ports::{LogFileReader, ProjectRepository, SettingsRepository};
+use lampo_domain::project::Project;
 use lampo_domain::service::ServiceId;
+use lampo_domain::site::SiteId;
 
 use super::service_catalog::ServiceCatalog;
 use super::support::parse_site;
@@ -34,9 +36,9 @@ impl LogQueries {
         LogSourceDto { id: source.to_string(), file: file.display().to_string(), exists }
     }
 
-    /// Sources of a site (`access/error/php` + the error logs of its services), or every
-    /// service source when `None`: output and error log of each configured service and of
-    /// every service a project uses.
+    /// Sources of a site (`access/error/php` + the error logs of its services), or everything
+    /// when `None`: output and error log of each configured service and of every service a
+    /// project uses, then `access/error/php` of every project (served or not).
     pub fn sources(&self, site: Option<&str>) -> AppResult<Vec<LogSourceDto>> {
         let sources = match site.map(str::trim).filter(|s| !s.is_empty()) {
             Some(raw) => {
@@ -45,18 +47,26 @@ impl LogQueries {
                 LogSource::for_site(&site, self.services.with_error_log(project.environment.service_ids()))
             }
             None => {
-                let mut ids: Vec<ServiceId> = self.services.configured(&self.settings.load()?);
-                let used: BTreeSet<ServiceId> = self.projects.list()?.iter().flat_map(|p| p.environment.service_ids().collect::<Vec<_>>()).collect();
-                ids.extend(used.into_iter().filter(|id| !ids.contains(id)).collect::<Vec<_>>());
-                let mut out = Vec::new();
-                for id in ids {
-                    out.push(LogSource::ServiceOutput(id.clone()));
-                    out.extend(self.services.with_error_log([id]).into_iter().map(LogSource::ServiceError));
-                }
+                let projects = self.projects.list()?;
+                let mut out = self.service_sources(&projects)?;
+                out.extend(projects.iter().flat_map(|p| LogSource::for_site(&SiteId::Project(p.id.clone()), [])));
                 out
             }
         };
         Ok(sources.iter().map(|s| self.source_dto(s)).collect())
+    }
+
+    /// Output and error log of each configured service, then of the other services `projects` use.
+    fn service_sources(&self, projects: &[Project]) -> AppResult<Vec<LogSource>> {
+        let mut ids: Vec<ServiceId> = self.services.configured(&self.settings.load()?);
+        let used: BTreeSet<ServiceId> = projects.iter().flat_map(|p| p.environment.service_ids().collect::<Vec<_>>()).collect();
+        ids.extend(used.into_iter().filter(|id| !ids.contains(id)).collect::<Vec<_>>());
+        let mut out = Vec::new();
+        for id in ids {
+            out.push(LogSource::ServiceOutput(id.clone()));
+            out.extend(self.services.with_error_log([id]).into_iter().map(LogSource::ServiceError));
+        }
+        Ok(out)
     }
 
     /// Parses a source; service sources must name a registered kind (and an error log only

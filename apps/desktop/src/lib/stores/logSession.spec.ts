@@ -124,6 +124,51 @@ describe('LogSession polling', () => {
 		expect(offsets).toEqual([]);
 	});
 
+	it('never reads again once disposed, even when opened afterwards', async () => {
+		let tails = 0;
+		const offsets: number[] = [];
+		const { backend } = testBackend({
+			tailLog: async () => {
+				tails++;
+				return batch(['a'], 1);
+			},
+			readLogFrom: async (_source, offset) => {
+				offsets.push(offset);
+				return batch([], offset);
+			}
+		});
+		const session = new LogSession(backend);
+
+		session.dispose();
+		await session.open(SOURCE);
+		await vi.advanceTimersByTimeAsync(POLL_MS * 3);
+
+		expect(tails).toBe(0);
+		expect(offsets).toEqual([]);
+		expect(session.source).toBeNull();
+	});
+
+	it('dispose() while the tail loads leaves no polling behind', async () => {
+		const slow = deferred<LogLines>();
+		const offsets: number[] = [];
+		const { backend } = testBackend({
+			tailLog: () => slow.promise,
+			readLogFrom: async (_source, offset) => {
+				offsets.push(offset);
+				return batch([], offset);
+			}
+		});
+		const session = new LogSession(backend);
+
+		const opening = session.open(SOURCE);
+		session.dispose();
+		slow.resolve(batch(['a'], 1));
+		await opening;
+		await vi.advanceTimersByTimeAsync(POLL_MS * 3);
+
+		expect(offsets).toEqual([]);
+	});
+
 	it('does not poll while hidden and catches up at once when shown', async () => {
 		const { session, offsets } = scripted(batch(['a'], 1), [batch(['b'], 2)]);
 		await session.open(SOURCE);

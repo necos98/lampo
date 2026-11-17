@@ -617,7 +617,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 		// Logs
 		listLogSources: async (site = null) => {
 			await sleep(120);
-			const sites = projects.filter((p) => p.active && (!site || p.id === site));
+			const sites = projects.filter((p) => !site || p.id === site);
 			const src = (id: string): T.LogSource => ({ id, file: logs.file(id), exists: logs.exists(id) });
 			return [
 				...(site ? [] : [src('apache'), src('apache-error'), src('mysql-8.4'), src('mysql-8.4-error'), src('mysql-5.7'), src('redis'), src('mailpit')]),

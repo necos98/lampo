@@ -16,7 +16,8 @@ export interface LogEntry extends LogLine {
 
 /**
  * Live tail of one log source: an initial `tailLog`, then `readLogFrom` polling with the offset
- * the backend handed back. One session per viewer; `close()` stops the polling.
+ * the backend handed back. One session per viewer; `close()` stops the polling, `dispose()`
+ * stops it for good when the viewer goes away.
  *
  * Polling runs whether or not the reader follows the tail, so no line is lost; while not
  * following, new lines are held back (see `TailBuffer`) and counted in `pendingCount`. A hidden
@@ -53,12 +54,14 @@ export class LogSession {
 	#offset = 0;
 	#seq = 0;
 	#generation = 0;
+	#disposed = false;
 
 	constructor(backend: Backend) {
 		this.#backend = backend;
 	}
 
 	async open(source: string | null): Promise<void> {
+		if (this.#disposed) return;
 		this.close();
 		const generation = ++this.#generation;
 		this.source = source;
@@ -112,6 +115,12 @@ export class LogSession {
 	close(): void {
 		this.#generation++;
 		this.#poller.stop();
+	}
+
+	/** Closes for good: the viewer is gone, so a late `open()` (a list that arrived after) is ignored. */
+	dispose(): void {
+		this.#disposed = true;
+		this.close();
 	}
 
 	#entries(lines: LogLine[]): LogEntry[] {

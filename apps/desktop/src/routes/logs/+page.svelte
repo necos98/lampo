@@ -4,6 +4,7 @@
 
 	import { page } from '$app/state';
 
+	import type { LogSource } from '#lib/api/index.js';
 	import AsyncBoundary from '#lib/components/common/AsyncBoundary.svelte';
 	import PageHeader from '#lib/components/common/PageHeader.svelte';
 	import SelectField from '#lib/components/common/SelectField.svelte';
@@ -15,9 +16,9 @@
 	import { Checkbox } from '#lib/components/ui/checkbox/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
-	import { pickInitialSource, readLastSource, rememberLastSource } from '#lib/logs/lastSource.js';
+	import { openRequestedSource } from '#lib/logs/initialSource.js';
+	import { readLastSource, rememberLastSource } from '#lib/logs/lastSource.js';
 	import { isLevelFilter, LEVEL_FILTERS } from '#lib/logs/level.js';
-	import { serviceLogSource } from '#lib/logs/serviceSource.js';
 	import { messages as m } from '#lib/messages/index.js';
 	import { createLogSearch, createLogSession, logSources } from '#lib/stores/index.js';
 
@@ -38,26 +39,24 @@
 	}
 
 	const request = $derived({ source: page.url.searchParams.get('source'), service: page.url.searchParams.get('service') });
-	/** Only the latest request opens its log, however the source lists arrive. */
-	let requestGeneration = 0;
+
+	async function loadSources(): Promise<LogSource[]> {
+		await logSources.load();
+		return logSources.list.data ?? [];
+	}
 
 	onMount(() => {
 		session.setHidden(document.hidden);
-		return () => session.close();
+		return () => session.dispose();
 	});
 
-	// Also when already on this page: a toast's «Vedi log» only changes the query.
+	// Also when already on this page: a toast's «Vedi log» only changes the query. Only the latest
+	// request opens its log, and none once the page is left, however the source lists arrive.
 	$effect(() => {
 		const wanted = request;
-		const generation = ++requestGeneration;
-		untrack(() => {
-			void logSources.load().then(() => {
-				if (generation !== requestGeneration) return;
-				const all = logSources.list.data ?? [];
-				const pick = pickInitialSource(all, wanted.source ?? serviceLogSource(all, wanted.service), readLastSource());
-				if (pick) show(pick);
-			});
-		});
+		const controller = new AbortController();
+		untrack(() => void openRequestedSource({ load: loadSources, request: wanted, remembered: readLastSource, show, signal: controller.signal }));
+		return () => controller.abort();
 	});
 
 	const sources = $derived(logSources.list.data ?? []);
