@@ -1,12 +1,13 @@
-//! The antivirus scan exclusions of Lampo's files. Implemented by `lampo-infra-web`
-//! (`DefenderScanExclusion`, through the elevated helper).
+//! The antivirus scan exclusions of Lampo's files and Defender's state. Implemented by `lampo-infra-web`
+//! (`DefenderScanExclusion` through the elevated helper, `PowerShellDefenderState`) and
+//! `lampo-infra-store` (`TomlProcessExclusionRecord`).
 
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 
 use crate::error::PortResult;
-use crate::scan_exclusion::{ScanExclusionChange, ScanExclusionOutcome, ScanExclusionTargets};
+use crate::scan_exclusion::{DefenderState, ProcessExclusionRecord, ScanExclusionChange, ScanExclusionOutcome, ScanExclusionTargets};
 
 /// Adds or removes the Microsoft Defender exclusions of `targets`, all through one UAC prompt.
 ///
@@ -29,4 +30,24 @@ pub trait ScanExclusionEditor: Send + Sync {
     /// changes nothing (a missing MySQL folder, which adding creates, is not an error): it tells
     /// what someone else may exclude for the user.
     fn accepted_targets(&self, targets: &ScanExclusionTargets, change: ScanExclusionChange) -> PortResult<ScanExclusionTargets>;
+}
+
+/// Reads Microsoft Defender's state without elevation. Implemented by `lampo-infra-web`
+/// (`PowerShellDefenderState`). Errors: `Process` when the state cannot be read (PowerShell
+/// missing, failing or not answering within a few seconds): the caller treats it as unknown.
+#[async_trait]
+pub trait DefenderStateReader: Send + Sync {
+    async fn state(&self) -> PortResult<DefenderState>;
+}
+
+/// Reads what Lampo remembers of its requests naming the server processes. Implemented by
+/// `lampo-infra-store` (`TomlProcessExclusionRecord`). A missing record is the default (never
+/// asked); `InvalidData` when it does not load.
+pub trait ProcessExclusionRecordReader: Send + Sync {
+    fn read(&self) -> PortResult<ProcessExclusionRecord>;
+}
+
+/// Replaces the record of the requests naming the server processes.
+pub trait ProcessExclusionRecordWriter: Send + Sync {
+    fn write(&self, record: &ProcessExclusionRecord) -> PortResult<()>;
 }

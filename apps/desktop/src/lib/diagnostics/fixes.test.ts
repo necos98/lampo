@@ -8,7 +8,7 @@ const check = (id: string, status: CheckStatus = 'warning'): DoctorCheck => ({ i
 const noVc = { missingVcRuntimes: [] as VcRuntimeIssue[] };
 
 test('a passing check offers nothing', () => {
-	for (const id of ['shims-on-path', 'stale-worktrees', 'hosts-block', 'services', 'packages', 'folders', 'mysql-auth', 'ports', 'vc-runtime']) {
+	for (const id of ['shims-on-path', 'stale-worktrees', 'hosts-block', 'services', 'packages', 'folders', 'mysql-auth', 'defender', 'ports', 'vc-runtime']) {
 		assert.deepEqual(fixActions(check(id, 'ok'), noVc), [], id);
 	}
 });
@@ -24,6 +24,7 @@ test('fixes made on another page navigate there', () => {
 	assert.deepEqual(fixActions(check('packages', 'error'), noVc), [{ kind: 'navigate', href: '/packages', page: 'packages' }]);
 	assert.deepEqual(fixActions(check('folders'), noVc), [{ kind: 'navigate', href: '/projects', page: 'projects' }]);
 	assert.deepEqual(fixActions(check('mysql-auth'), noVc), [{ kind: 'navigate', href: '/projects', page: 'projects' }]);
+	assert.deepEqual(fixActions(check('defender'), noVc), [{ kind: 'navigate', href: '/settings', page: 'settings' }]);
 	assert.deepEqual(fixActions(check('ports', 'error'), noVc), [{ kind: 'navigate', href: '/services', page: 'services' }]);
 });
 

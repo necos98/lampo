@@ -30,6 +30,8 @@
 //!   bin\shim-index.json            read by the shims on every invocation
 //!   secrets\<service-id>.root.dpapi  password of a MySQL instance's root, when it has one,
 //!                                  encrypted for the Windows user (DPAPI)
+//!   defender-exclusion.toml        outcome of the last Defender exclusion request for the server
+//!                                  processes, and the executables Defender confirmed excluded
 //!   app-location.txt               folder of the last started lampo-desktop.exe, read by copies
 //!                                  of the CLI that do not sit next to the app (bin\lampo.exe)
 //!   tools\laravel-installer\<php>\ Lampo's own `laravel/installer` (Composer project)
@@ -196,6 +198,13 @@ impl LampoPaths {
         self.data_root.join("app-location.txt")
     }
 
+    /// What Lampo remembers of its Defender exclusion requests for the server processes (their
+    /// last outcome and the executables Defender confirmed): `defender-exclusion.toml`. In the
+    /// data root, machine-local like the executables it names.
+    pub fn defender_exclusion_file(&self) -> PathBuf {
+        self.data_root.join("defender-exclusion.toml")
+    }
+
     /// Tools Lampo manages for itself (never the user's global Composer): `tools\`.
     pub fn tools_dir(&self) -> PathBuf {
         self.data_root.join("tools")
@@ -249,6 +258,7 @@ mod tests {
         assert_eq!(p.service_log_dir(&"mysql-5.7".parse().unwrap()), PathBuf::from(r"C:\data").join("logs").join("mysql-5.7"));
         assert_eq!(p.apache_config_dir(), PathBuf::from(r"C:\data").join("generated").join("apache"));
         assert_eq!(p.app_location_file(), PathBuf::from(r"C:\data").join("app-location.txt"));
+        assert_eq!(p.defender_exclusion_file(), PathBuf::from(r"C:\data").join("defender-exclusion.toml"));
         assert_eq!(p.claude_plugin_dir(), PathBuf::from(r"C:\data").join("agent-plugins").join("claude-code"));
         assert_eq!(p.shim_cli_exe(), PathBuf::from(r"C:\data").join("bin").join("lampo.exe"));
     }

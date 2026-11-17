@@ -23,6 +23,7 @@ const PAGE_FIXES: Partial<Record<string, NavId>> = {
 	packages: 'packages',
 	folders: 'projects',
 	'mysql-auth': 'projects',
+	defender: 'settings',
 	ports: 'services'
 };
 

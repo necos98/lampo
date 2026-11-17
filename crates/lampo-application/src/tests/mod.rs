@@ -3,6 +3,7 @@
 mod allocation;
 mod auto_restart;
 mod claude_code;
+mod doctor_defender;
 mod doctor_services;
 mod env_vars;
 mod environment;

@@ -116,7 +116,22 @@ async fn doctor_runs_the_standard_checks_in_order() {
     let ids: Vec<&str> = report.checks.iter().map(|c| c.id.as_str()).collect();
     assert_eq!(
         ids,
-        ["settings", "project-files", "vc-runtime", "ports", "shims-on-path", "path-shadowing", "hosts-block", "packages", "services", "mysql-auth", "folders", "stale-worktrees", "app"]
+        [
+            "settings",
+            "project-files",
+            "vc-runtime",
+            "ports",
+            "shims-on-path",
+            "path-shadowing",
+            "hosts-block",
+            "packages",
+            "services",
+            "mysql-auth",
+            "defender",
+            "folders",
+            "stale-worktrees",
+            "app"
+        ]
     );
 }
 

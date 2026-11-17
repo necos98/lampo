@@ -7,7 +7,8 @@
 //! * [`projects`] — the folders a projects folder may never be, and their check (both sides);
 //! * [`request`] — the helper's command line in this mode;
 //! * [`profiles`] — the user profiles of this machine (registry);
-//! * [`powershell`] — the Defender cmdlets, run by the helper;
+//! * [`powershell`] — the Defender cmdlets, run by the helper, and the safe PowerShell launch;
+//! * [`state`] — Defender's state, read as the user ([`PowerShellDefenderState`]);
 //! * [`helper`] — the logic of the helper's Defender mode (and its security rules);
 //! * [`DefenderScanExclusion`] — the `ScanExclusionEditor` adapter.
 
@@ -17,6 +18,7 @@ pub mod powershell;
 pub mod profiles;
 pub mod projects;
 pub mod request;
+pub mod state;
 pub mod target;
 
 use std::path::{Path, PathBuf};
@@ -26,6 +28,8 @@ use async_trait::async_trait;
 use lampo_domain::ports::ScanExclusionEditor;
 use lampo_domain::scan_exclusion::{ScanExclusionChange, ScanExclusionOutcome, ScanExclusionTargets};
 use lampo_domain::{PortError, PortResult};
+
+pub use self::state::PowerShellDefenderState;
 
 use self::profiles::UserProfiles;
 use self::request::{ExclusionArgs, MAX_PROCESSES};

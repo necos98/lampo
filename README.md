@@ -38,7 +38,7 @@ Windows. Include la CLI `lampo`, pensata anche per i coding agent.
 - **Apri il progetto** in Esplora risorse, in VS Code o in un terminale con il PHP del progetto nel
   PATH.
 - **Log** di servizi e siti nell'app e **diagnostica** (`doctor`: runtime Visual C++, porte, PATH,
-  file hosts, pacchetti).
+  file hosts, pacchetti, Defender che rallenta PHP).
 - **Icona nella tray** con lo stato dei servizi, che restano attivi anche a finestra chiusa.
 - **Aggiornamenti dall'app**, firmati.
 
@@ -179,7 +179,10 @@ Tre esclusioni facoltative, da aggiungere solo se le vuoi:
   Apache (`%LOCALAPPDATA%\Lampo\packages\...`): Defender non analizza i file aperti da quei
   processi, per tutti i progetti ovunque si trovino, senza escludere alcuna cartella di sorgenti.
   Vale per le versioni installate al momento: dopo aver installato un'altra versione di PHP, ripeti
-  `add --php`.
+  `add --php`. Lampo ricorda l'esito delle richieste: `lampo doctor` (check `defender`) avvisa
+  quando la protezione in tempo reale di Defender è attiva e un PHP installato non è coperto da
+  un'esclusione applicata, con il comando da eseguire o, se le esclusioni le gestisce l'IT,
+  `lampo defender exclusion commands --php`.
 - **Dati MySQL** (`--mysql`): le suite di test ricreano il database a ogni esecuzione e Defender
   analizza ogni scrittura dei file di MySQL (`.ibd`, redo log). Lampo esclude la sola cartella dei
   dati MySQL, `%LOCALAPPDATA%\Lampo\mysql` (i dati di tutte le istanze).

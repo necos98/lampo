@@ -16,7 +16,9 @@
 //! Only on an explicit request: nothing adds an exclusion at install or start. Each request shows
 //! one UAC prompt whatever it names, so a call that may not prompt (the CLI without
 //! `--allow-elevation`) is refused before anything happens. The executables are those installed
-//! when the request is made: a PHP installed later needs a new request.
+//! when the request is made: a PHP installed later needs a new request. The outcome of every
+//! request naming `php` is remembered ([`ProcessExclusionRecord`]): the doctor's `defender` check
+//! tells from it whether every installed PHP is covered.
 //!
 //! When a policy controls Defender's exclusions (group policy, Intune), `commands` gives the
 //! `Add-MpPreference` lines of the same targets, for whoever manages the PC; it prompts for
@@ -27,9 +29,9 @@ use std::sync::Arc;
 
 use lampo_domain::package::{EntryRole, PackageKind};
 use lampo_domain::paths::LampoPaths;
-use lampo_domain::ports::{InstalledPackageRegistry, ProjectRepository, ScanExclusionEditor};
+use lampo_domain::ports::{InstalledPackageRegistry, ProcessExclusionRecordReader, ProcessExclusionRecordWriter, ProjectRepository, ScanExclusionEditor};
 use lampo_domain::project::ProjectRoot;
-use lampo_domain::scan_exclusion::{ScanExclusionChange, ScanExclusionOutcome, ScanExclusionTargets};
+use lampo_domain::scan_exclusion::{ProcessExclusionRecord, ProcessExclusionRequest, ScanExclusionChange, ScanExclusionOutcome, ScanExclusionTargets};
 use lampo_domain::service::ServiceKind;
 
 use super::defender_commands;
@@ -40,8 +42,10 @@ use crate::dto::{
 };
 use crate::error::{AppError, AppResult, ErrorCode};
 
+/// The server executable of PHP: the one opening the projects' sources.
+pub(crate) const PHP_SERVER: (PackageKind, EntryRole) = (PackageKind::PHP, EntryRole::FastCgi);
 /// The server executable of each package kind the `php` part names.
-const SERVER_EXECUTABLES: [(PackageKind, EntryRole); 2] = [(PackageKind::PHP, EntryRole::FastCgi), (PackageKind::APACHE, EntryRole::Server)];
+const SERVER_EXECUTABLES: [(PackageKind, EntryRole); 2] = [PHP_SERVER, (PackageKind::APACHE, EntryRole::Server)];
 const SEPARATOR: char = '\\';
 
 pub struct DefenderExclusion {
@@ -49,13 +53,23 @@ pub struct DefenderExclusion {
     installed: Arc<dyn InstalledPackageRegistry>,
     projects: Arc<dyn ProjectRepository>,
     paths: LampoPaths,
+    record_reader: Arc<dyn ProcessExclusionRecordReader>,
+    record_writer: Arc<dyn ProcessExclusionRecordWriter>,
     /// One prompt at a time.
     busy: tokio::sync::Mutex<()>,
 }
 
 impl DefenderExclusion {
-    pub fn new(editor: Arc<dyn ScanExclusionEditor>, installed: Arc<dyn InstalledPackageRegistry>, projects: Arc<dyn ProjectRepository>, paths: LampoPaths) -> Self {
-        Self { editor, installed, projects, paths, busy: tokio::sync::Mutex::new(()) }
+    /// `record_reader` and `record_writer`: the record of the requests naming `php` (one adapter).
+    pub fn new(
+        editor: Arc<dyn ScanExclusionEditor>,
+        installed: Arc<dyn InstalledPackageRegistry>,
+        projects: Arc<dyn ProjectRepository>,
+        paths: LampoPaths,
+        record_reader: Arc<dyn ProcessExclusionRecordReader>,
+        record_writer: Arc<dyn ProcessExclusionRecordWriter>,
+    ) -> Self {
+        Self { editor, installed, projects, paths, record_reader, record_writer, busy: tokio::sync::Mutex::new(()) }
     }
 
     fn folder(&self) -> PathBuf {
@@ -118,7 +132,11 @@ impl DefenderExclusion {
         }
         let _busy = self.busy.lock().await;
         let targets = self.targets(&request)?;
-        let outcome = self.editor.change(&targets, change_from_dto(request.change)).await?;
+        let change = change_from_dto(request.change);
+        let outcome = self.editor.change(&targets, change).await?;
+        if request.php {
+            self.remember(ProcessExclusionRequest { change, outcome, processes: targets.processes.clone() });
+        }
         Ok(DefenderExclusionResultDto {
             change: request.change,
             outcome: outcome_to_dto(outcome),
@@ -147,6 +165,19 @@ impl DefenderExclusion {
         }
         let projects = if request.projects { Some(self.projects_folder(request.projects_folder.as_deref())?) } else { None };
         Ok(ScanExclusionTargets { folder: request.mysql.then(|| self.folder()), processes, projects })
+    }
+
+    /// Adds `request` to the record. The request itself is done: a record that cannot be read
+    /// starts over, one that cannot be written is logged (the doctor then advises a new request).
+    fn remember(&self, request: ProcessExclusionRequest) {
+        let mut record = self.record_reader.read().unwrap_or_else(|e| {
+            tracing::warn!("the record of the Defender exclusions does not load, starting a new one: {e}");
+            ProcessExclusionRecord::default()
+        });
+        record.record(request);
+        if let Err(e) = self.record_writer.write(&record) {
+            tracing::warn!("cannot record the outcome of the Defender exclusion request: {e}");
+        }
     }
 
     /// The MySQL-only form of [`Self::change`].

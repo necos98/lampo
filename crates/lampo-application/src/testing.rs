@@ -42,6 +42,10 @@ use crate::dto::{ServiceStatusDto, SyncReportDto};
 use crate::error::{AppError, AppResult, ErrorCode};
 use crate::use_cases::*;
 
+mod defender;
+
+pub use defender::{FakeDefender, MemExclusionRecord};
+
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap()
 }
@@ -1192,6 +1196,10 @@ pub struct World {
     pub passwords: Arc<MysqlPasswords>,
     /// The shutdown gate `env` checks, closed by [`Self::shutdown`].
     pub gate: Arc<ShutdownGate>,
+    /// Microsoft Defender's state (not the active antivirus unless set).
+    pub defender: Arc<FakeDefender>,
+    /// What Lampo remembers of its Defender exclusion requests for the server processes.
+    pub exclusion_record: Arc<MemExclusionRecord>,
 }
 
 impl World {
@@ -1279,6 +1287,8 @@ impl World {
             secrets,
             passwords,
             gate,
+            defender: Arc::new(FakeDefender::default()),
+            exclusion_record: Arc::new(MemExclusionRecord::default()),
         }
     }
 
@@ -1595,6 +1605,7 @@ impl World {
             shim_tools: lampo_domain::shim::tools::all(),
             hosts: self.hosts.clone(),
             fs: self.fs.clone(),
+            exclusion_record: self.exclusion_record.clone(),
         });
         DoctorDeps {
             projects: self.projects.clone(),
@@ -1603,6 +1614,7 @@ impl World {
             installed: self.installed.clone(),
             control: self.control.clone(),
             service_states: Arc::new(ServiceQueries::new(self.runners(), self.services.clone(), self.projects.clone(), self.worktrees.clone(), self.settings.clone())),
+            defender: self.defender.clone(),
             checks,
         }
     }

@@ -61,6 +61,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 	let firstRunFailures = 1;
 	let port5Failures = 1;
 	let hostsInSync = true;
+	// Whether an applied `php` request excluded the PHP processes (the doctor's `defender` check).
+	let phpExcluded = false;
 	let firstRunCompleted = !fresh;
 
 	let projects = seedProjects();
@@ -720,6 +722,16 @@ export function createMockBackend({ fresh }: Options): Backend {
 				{ id: 'hosts-block', status: hostsInSync ? 'ok' : 'warning', message: hostsInSync ? 'File hosts aggiornato' : 'Il file hosts non è aggiornato', fix: hostsInSync ? null : 'lampo up --allow-elevation' },
 				{ id: 'packages', status: missingPackages.length ? 'error' : 'ok', message: missingPackages.length ? `Pacchetti mancanti: ${missingPackages.join(', ')}` : 'Pacchetti presenti', fix: missingPackages.length ? 'lampo package install <kind> <series>' : null },
 				{ id: 'services', status: servicesStatus, message: servicesDown.length ? `Servizi non in esecuzione: ${servicesDown.join(', ')}` : 'Servizi in esecuzione', fix: servicesDown.length ? `lampo up ${servicesDown.join(' ')}` : null },
+				{
+					id: 'defender',
+					status: phpExcluded ? 'ok' : 'warning',
+					message: phpExcluded
+						? 'Processi PHP esclusi dall’analisi di Defender'
+						: 'Defender analizza ogni file PHP alla prima richiesta di un sito: processi PHP non esclusi',
+					fix: phpExcluded
+						? null
+						: 'lampo defender exclusion add --php --allow-elevation (where a policy manages Defender, give the commands of `lampo defender exclusion commands --php` to whoever manages the PC)'
+				},
 				{ id: 'folders', status: 'ok', message: 'Cartelle dei progetti presenti', fix: null },
 				{ id: 'stale-worktrees', status: stale.length ? 'warning' : 'ok', message: stale.length ? `${stale.length} ambiente worktree con cartella mancante` : 'Nessun ambiente orfano', fix: stale.length ? 'lampo worktree prune' : null },
 				{ id: 'app', status: 'ok', message: 'App in esecuzione', fix: null }
@@ -796,6 +808,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 		// The browser has no UAC prompt nor Defender: every change is confirmed.
 		changeDefenderExclusion: async ({ change, php, mysql, projects, projectsFolder }) => {
 			await sleep(1200);
+			if (php) phpExcluded = change === 'add';
 			return {
 				change,
 				outcome: 'applied',

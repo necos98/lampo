@@ -6,6 +6,7 @@
 //! check is a new type added there).
 
 mod config_files_check;
+mod defender_check;
 mod mysql_auth_check;
 mod services_check;
 
@@ -16,9 +17,10 @@ use std::sync::Arc;
 use lampo_domain::address::SiteAddress;
 use lampo_domain::package::InstalledPackage;
 use lampo_domain::ports::{
-    ControlChannelClient, ExecutableLocator, FileSystemInspector, HostsFileReader, InstalledPackageRegistry, PortAvailability, PortProbe, ProjectListing, ProjectRepository,
-    SettingsRepository, ShimInstaller, UserPathEditor, VcRuntimeDetector, WorktreeRepository,
+    ControlChannelClient, DefenderStateReader, ExecutableLocator, FileSystemInspector, HostsFileReader, InstalledPackageRegistry, PortAvailability, PortProbe, ProcessExclusionRecordReader,
+    ProjectListing, ProjectRepository, SettingsRepository, ShimInstaller, UserPathEditor, VcRuntimeDetector, WorktreeRepository,
 };
+use lampo_domain::scan_exclusion::DefenderState;
 use lampo_domain::settings::Settings;
 use lampo_domain::shim::ShimTool;
 use lampo_domain::tcp_port::Port;
@@ -35,6 +37,7 @@ use crate::dto::{CheckStatus, DoctorCheckDto, DoctorReportDto, PortConflictDto, 
 use crate::error::AppResult;
 
 pub use config_files_check::{ProjectFilesCheck, SettingsFileCheck};
+pub use defender_check::DefenderCheck;
 pub use mysql_auth_check::MysqlAuthCheck;
 pub use services_check::ServicesCheck;
 
@@ -53,6 +56,8 @@ pub struct DoctorFacts {
     pub app_running: bool,
     /// Live service states; `Err` when they cannot be read (in the CLI: the app is not running).
     pub services: AppResult<Vec<ServiceStatusDto>>,
+    /// Microsoft Defender's state; `None` when it cannot be read.
+    pub defender: Option<DefenderState>,
 }
 
 /// One diagnostic. Returns its line of the report and may fill its own detail field of
@@ -74,6 +79,8 @@ pub struct DoctorDeps {
     /// The source of `lampo status`: the live services in the app, the app over the control
     /// pipe in the CLI.
     pub service_states: Arc<dyn ServiceStatusSource>,
+    /// Read concurrently with the service states (it may take a few seconds).
+    pub defender: Arc<dyn DefenderStateReader>,
     /// Run in this order.
     pub checks: Vec<Arc<dyn DoctorCheck>>,
 }
@@ -95,6 +102,8 @@ impl Doctor {
             Ok(settings) => (settings, None),
             Err(e) => (Settings::default(), Some(e.to_string())),
         };
+        let (services, defender) = tokio::join!(d.service_states.statuses(), d.defender.state());
+        let defender = defender.inspect_err(|e| tracing::warn!("cannot read Microsoft Defender's state: {e}")).ok();
         let facts = DoctorFacts {
             project_files: d.projects.scan()?,
             worktrees: d.worktrees.list_all()?,
@@ -102,7 +111,8 @@ impl Doctor {
             settings_problem,
             installed: d.installed.list()?,
             app_running: d.control.is_server_running(),
-            services: d.service_states.statuses().await,
+            services,
+            defender,
         };
         let mut report = DoctorReportDto::default();
         for c in &d.checks {
@@ -126,6 +136,8 @@ pub struct StandardChecksDeps {
     pub shim_tools: Vec<Arc<dyn ShimTool>>,
     pub hosts: Arc<dyn HostsFileReader>,
     pub fs: Arc<dyn FileSystemInspector>,
+    /// What Lampo remembers of its Defender exclusion requests for the server processes.
+    pub exclusion_record: Arc<dyn ProcessExclusionRecordReader>,
 }
 
 /// The checks of `lampo doctor` and of the GUI diagnostics, in report order. The single list
@@ -142,6 +154,7 @@ pub fn standard_checks(deps: StandardChecksDeps) -> Vec<Arc<dyn DoctorCheck>> {
         Arc::new(PackagesCheck { services: deps.services }),
         Arc::new(ServicesCheck),
         Arc::new(MysqlAuthCheck),
+        Arc::new(DefenderCheck { record: deps.exclusion_record }),
         Arc::new(FoldersCheck { fs: deps.fs.clone() }),
         Arc::new(StaleWorktreesCheck { fs: deps.fs }),
         Arc::new(AppCheck),

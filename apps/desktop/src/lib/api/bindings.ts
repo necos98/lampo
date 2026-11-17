@@ -877,7 +877,7 @@ export type CheckStatus = "ok" | "warning" | "error";
 
 /**
  * One `doctor` check. `id` is stable (`settings`, `project-files`, `vc-runtime`, `ports`,
- * `path-shadowing`, `shims-on-path`, `hosts-block`, `packages`, `services`, `mysql-auth`,
+ * `path-shadowing`, `shims-on-path`, `hosts-block`, `packages`, `services`, `mysql-auth`, `defender`,
  * `stale-worktrees`, `folders`, `app`).
  */
 export type DoctorCheck = { id: string, status: CheckStatus, message: string, 

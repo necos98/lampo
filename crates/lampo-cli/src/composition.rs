@@ -20,7 +20,7 @@ use lampo_infra_services::{DpapiMysqlPasswords, FileLogReader, HeadlessAppLaunch
 use lampo_infra_store as store;
 use lampo_infra_web::defender::profiles::RegistryProfiles;
 use lampo_infra_web::elevation::RunAsLauncher;
-use lampo_infra_web::{DefenderScanExclusion, ElevatedHostsFile};
+use lampo_infra_web::{DefenderScanExclusion, ElevatedHostsFile, PowerShellDefenderState};
 
 use crate::context::{CliContext, CliEnv};
 use crate::local::CtrlC;
@@ -54,6 +54,8 @@ pub fn build() -> AppResult<CliContext> {
     let elevated_helper = app_dir.join("lampo-hosts-helper.exe");
     // The registered service kinds (the same list as the app's).
     let services = Arc::new(ServiceCatalog::new(lampo_domain::service::builtin::all()));
+    // What Lampo remembers of its Defender exclusion requests (written by `defender exclusion`, read by `doctor`).
+    let exclusion_record = Arc::new(store::TomlProcessExclusionRecord::new(paths.defender_exclusion_file()));
 
     let user = std::env::var("USERNAME").unwrap_or_else(|_| "user".into());
     let channel: Arc<dyn ControlChannelClient> = Arc::new(NamedPipeControlClient::new(instance_pipe_name(&user, isolated_home.as_deref())));
@@ -82,6 +84,7 @@ pub fn build() -> AppResult<CliContext> {
         shim_tools: shim_tools.clone(),
         hosts: Arc::new(ElevatedHostsFile::system(elevated_helper.clone(), Arc::new(RunAsLauncher::default()))?),
         fs: fs.clone(),
+        exclusion_record: exclusion_record.clone(),
     });
 
     let settings = Arc::new(SettingsQuery::new(settings_repo.clone(), services.clone()));
@@ -129,6 +132,7 @@ pub fn build() -> AppResult<CliContext> {
             control: channel.clone(),
             // The app's live states, as `lampo status`; a warning when it is not running.
             service_states: Arc::new(AppServiceStatus::new(app.clone())),
+            defender: Arc::new(PowerShellDefenderState::default()),
             checks,
         })),
         shims: Arc::new(ShimSetup::new(shim_installer, user_path, locator, paths.clone(), shim_tools)),
@@ -137,6 +141,8 @@ pub fn build() -> AppResult<CliContext> {
             installed.clone(),
             projects_repo.clone(),
             paths.clone(),
+            exclusion_record.clone(),
+            exclusion_record,
         )),
         packages: Arc::new(PackageCatalog::new(PackageCatalogDeps {
             // Offline listing: embedded catalog only; live data comes through the app.

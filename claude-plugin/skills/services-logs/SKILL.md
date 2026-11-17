@@ -81,7 +81,8 @@ lampo doctor --json
 ```
 
 Checks Visual C++ runtimes, ports, shims on PATH and PATH shadowing, the hosts file, required
-packages, stale worktrees and project folders. Exit code 14 means at least one `[error]`; each
+packages, stale worktrees, project folders and Microsoft Defender slowing PHP down (`defender`, a
+warning: the fix needs a UAC prompt, so suggest it to the user rather than running it). Exit code 14 means at least one `[error]`; each
 problem has a `fix:` line. Act on fixes within your autonomy (installing a missing package,
 starting services); report the others (VC++ downloads, other programs on a port).
 

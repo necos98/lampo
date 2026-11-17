@@ -11,6 +11,7 @@
 //! | [`PhpIniRenderer`]       | `PhpIniWriter`                          |
 //! | [`ElevatedHostsFile`]    | `HostsFileReader`, `HostsFileWriter` (UAC via `lampo-hosts-helper.exe`) |
 //! | [`DefenderScanExclusion`] | `ScanExclusionEditor` (UAC via `lampo-hosts-helper.exe`) |
+//! | [`PowerShellDefenderState`] | `DefenderStateReader` (no elevation) |
 //!
 //! Binary: `lampo-hosts-helper` — the only code that ever runs elevated ([`elevation`]). It
 //! splices the requested `lampo_domain::hosts::HostsBlock` into the hosts file (see
@@ -32,6 +33,6 @@ mod test_snapshot;
 pub use apache::config::ApacheConfigurator;
 pub use apache::render::{FcgidTuning, RenderOptions};
 pub use apache::runner::ApacheRunner;
-pub use defender::DefenderScanExclusion;
+pub use defender::{DefenderScanExclusion, PowerShellDefenderState};
 pub use hosts::ElevatedHostsFile;
 pub use php_ini::PhpIniRenderer;

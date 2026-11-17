@@ -8,6 +8,7 @@
 //! and `$env:LAMPO_DEFENDER_PROCESSES` with one executable per line), which PowerShell reads as plain
 //! strings. The child gets a minimal environment: the modules come only from System32, so nothing
 //! the user can write (their PSModulePath, profile, temp folder) is loaded elevated.
+//! [`system_powershell`] is that launch, shared with [`super::state`], which runs as the user.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -89,7 +90,6 @@ pub struct PowerShellDefender {
 impl PowerShellDefender {
     /// The cmdlets answer in seconds; a stuck Defender service must not hold the helper forever.
     pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
-    const POLL_INTERVAL: Duration = Duration::from_millis(100);
 }
 
 impl Default for PowerShellDefender {
@@ -125,17 +125,10 @@ fn result_of(code: i32) -> DefenderResult {
     }
 }
 
-/// `powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command <script>`
-/// with a minimal environment and the targets. `None` when the system folder is unknown.
+/// [`system_powershell`] running the script of `change`, with the targets in its environment.
+/// `None` when the system folder is unknown.
 pub(crate) fn powershell_command(change: ScanExclusionChange, targets: &ScanExclusionTargets) -> Option<Command> {
-    let system = system_directory()?;
-    let windows = system.parent()?.to_path_buf();
-    let powershell_dir = system.join("WindowsPowerShell").join("v1.0");
-    let mut command = Command::new(powershell_dir.join("powershell.exe"));
-    // `Bypass` concerns this process only and lets the signed cmdlet modules load whatever the
-    // machine's default policy; the command itself is a constant, not a script file.
-    command.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script(change)]);
-    command.env_clear().envs(minimal_environment(&windows, &powershell_dir));
+    let mut command = system_powershell(script(change))?;
     if let Some(folder) = &targets.folder {
         command.env(FOLDER_VAR, folder);
     }
@@ -145,6 +138,21 @@ pub(crate) fn powershell_command(change: ScanExclusionChange, targets: &ScanExcl
     if !targets.processes.is_empty() {
         command.env(PROCESSES_VAR, process_list(&targets.processes));
     }
+    Some(command)
+}
+
+/// `<System32>\WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile -NonInteractive
+/// -ExecutionPolicy Bypass -Command <script>` with a minimal environment, no console and no
+/// standard streams. `None` when the system folder is unknown.
+pub(crate) fn system_powershell(script: &'static str) -> Option<Command> {
+    let system = system_directory()?;
+    let windows = system.parent()?.to_path_buf();
+    let powershell_dir = system.join("WindowsPowerShell").join("v1.0");
+    let mut command = Command::new(powershell_dir.join("powershell.exe"));
+    // `Bypass` concerns this process only and lets the signed cmdlet modules load whatever the
+    // machine's default policy; the command itself is a constant, not a script file.
+    command.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script]);
+    command.env_clear().envs(minimal_environment(&windows, &powershell_dir));
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     hide_console(&mut command);
     Some(command)
@@ -178,15 +186,18 @@ fn hide_console(command: &mut Command) {
 #[cfg(not(windows))]
 fn hide_console(_command: &mut Command) {}
 
+/// How often [`run_bounded`] checks whether the child has ended.
+const POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 /// Runs `command` and returns its exit code; `None` when it cannot start, ends without a code, or
-/// is still running after `timeout` (it is then killed).
-fn run_bounded(command: &mut Command, timeout: Duration) -> Option<i32> {
+/// is still running after `timeout` (it is then killed). Blocks the calling thread.
+pub(crate) fn run_bounded(command: &mut Command, timeout: Duration) -> Option<i32> {
     let mut child = command.spawn().ok()?;
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
             Ok(Some(status)) => return status.code(),
-            Ok(None) if Instant::now() < deadline => std::thread::sleep(PowerShellDefender::POLL_INTERVAL),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(POLL_INTERVAL),
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -194,6 +205,15 @@ fn run_bounded(command: &mut Command, timeout: Duration) -> Option<i32> {
             }
         }
     }
+}
+
+/// Whether Windows PowerShell's own parser accepts `script` (the scripts' tests).
+#[cfg(all(test, windows))]
+pub(crate) fn script_parses(script: &str) -> bool {
+    const PARSE: &str = "$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($env:SCRIPT, [ref]$null, [ref]$errors); exit $errors.Count";
+    let mut command = Command::new(system_directory().unwrap().join(r"WindowsPowerShell\v1.0\powershell.exe"));
+    command.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", PARSE]).env("SCRIPT", script).stdout(Stdio::null());
+    run_bounded(&mut command, PowerShellDefender::DEFAULT_TIMEOUT) == Some(0)
 }
 
 #[cfg(test)]
@@ -234,11 +254,8 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn the_scripts_parse() {
-        const PARSE: &str = "$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($env:SCRIPT, [ref]$null, [ref]$errors); exit $errors.Count";
         for script in [ADD_SCRIPT, REMOVE_SCRIPT] {
-            let mut command = Command::new(system_directory().unwrap().join(r"WindowsPowerShell\v1.0\powershell.exe"));
-            command.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", PARSE]).env("SCRIPT", script).stdout(Stdio::null());
-            assert_eq!(run_bounded(&mut command, PowerShellDefender::DEFAULT_TIMEOUT), Some(0), "{script}");
+            assert!(script_parses(script), "{script}");
         }
     }
 

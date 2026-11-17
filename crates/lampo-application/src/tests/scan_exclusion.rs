@@ -10,7 +10,7 @@ use lampo_domain::package::PackageKind;
 use lampo_domain::paths::LampoPaths;
 use lampo_domain::ports::{ProjectRepository, ScanExclusionEditor};
 use lampo_domain::project::{DisplayName, Project, ProjectEnvironment, ProjectId, ProjectRoot};
-use lampo_domain::scan_exclusion::{ScanExclusionChange, ScanExclusionOutcome, ScanExclusionTargets};
+use lampo_domain::scan_exclusion::{ProcessExclusionRecord, ProcessExclusionRequest, ScanExclusionChange, ScanExclusionOutcome, ScanExclusionTargets};
 use lampo_domain::hostname::Tld;
 use lampo_domain::{PortError, PortResult};
 
@@ -18,7 +18,7 @@ use super::{cli, gui};
 use crate::context::CallContext;
 use crate::dto::*;
 use crate::error::ErrorCode;
-use crate::testing::{MemInstalled, MemProjects, php};
+use crate::testing::{MemExclusionRecord, MemInstalled, MemProjects, php};
 use crate::use_cases::DefenderExclusion;
 
 /// Folders the fake accepts as a projects folder: two levels below `C:\Users\me` or deeper
@@ -73,6 +73,7 @@ struct Setup {
     editor: Arc<FakeEditor>,
     installed: Arc<MemInstalled>,
     projects: Arc<MemProjects>,
+    record: Arc<MemExclusionRecord>,
     use_case: DefenderExclusion,
 }
 
@@ -81,8 +82,9 @@ fn setup(result: PortResult<ScanExclusionOutcome>) -> Setup {
     let installed = Arc::new(MemInstalled::default());
     let projects = Arc::new(MemProjects::default());
     let paths = LampoPaths::new(r"C:\Users\me\AppData\Roaming\Lampo", r"C:\Users\me\AppData\Local\Lampo");
-    let use_case = DefenderExclusion::new(editor.clone(), installed.clone(), projects.clone(), paths);
-    Setup { editor, installed, projects, use_case }
+    let record = Arc::new(MemExclusionRecord::default());
+    let use_case = DefenderExclusion::new(editor.clone(), installed.clone(), projects.clone(), paths, record.clone(), record.clone());
+    Setup { editor, installed, projects, record, use_case }
 }
 
 /// PHP 8.3 and 7.4, Apache, and packages that run no server Lampo excludes.
@@ -218,6 +220,51 @@ async fn adapter_failures_are_errors() {
     assert_eq!(s.use_case.change_mysql(ScanExclusionChangeDto::Add, gui()).await.unwrap_err().code, ErrorCode::Validation);
     let s = setup(Err(PortError::not_found("elevated helper", "lampo-hosts-helper.exe")));
     assert_eq!(s.use_case.change(request(ScanExclusionChangeDto::Remove, false, true), gui()).await.unwrap_err().code, ErrorCode::NotFound);
+}
+
+#[tokio::test]
+async fn every_php_request_is_remembered_with_its_outcome_and_executables() {
+    for outcome in [ScanExclusionOutcome::Applied, ScanExclusionOutcome::Cancelled, ScanExclusionOutcome::Refused, ScanExclusionOutcome::NotConfirmed] {
+        let s = setup(Ok(outcome));
+        install_servers(&s.installed);
+        s.use_case.change(request(ScanExclusionChangeDto::Add, true, false), gui()).await.unwrap();
+        let record = s.record.get();
+        assert_eq!(record.last_request, Some(ProcessExclusionRequest { change: ScanExclusionChange::Add, outcome, processes: servers() }), "{outcome:?}");
+        assert_eq!(record.excluded, if outcome == ScanExclusionOutcome::Applied { servers() } else { Vec::new() }, "{outcome:?}");
+    }
+}
+
+#[tokio::test]
+async fn an_applied_removal_is_remembered() {
+    let s = setup(Ok(ScanExclusionOutcome::Applied));
+    install_servers(&s.installed);
+    s.use_case.change(request(ScanExclusionChangeDto::Add, true, false), gui()).await.unwrap();
+    s.use_case.change(request(ScanExclusionChangeDto::Remove, true, true), gui()).await.unwrap();
+    let record = s.record.get();
+    assert!(record.excluded.is_empty());
+    assert_eq!(record.last_request.map(|r| r.change), Some(ScanExclusionChange::Remove));
+}
+
+#[tokio::test]
+async fn requests_without_php_and_failed_requests_are_not_remembered() {
+    let s = setup(Ok(ScanExclusionOutcome::Applied));
+    install_servers(&s.installed);
+    s.use_case.change_mysql(ScanExclusionChangeDto::Add, gui()).await.unwrap();
+    assert_eq!(s.record.get(), ProcessExclusionRecord::default(), "mysql alone");
+    let s = setup(Err(PortError::not_found("elevated helper", "lampo-hosts-helper.exe")));
+    install_servers(&s.installed);
+    s.use_case.change(request(ScanExclusionChangeDto::Add, true, false), gui()).await.unwrap_err();
+    assert_eq!(s.record.get(), ProcessExclusionRecord::default(), "no outcome to remember");
+}
+
+#[tokio::test]
+async fn a_record_that_does_not_load_starts_over() {
+    let s = setup(Ok(ScanExclusionOutcome::Applied));
+    install_servers(&s.installed);
+    s.record.corrupt();
+    let result = s.use_case.change(request(ScanExclusionChangeDto::Add, true, false), gui()).await.unwrap();
+    assert_eq!(result.outcome, ScanExclusionOutcomeDto::Applied, "the request itself succeeded");
+    assert_eq!(s.record.get().excluded, servers());
 }
 
 #[test]

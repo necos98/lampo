@@ -785,6 +785,7 @@ export const it = {
 				packages: 'Pacchetti richiesti',
 				services: 'Servizi',
 				'mysql-auth': 'Autenticazione MySQL',
+				defender: 'Microsoft Defender',
 				'stale-worktrees': 'Ambienti worktree orfani',
 				folders: 'Cartelle dei progetti'
 			} as Record<string, string>,
@@ -807,6 +808,11 @@ export const it = {
 				'mysql-auth': {
 					ok: 'Il PHP di ogni progetto si autentica al suo MySQL.',
 					warning: 'Un progetto con PHP precedente al 7.4 usa MySQL 8.4: Lampo ne passa l’account a mysql_native_password; in alternativa usa MySQL 5.7.'
+				},
+				defender: {
+					ok: 'Microsoft Defender non rallenta PHP (o il suo stato non si può leggere).',
+					warning:
+						'La protezione in tempo reale di Defender analizza ogni file PHP alla prima richiesta di un sito (anche 8-24 secondi): escludi dall’analisi i processi PHP dalla sezione Microsoft Defender delle impostazioni, oppure manda i comandi PowerShell a chi gestisce il PC.'
 				},
 				folders: { ok: 'Tutte le cartelle dei progetti esistono.', warning: 'Alcune cartelle di progetto non esistono più.' },
 				'stale-worktrees': { ok: 'Nessun ambiente worktree orfano.', warning: 'Ci sono ambienti worktree la cui cartella non esiste più.' }

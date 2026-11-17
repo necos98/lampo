@@ -28,7 +28,7 @@
 //! | [`control`]  | `lampo-infra-services` (named pipe, headless launcher) |
 //! | [`agents`]   | `lampo-infra-services` (`ClaudeCodeCli`), `lampo-infra-store` (`AgentPluginFiles`) |
 //! | [`desktop`]  | `lampo-infra-services` (`WindowsExternalAppLauncher`) |
-//! | [`antivirus`] | `lampo-infra-web` (`DefenderScanExclusion`, through the elevated helper) |
+//! | [`antivirus`] | `lampo-infra-web` (`DefenderScanExclusion` through the elevated helper, `PowerShellDefenderState`), `lampo-infra-store` (`TomlProcessExclusionRecord`) |
 //! | [`events`]  | composition roots (Tauri app, CLI) |
 //!
 //! Strategy traits with pure implementations live next to their domain module and are
@@ -49,7 +49,7 @@ pub mod web;
 
 pub use system::{Clock, Timer};
 pub use agents::{AgentPluginFiles, ClaudeCodeCli};
-pub use antivirus::ScanExclusionEditor;
+pub use antivirus::{DefenderStateReader, ProcessExclusionRecordReader, ProcessExclusionRecordWriter, ScanExclusionEditor};
 pub use desktop::ExternalAppLauncher;
 pub use control::{AppLauncher, ControlChannelClient, ControlChannelServer, ControlFrameSink, ControlRequestHandler};
 pub use events::{EventPublisher, NullEventPublisher, NullProgressSink, ProgressSink};

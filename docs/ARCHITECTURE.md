@@ -207,7 +207,12 @@ accepts:
   those processes open, for every project wherever it is, without excluding any source folder.
   The executables are those installed when the request is made (`EntryRole::FastCgi` of the
   `php` packages, `EntryRole::Server` of the `apache` ones): a PHP installed later needs a new
-  `add --php`. A process exclusion does not exclude the process image itself, and files written
+  `add --php`. Lampo remembers the outcome of every request naming the processes, and the
+  executables Defender confirmed (`ProcessExclusionRecord`, `defender-exclusion.toml` in the data
+  root), since a standard user cannot read Defender's exclusions; the doctor's `defender` check
+  warns when real-time protection is on (`Get-MpComputerStatus`, readable without elevation) and
+  an installed `php-cgi.exe` is not among them, and stays silent when Defender is passive, absent
+  or its state cannot be read within a few seconds. A process exclusion does not exclude the process image itself, and files written
   by other programs are still scanned; what is lost is the scan of a malicious file at the
   moment PHP or Apache reads it.
 * **The MySQL data folder** (`lampo defender exclusion add|remove --mysql`, or the original

@@ -113,12 +113,16 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         Arc::new(web::elevation::RunAsLauncher::default().with_owner(Arc::new(move || crate::tray::main_window_handle(&owner_handle))));
     let elevated_helper = exe_dir().join("lampo-hosts-helper.exe");
     let hosts = Arc::new(web::ElevatedHostsFile::system(elevated_helper.clone(), elevated_launcher.clone())?);
+    // What Lampo remembers of its Defender exclusion requests (written here, read by the doctor).
+    let exclusion_record = Arc::new(store::TomlProcessExclusionRecord::new(paths.defender_exclusion_file()));
     // Only on an explicit request from the settings page, never at install or start.
     let scan_exclusion = Arc::new(DefenderExclusion::new(
         Arc::new(web::DefenderScanExclusion::new(elevated_helper, elevated_launcher, Arc::new(web::defender::profiles::RegistryProfiles))),
         installed.clone(),
         projects.clone(),
         paths.clone(),
+        exclusion_record.clone(),
+        exclusion_record.clone(),
     ));
 
     let php_ini: Arc<dyn PhpIniWriter> = Arc::new(web::PhpIniRenderer);
@@ -359,6 +363,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
             installed,
             control: Arc::new(services::NamedPipeControlClient::new(pipe)),
             service_states: service_queries,
+            defender: Arc::new(web::PowerShellDefenderState::default()),
             checks: standard_checks(StandardChecksDeps {
                 vc,
                 port_probe,
@@ -370,6 +375,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
                 shim_tools,
                 hosts,
                 fs,
+                exclusion_record,
             }),
         })),
         shims: shims.clone(),

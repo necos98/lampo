@@ -13,6 +13,7 @@
 //! | [`JsonShimIndex`]          | `ShimIndexReader`, `ShimIndexWriter`    |
 //! | [`ExeShimInstaller`]       | `ShimInstaller`                         |
 //! | [`AppLocationFile`]        | `AppLocationRecorder`                   |
+//! | [`TomlProcessExclusionRecord`] | `ProcessExclusionRecordReader`, `ProcessExclusionRecordWriter` |
 //! | [`detectors`]              | `ProjectDetector` (PHP manifest, Docker) |
 //! | [`FsGitInspector`]         | `GitInspector`                          |
 //! | [`FsPathCanonicalizer`]    | `PathCanonicalizer`                     |
@@ -28,6 +29,7 @@
 pub mod app_location;
 pub mod atomic;
 pub mod clock;
+pub mod defender_exclusion;
 pub mod detectors;
 pub mod final_path;
 pub mod fs;
@@ -51,6 +53,7 @@ mod testutil;
 
 pub use app_location::AppLocationFile;
 pub use clock::SystemClock;
+pub use defender_exclusion::TomlProcessExclusionRecord;
 pub use final_path::FsPathCanonicalizer;
 pub use fs::LocalFileSystem;
 pub use git::FsGitInspector;
