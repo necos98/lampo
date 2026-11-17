@@ -24,7 +24,7 @@ pub struct EmbeddedCatalog {
 
 impl EmbeddedCatalog {
     /// Does no work; composition roots can call it unconditionally.
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { entries: OnceLock::new() }
     }
 
@@ -37,6 +37,24 @@ impl EmbeddedCatalog {
 impl Default for EmbeddedCatalog {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Shared by the live sources, which answer with their pinned entries until a refresh succeeds.
+static PINNED: EmbeddedCatalog = EmbeddedCatalog::new();
+
+/// The embedded entries of `kind`, for a live source with no other local copy; `None` (logged)
+/// when there are none or the embedded catalog is unusable.
+pub(crate) fn pinned_entries(kind: &PackageKind) -> Option<Vec<CatalogEntry>> {
+    match PINNED.entries() {
+        Ok(entries) => {
+            let pinned: Vec<CatalogEntry> = entries.iter().filter(|e| &e.id.kind == kind).cloned().collect();
+            (!pinned.is_empty()).then_some(pinned)
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "the embedded catalog is unusable");
+            None
+        }
     }
 }
 

@@ -6,8 +6,8 @@
 //! a build without a readable checksum is skipped).
 //!
 //! Served from a stale-while-revalidate cache ([`super::revalidating_cache`]). There is no disk
-//! cache: until the first refresh, the pinned Apache entries of the embedded catalog cover offline
-//! machines.
+//! cache: until the first refresh succeeds, the source answers at once with the pinned Apache
+//! entries of the embedded catalog.
 //!
 //! mod_fcgid is *not* served here: Apache Lounge publishes no checksum for modules, so its entry
 //! is pinned in the embedded catalog with a SHA-256 computed from the file.
@@ -24,6 +24,7 @@ use lampo_domain::vc_runtime::VcRuntime;
 use lampo_domain::version::PackageVersion;
 use lampo_domain::{PortError, PortResult};
 
+use super::embedded::pinned_entries;
 use super::hrefs;
 use super::revalidating_cache::{LiveCatalog, RevalidatingCache};
 use crate::http::{FetchPolicy, get_text};
@@ -90,8 +91,9 @@ impl ApacheLoungeSite {
 
 #[async_trait]
 impl LiveCatalog for ApacheLoungeSite {
+    /// The pinned Apache entries of the embedded catalog (there is no disk cache).
     async fn stored(&self) -> Option<Vec<CatalogEntry>> {
-        None
+        pinned_entries(&PackageKind::APACHE)
     }
 
     async fn fetch_live(&self, cancel: &CancelFlag) -> PortResult<Vec<CatalogEntry>> {
@@ -223,7 +225,7 @@ mod tests {
         })
         .await;
         let source = ApacheLoungeSource::new(reqwest::Client::new()).with_base_url(server.url(""));
-        let entries = source.fetch(&PackageKind::APACHE).await.unwrap();
+        let entries = source.live.fetch_live(&CancelFlag::new()).await.unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].url.as_str(), "https://www.apachelounge.com/download/VS18/binaries/httpd-2.4.71-261112-Win64-VS18.zip");
         assert!(source.fetch(&PackageKind::MOD_FCGID).await.unwrap().is_empty());
@@ -239,19 +241,39 @@ mod tests {
         })
         .await;
         let source = ApacheLoungeSource::new(reqwest::Client::new()).with_base_url(server.url(""));
-        let entries = source.fetch(&PackageKind::APACHE).await.unwrap();
+        let entries = source.live.fetch_live(&CancelFlag::new()).await.unwrap();
         assert_eq!(entries.iter().map(|e| e.id.version.as_str()).collect::<Vec<_>>(), ["2.4.71-261112"]);
 
         let no_checksums = TestServer::start(|req| if req.path == "/download/" { Reply::text(PAGE) } else { Reply::status(404) }).await;
         let source = ApacheLoungeSource::new(reqwest::Client::new()).with_base_url(no_checksums.url(""));
-        assert!(source.fetch(&PackageKind::APACHE).await.is_err());
+        assert!(source.live.fetch_live(&CancelFlag::new()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_slow_site_does_not_delay_the_listing() {
+        let server = TestServer::start(|req| {
+            let reply = match req.path.as_str() {
+                "/download/" => Reply::text(PAGE),
+                "/download/VS18/binaries/httpd-2.4.71-261112-Win64-VS18.zip.txt" => Reply::text(TXT),
+                _ => Reply::status(404),
+            };
+            reply.delayed(Duration::from_secs(2))
+        })
+        .await;
+        let source = ApacheLoungeSource::new(reqwest::Client::new()).with_base_url(server.url(""));
+        let pinned = tokio::time::timeout(Duration::from_millis(500), source.fetch(&PackageKind::APACHE)).await.expect("answered with the pinned builds").unwrap();
+        assert!(!pinned.is_empty() && pinned.iter().all(|e| e.id.kind == PackageKind::APACHE && e.channel == CatalogChannel::Frozen), "{pinned:?}");
+
+        source.cache.settled().await;
+        let live = source.fetch(&PackageKind::APACHE).await.unwrap();
+        assert_eq!(live.iter().map(|e| (e.id.version.as_str(), e.channel)).collect::<Vec<_>>(), [("2.4.71-261112", CatalogChannel::Live)]);
     }
 
     #[tokio::test]
     #[ignore = "network"]
     async fn live_apache_lounge_page() {
         let source = ApacheLoungeSource::new(crate::http::build_client().unwrap());
-        let entries = source.fetch(&PackageKind::APACHE).await.unwrap();
+        let entries = source.live.fetch_live(&CancelFlag::new()).await.unwrap();
         assert!(!entries.is_empty());
         for e in &entries {
             println!("{} {} {:?} {}", e.id, e.url, e.vc_runtime, e.sha256.unwrap());

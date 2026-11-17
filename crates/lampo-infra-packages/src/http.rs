@@ -54,7 +54,8 @@ pub(crate) struct FetchPolicy {
 }
 
 impl FetchPolicy {
-    /// Catalog lists: one quick attempt; the cache answers with what it has meanwhile.
+    /// Catalog lists: one quick attempt (plus the 403 retry of [`get_text`]); the cache answers
+    /// with what it has meanwhile.
     pub(crate) const LIST: Self = Self { attempts: 1, timeout: Duration::from_secs(5) };
     /// Checksum files: small, and without one a release is skipped, so worth a couple of retries.
     pub(crate) const CHECKSUM: Self = Self { attempts: 3, timeout: Duration::from_secs(10) };
@@ -64,31 +65,37 @@ impl FetchPolicy {
 }
 
 /// GET `url` and return the body as text (at most [`MAX_TEXT_BYTES`]), retrying transient
-/// failures as `policy` says; the last of several attempts uses the fallback user agent. Once
+/// failures as `policy` says. A 403 is retried once, at once and without using up an attempt,
+/// with the fallback user agent, which the later attempts keep; a 403 to that one is final. Once
 /// `cancel` is set no new attempt starts and a pending pause ends with `Cancelled`. Used by the
 /// live catalog sources.
 pub(crate) async fn get_text(client: &reqwest::Client, url: &str, policy: FetchPolicy, cancel: &CancelFlag) -> PortResult<String> {
     let attempts = policy.attempts.max(1);
-    let mut last_error = String::new();
-    for attempt in 0..attempts {
-        if attempt > 0 {
-            sleep_cancellable(BASE_BACKOFF * 2u32.pow(attempt), cancel).await?;
-        }
+    let mut fallback_user_agent = false;
+    let mut attempt = 0;
+    loop {
         cancel.check()?;
         let mut request = client.get(url).timeout(policy.timeout);
-        if attempt > 0 && attempt + 1 == attempts {
+        if fallback_user_agent {
             request = request.header(reqwest::header::USER_AGENT, FALLBACK_USER_AGENT);
         }
-        match request.send().await {
+        let transient_error = match request.send().await {
             Ok(response) if response.status().is_success() => return read_text(url, response).await,
-            Ok(response) if is_retryable(response.status()) || response.status() == reqwest::StatusCode::FORBIDDEN => {
-                last_error = format!("{url}: HTTP {}", response.status());
+            Ok(response) if response.status() == reqwest::StatusCode::FORBIDDEN && !fallback_user_agent => {
+                tracing::info!(url, "HTTP 403, retrying with the fallback user agent");
+                fallback_user_agent = true;
+                continue;
             }
+            Ok(response) if is_retryable(response.status()) => format!("{url}: HTTP {}", response.status()),
             Ok(response) => return Err(PortError::Network(format!("{url}: HTTP {}", response.status()))),
-            Err(e) => last_error = format!("{url}: {e}"),
+            Err(e) => format!("{url}: {e}"),
+        };
+        attempt += 1;
+        if attempt == attempts {
+            return Err(PortError::Network(transient_error));
         }
+        sleep_cancellable(BASE_BACKOFF * 2u32.pow(attempt), cancel).await?;
     }
-    Err(PortError::Network(last_error))
 }
 
 /// The body of `response` as UTF-8, refused (`InvalidData`) past [`MAX_TEXT_BYTES`], whether the
@@ -128,6 +135,9 @@ pub(crate) fn is_retryable(status: reqwest::StatusCode) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use super::*;
     use crate::test_server::{Reply, TestServer};
 
@@ -148,6 +158,47 @@ mod tests {
             let err = get_text(&client, &server.url(path), FetchPolicy::ONCE, &CancelFlag::new()).await.unwrap_err();
             assert!(matches!(err, PortError::InvalidData { .. }), "{path}: {err}");
         }
+    }
+
+    /// Refuses (403) every request without the fallback user agent and answers the others with
+    /// `fallback_reply`; counts the requests.
+    async fn refusing_plain_user_agents(fallback_reply: impl Fn() -> Reply + Send + Sync + 'static) -> (TestServer, Arc<AtomicUsize>) {
+        let requests = Arc::new(AtomicUsize::new(0));
+        let counter = requests.clone();
+        let server = TestServer::start(move |req| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            if req.header("user-agent").as_deref() == Some(FALLBACK_USER_AGENT) { fallback_reply() } else { Reply::status(403) }
+        })
+        .await;
+        (server, requests)
+    }
+
+    #[tokio::test]
+    async fn a_list_refused_with_403_is_retried_at_once_with_the_fallback_user_agent() {
+        let (server, requests) = refusing_plain_user_agents(|| Reply::text("listed")).await;
+        let started = Instant::now();
+        let text = get_text(&reqwest::Client::new(), &server.url("/list"), FetchPolicy::LIST, &CancelFlag::new()).await.unwrap();
+        assert_eq!(text, "listed");
+        assert_eq!(requests.load(Ordering::SeqCst), 2);
+        assert!(started.elapsed() < BASE_BACKOFF, "no pause before the fallback: {:?}", started.elapsed());
+    }
+
+    #[tokio::test]
+    async fn a_403_to_the_fallback_user_agent_too_is_final() {
+        let (server, requests) = refusing_plain_user_agents(|| Reply::status(403)).await;
+        let policy = FetchPolicy { attempts: 3, timeout: Duration::from_secs(5) };
+        let err = get_text(&reqwest::Client::new(), &server.url("/list"), policy, &CancelFlag::new()).await.unwrap_err();
+        assert_eq!(err, PortError::Network(format!("{}: HTTP 403 Forbidden", server.url("/list"))));
+        assert_eq!(requests.load(Ordering::SeqCst), 2, "one plain request, one with the fallback, no further attempt");
+    }
+
+    #[tokio::test]
+    async fn retries_after_the_fallback_keep_its_user_agent() {
+        let (server, requests) = refusing_plain_user_agents(|| Reply::status(503)).await;
+        let policy = FetchPolicy { attempts: 2, timeout: Duration::from_secs(5) };
+        let err = get_text(&reqwest::Client::new(), &server.url("/busy"), policy, &CancelFlag::new()).await.unwrap_err();
+        assert_eq!(err, PortError::Network(format!("{}: HTTP 503 Service Unavailable", server.url("/busy"))));
+        assert_eq!(requests.load(Ordering::SeqCst), 3, "the 403 retry does not use up an attempt");
     }
 
     #[tokio::test]

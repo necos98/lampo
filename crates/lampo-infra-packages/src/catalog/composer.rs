@@ -4,7 +4,8 @@
 //!
 //! A release whose checksum cannot be downloaded is skipped, the others are still listed. The
 //! last valid `versions` document is kept in the cache file (when configured) together with the
-//! checksums, and answers listings until a refresh succeeds ([`super::revalidating_cache`]).
+//! checksums, and answers listings until a refresh succeeds ([`super::revalidating_cache`]);
+//! without it (first run) the pinned Composer entries of the embedded catalog answer instead.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -20,6 +21,7 @@ use lampo_domain::version::PackageVersion;
 use lampo_domain::{PortError, PortResult};
 use serde::{Deserialize, Serialize};
 
+use super::embedded::pinned_entries;
 use super::revalidating_cache::{LiveCatalog, RevalidatingCache};
 use super::write_cache_file;
 use crate::http::{FetchPolicy, get_text};
@@ -86,11 +88,9 @@ impl ComposerSite {
             }
         }
     }
-}
 
-#[async_trait]
-impl LiveCatalog for ComposerSite {
-    async fn stored(&self) -> Option<Vec<CatalogEntry>> {
+    /// The releases kept in the cache file, `None` when there is none or it is unusable (logged).
+    async fn cached_releases(&self) -> Option<Vec<CatalogEntry>> {
         let file = self.cache_file.as_ref()?;
         let text = tokio::fs::read_to_string(file).await.ok()?;
         let cached = serde_json::from_str::<CachedVersions>(&text).map_err(|e| PortError::invalid_data(file.display().to_string(), e));
@@ -101,6 +101,17 @@ impl LiveCatalog for ComposerSite {
                 tracing::warn!(file = %file.display(), error = %e, "cached Composer versions are unusable");
                 None
             }
+        }
+    }
+}
+
+#[async_trait]
+impl LiveCatalog for ComposerSite {
+    /// The cache file, else the pinned Composer entries of the embedded catalog.
+    async fn stored(&self) -> Option<Vec<CatalogEntry>> {
+        match self.cached_releases().await {
+            Some(entries) => Some(entries),
+            None => pinned_entries(&PackageKind::COMPOSER),
         }
     }
 
@@ -229,7 +240,7 @@ mod tests {
         })
         .await;
         let source = ComposerSource::new(reqwest::Client::new()).with_base_url(server.url(""));
-        let entries = source.fetch(&PackageKind::COMPOSER).await.unwrap();
+        let entries = source.live.fetch_live(&CancelFlag::new()).await.unwrap();
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].url.as_str(), "https://getcomposer.org/download/2.11.2/composer.phar");
         assert_eq!(entries[1].sha256.unwrap().to_string(), "241a3d13b7c6d35d970b1f69a000298b66943541302148a438a932f5dd44a9fc");
@@ -261,7 +272,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cache = dir.path().join("cache").join("versions.json");
         let source = ComposerSource::new(reqwest::Client::new()).with_base_url(server.url("")).with_cache_file(&cache);
-        assert_eq!(versions(&source.fetch(&PackageKind::COMPOSER).await.unwrap()), ["2.11.2"]);
+        assert_eq!(versions(&source.live.fetch_live(&CancelFlag::new()).await.unwrap()), ["2.11.2"]);
 
         let offline = ComposerSource::new(reqwest::Client::new()).with_base_url("http://127.0.0.1:9").with_cache_file(&cache);
         let entries = offline.fetch(&PackageKind::COMPOSER).await.unwrap();
@@ -275,7 +286,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let cache = dir.path().join("versions.json");
         let source = ComposerSource::new(reqwest::Client::new()).with_base_url(server.url("")).with_cache_file(&cache);
-        assert!(source.fetch(&PackageKind::COMPOSER).await.is_err());
+        assert!(source.live.fetch_live(&CancelFlag::new()).await.is_err());
         assert!(!cache.exists());
     }
 
@@ -294,10 +305,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn without_a_cache_file_a_slow_site_answers_with_the_pinned_releases() {
+        let dir = tempfile::tempdir().unwrap();
+        let server = site_without_the_lts_checksum(Duration::from_secs(2)).await;
+        let source = ComposerSource::new(reqwest::Client::new()).with_base_url(server.url("")).with_cache_file(dir.path().join("versions.json"));
+        let pinned = tokio::time::timeout(Duration::from_millis(500), source.fetch(&PackageKind::COMPOSER)).await.expect("answered with the pinned releases").unwrap();
+        assert!(!pinned.is_empty() && pinned.iter().all(|e| e.id.kind == PackageKind::COMPOSER && e.channel == CatalogChannel::Frozen), "{pinned:?}");
+
+        source.cache.settled().await;
+        let live = source.fetch(&PackageKind::COMPOSER).await.unwrap();
+        assert_eq!(live.iter().map(|e| (e.id.version.as_str(), e.channel)).collect::<Vec<_>>(), [("2.11.2", CatalogChannel::Live)]);
+    }
+
+    #[tokio::test]
     #[ignore = "network"]
     async fn live_composer_versions() {
         let source = ComposerSource::new(crate::http::build_client().unwrap());
-        let entries = source.fetch(&PackageKind::COMPOSER).await.unwrap();
+        let entries = source.live.fetch_live(&CancelFlag::new()).await.unwrap();
         assert!(entries.iter().any(|e| e.id.series().to_string() == "2.2"), "2.2 LTS listed");
         for e in &entries {
             println!("{} {} {}", e.id, e.url, e.sha256.unwrap());
