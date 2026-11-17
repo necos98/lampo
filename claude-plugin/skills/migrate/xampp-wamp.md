@@ -69,8 +69,8 @@ importing. Then follow SKILL.md step 4.
 ## WordPress specifics
 
 `wp-config.php` holds `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`: back it up, then set
-`DB_HOST` to `127.0.0.1:3306` (Lampo's port), `DB_USER` `root`, empty `DB_PASSWORD`, `DB_NAME`
-the Lampo database. The site URL lives in the database (`wp_options`: `siteurl`, `home`): after
+`DB_HOST` to `127.0.0.1:3306` (Lampo's port), `DB_USER` and `DB_PASSWORD` to
+`database.user` and `database.password` of `agent context --json`, `DB_NAME` the Lampo database. The site URL lives in the database (`wp_options`: `siteurl`, `home`): after
 the import, and with the user's approval, change it to the Lampo URL, for example with WP-CLI if
 the project has it (`php wp-cli.phar search-replace "http://localhost/blog" "http://blog.localhost" --all-tables`)
 or with a targeted `UPDATE` on `wp_options`. Serialized data makes a plain text replace in the

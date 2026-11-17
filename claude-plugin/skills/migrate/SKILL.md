@@ -59,7 +59,7 @@ Write the inventory down for the user in a short table before changing anything.
 |------------|----------|
 | PHP 5.6 to the newest | supported, per project (`lampo package install php <x.y>`) |
 | MySQL 5.7 / 8.x | MySQL 8.4 (default) or 5.7; 8.0 dumps import into 8.4 |
-| PHP 7.3 or older with MySQL 8.4 | Lampo moves that project's MySQL account to `mysql_native_password` and warns (`detect`, `doctor`); MySQL 5.7 is the alternative |
+| PHP 7.3 or older with MySQL 8.4 | Lampo moves that project's MySQL account to `mysql_native_password` and warns (`warnings` of `project create`/`project set`/`project set-php`/`project info`, code `legacy-php-mysql-auth`; `doctor` check `mysql-auth`); MySQL 5.7 is the alternative |
 | MariaDB | not available: the project gets MySQL. Dumps usually import; check the caveats below |
 | PostgreSQL | **not supported**. Stop here (see below) |
 | Redis / Valkey | Redis, optional per project |
@@ -88,7 +88,9 @@ handles `DEFINER` clauses, the sandbox first line, non-unique foreign keys and t
 collation (see `lampo:database`). If the import still fails (exit 12), show the error line;
 fixing the dump is a change the user approves.
 
-Every entry of `warnings` from `lampo project detect` must appear in this check. If something
+Every entry of `warnings` from `lampo project detect` must appear in this check (the PHP/MySQL
+warning above comes later, from the commands that register or change the project: report it
+then). If something
 essential is unsupported, stop and report before creating anything.
 
 ## Step 3: register the project
@@ -144,8 +146,9 @@ in step 1, not only in `.env`: base URLs (`http://api/`), config files, tests, f
 Then carry over the compose `environment:` values that differ from `.env` (real case:
 `DB_DATABASE=laravel` in the compose, another name in `.env`): write them in `.env`, or set them
 for the site with `lampo project set shop --env DB_DATABASE=shop`. Typical changes:
-`DB_HOST=mysql` / `DB_HOST=db` -> `127.0.0.1`, `DB_USERNAME=sail` -> `root`, empty
-`DB_PASSWORD`, `REDIS_HOST=redis` -> `127.0.0.1`, `MAIL_HOST=mailpit` / `mailhog` -> `127.0.0.1`
+`DB_HOST=mysql` / `DB_HOST=db` -> `127.0.0.1`, `DB_USERNAME` / `DB_PASSWORD` (`sail` /
+`password`) -> `database.user` / `database.password` of `agent context --json` (never root with
+an empty password: the project has its own account), `REDIS_HOST=redis` -> `127.0.0.1`, `MAIL_HOST=mailpit` / `mailhog` -> `127.0.0.1`
 with `MAIL_PORT` = `mail.smtpPort` (1025) and no `MAIL_USERNAME` / `MAIL_PASSWORD` /
 `MAIL_ENCRYPTION`, `APP_URL=http://shop.test` -> the Lampo URL.
 Then `php artisan config:clear` (Laravel). WordPress: `wp-config.php` instead (and the site URL

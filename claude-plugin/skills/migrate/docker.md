@@ -146,8 +146,8 @@ Container hostnames are also in code and config, not only in `.env`: replace eve
 inventory pass. The compose `environment:` overrides `.env` in the container, so carry those
 values over too (`.env`, or `lampo project set shop --env KEY=VALUE`).
 
-`DB_HOST=127.0.0.1`, `DB_PORT` from Lampo, `DB_USERNAME=root`, `DB_PASSWORD=` (empty),
-`DB_DATABASE` = the Lampo database, `REDIS_HOST=127.0.0.1`, `APP_URL` = the Lampo URL,
+`DB_HOST=127.0.0.1`, `DB_PORT` from Lampo, `DB_USERNAME` and `DB_PASSWORD` =
+`database.user` and `database.password` of `agent context --json`, `DB_DATABASE` = the Lampo database, `REDIS_HOST=127.0.0.1`, `APP_URL` = the Lampo URL,
 `MAIL_MAILER=smtp`, `MAIL_HOST=127.0.0.1`, `MAIL_PORT` = `mail.smtpPort` from Lampo (1025), no
 username, password or encryption. Remove nothing else; `php artisan config:clear`.
 

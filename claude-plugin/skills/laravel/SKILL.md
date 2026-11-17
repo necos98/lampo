@@ -38,9 +38,13 @@ DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_DATABASE=shop
-DB_USERNAME=root
-DB_PASSWORD=
+DB_USERNAME=lampo_shop
+DB_PASSWORD=<database.password>
 ```
+
+`DB_USERNAME` and `DB_PASSWORD` are the `database.user` and `database.password` of `agent
+context --json` (a new project has its own account `lampo_<id>` with a random password; only a
+project still on root has `root` and an empty password): copy them, never guess.
 
 - `APP_URL` = the `url` of the site (in a worktree environment, its `http://127.0.0.1:<port>`);
   it matters for generated links, `asset()`, mail links, Sanctum/Fortify (`SANCTUM_STATEFUL_DOMAINS`
@@ -164,7 +168,7 @@ MAIL_ENCRYPTION=null
 | Symptom | Fix |
 |---------|-----|
 | `SQLSTATE[HY000] [2002]` | MySQL not running or wrong port: `lampo status`, `lampo up`; re-read `database.port`. |
-| `SQLSTATE[HY000] [1045] Access denied` | `DB_USERNAME=root`, empty `DB_PASSWORD`. |
+| `SQLSTATE[HY000] [1045] Access denied` | `.env` credentials are stale: copy `database.user` and `database.password` from `lampo agent context --json` (`lampo:database`, Troubleshooting), then `php artisan config:clear`. |
 | `SQLSTATE[HY000] [1049] Unknown database` | `lampo db create <name>` or fix `DB_DATABASE`. |
 | `could not find driver` | `pdo_mysql` not enabled for the project (`lampo:php`). |
 | `No application encryption key` | `php artisan key:generate` (only if `APP_KEY` is empty). |

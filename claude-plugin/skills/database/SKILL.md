@@ -17,18 +17,23 @@ lampo agent context --json
 ```
 
 `database` holds `mysqlVersion`, `host` (127.0.0.1), `port` (3306 for 8.4 by default; another
-series has its own port, see `services`), `user` (`root`), `password` (empty) and `database`.
-Inside a worktree environment with its own database these are that database's values. Use
+series has its own port, see `services`), `user`, `password` and `database`. A new project has
+its own account `lampo_<id>` (all privileges on its databases, nothing elsewhere) with a random
+password; `lampo project info` shows the same. Always copy `user` and `password` from here:
+root with an empty password holds only for older projects still on root, and root gets a random
+password once no project of the instance uses it (never copy it anywhere). Inside a worktree environment with its own database these are that database's values. Use
 `127.0.0.1`, not `localhost` (on Windows `localhost` may resolve to IPv6 first).
 
 ## The `mysql` client
 
 The `mysql` shim runs the site's client with `--host=127.0.0.1 --port=<the series' port>
---user=root --default-character-set=utf8mb4` and **selects the site's database** (in a worktree
-environment with its own database, that one). Your options come after these defaults, so they
-win. Outside any project (the default PHP) no database is selected. While the site's database
-does not exist yet the shim connects without one and prints `lampo-shim: database '<db>' does
-not exist yet, connecting without a default database` on stderr.
+--user=<the project's user> --default-character-set=utf8mb4` and **selects the site's database**
+(in a worktree environment with its own database, that one). Your options come after these
+defaults, so they win. It connects as the project's account, so it cannot reach other
+databases: use `lampo db create` / `lampo db import <dump> <name>` for those (they run as root).
+Outside any project (the default PHP) no database is selected. While the site's database does
+not exist yet the shim connects without one and prints `lampo-shim: database '<db>' does not
+exist yet, connecting without a default database` on stderr.
 
 ```powershell
 mysql -e "SHOW TABLES"
@@ -60,8 +65,8 @@ mysql --database= -e "SHOW DATABASES"
   stderr, nothing on stdout); 2 bad command line; 127 the shim could not resolve the site or
   the client (`lampo agent context --json`, read `hints`). `ERROR 1049 Unknown database` means
   the site's database is missing: `lampo db list`, then `lampo db create` (allowed).
-- Keep host and user as they are: `127.0.0.1`, not `localhost` (on Windows it may resolve to
-  IPv6 first), and `root` with no password (do not pass `-p`, it would prompt).
+- Keep host and user as the shim sets them; it supplies the password: do not pass `-p`, it
+  would prompt.
 - Reading is allowed. Statements that destroy data on the project's main database (`DROP`,
   `TRUNCATE`, `DELETE`/`UPDATE` of many rows, destructive `ALTER`) need the user's yes, like
   `lampo db drop`; export first (`lampo db export before-change.sql`). A `fresh`/`clone:`
@@ -89,20 +94,20 @@ reason feed dumps with `lampo db import` (an import: ask first, see below), not
 
 ## Writing `.env`
 
-Lampo never edits `.env`. You may write the values it reports into the app's `.env` (keep
-every other line as it is). For Laravel and most PHP frameworks:
+Lampo never edits `.env`. You may write the values `agent context --json` reports into the
+app's `.env` (keep every other line as it is). For Laravel and most PHP frameworks:
 
 ```dotenv
 DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
 DB_PORT=3306
 DB_DATABASE=my_shop
-DB_USERNAME=root
-DB_PASSWORD=
+DB_USERNAME=<database.user>
+DB_PASSWORD=<database.password>
 ```
 
-WordPress: `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST` (`127.0.0.1:3306`) in
-`wp-config.php`. Symfony: `DATABASE_URL="mysql://root:@127.0.0.1:3306/my_shop?serverVersion=8.4"`.
+WordPress: `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST` (`127.0.0.1:3306`) in `wp-config.php`.
+Symfony: `DATABASE_URL="mysql://<user>:<password>@127.0.0.1:3306/my_shop?serverVersion=8.4"`.
 After editing a Laravel `.env`, run `php artisan config:clear` (a cached config ignores `.env`).
 
 ## Commands
@@ -184,15 +189,8 @@ not work around a failure with `mysql --init-command=… -e "source …"`: use t
 
 Dump caveats:
 
-- A dump made with `--databases` / `--all-databases` contains `CREATE DATABASE` and `USE`
-  lines that send the data to the original name, whatever target you pass. Check the head of
-  the file (`Select-String -Path dump.sql -Pattern '^USE ', '^CREATE DATABASE' | Select -First 5`;
-  for a compressed dump ask the user, or look inside a `.zip` with `Expand-Archive` into a
-  temporary folder) and, with the user's approval, import into that name or dump again without
-  those options.
-- Dumps from MariaDB may also use syntax `--compat` does not fix and MySQL rejects (see
-  `lampo:migrate`, "MariaDB").
-- Exit code 12 means the mysql client failed: the message has the SQL error and its line.
+- `--databases` dumps: see the `USE` / `CREATE DATABASE` refusal above. MariaDB dumps may use
+  syntax `--compat` does not fix (`lampo:migrate`). Exit 12: the mysql client failed.
 
 ### Drop: always ask first
 
@@ -236,8 +234,12 @@ user's yes.
 - `SQLSTATE[HY000] [2002]` / connection refused: MySQL is not running or the port differs.
   `lampo status`, then `lampo up` (starts the planned services) or `lampo up mysql-8.4`; read
   the port from `agent context` again.
-- `Access denied for user`: the app uses other credentials; set `root` with an empty password
-  as above (or ask the user if they created their own MySQL users).
+- `Access denied for user` (`[1045]`): the `.env` has stale credentials, usually the old `root`
+  with an empty password. Copy `database.user` and `database.password` from `lampo agent context
+  --json` into `.env` (`php artisan config:clear` for Laravel); do not try `root`. An older
+  project may still be on root: switch it (ask first, `.env` changes too) with `lampo project
+  set my-shop --mysql-credentials project` (`root` goes back; new-project default:
+  `lampo settings set --project-credentials on|off`).
 - `Unknown database`: `lampo db list`, then `lampo db create <name>` (allowed).
 - MySQL does not start: `lampo logs mysql-8.4-error -n 80` and `lampo:services-logs`.
 - A `lampo db` command fails with exit 4 "uses no MySQL": the project has no MySQL service.
