@@ -21,10 +21,21 @@ import type { CommandRunner, Outcome } from './runner.js';
  */
 export type DefenderTarget = 'php' | 'mysql' | 'projects';
 
+/** What a request is about: a target, or `uninstalled` (the exclusions of the executables no longer installed). */
+export type PendingTarget = DefenderTarget | 'uninstalled';
+
 /** The request in progress, while its UAC prompt is open. */
 export interface PendingExclusion {
-	target: DefenderTarget;
+	target: PendingTarget;
 	change: ScanExclusionChange;
+}
+
+/**
+ * The removal of the exclusions Lampo applied to PHP or Apache executables uninstalled since
+ * (`lampo defender exclusion remove --uninstalled`): the installed ones stay excluded.
+ */
+export function uninstalledRemovalRequest(): DefenderExclusionRequest {
+	return { change: 'remove', php: false, mysql: false, projects: false, projectsFolder: null, uninstalled: true };
 }
 
 /** What the user is told when a request ends: the success of the change, or why nothing changed. */
@@ -33,7 +44,7 @@ export function scanExclusionMessage(target: DefenderTarget, result: DefenderExc
 	return result.outcome === 'applied' ? t[target].done[result.change] : t.outcome[result.outcome];
 }
 
-/** What the user is told when a change proposed after a PHP install or uninstall ends. */
+/** What the user is told when a change proposed after a PHP install or uninstall ends, or the removal of the uninstalled ones. */
 export function suggestionMessage(result: DefenderExclusionResult): string {
 	const t = m.settings.defender;
 	return result.outcome === 'applied' ? t.php.suggestion.done[result.change] : t.outcome[result.outcome];
@@ -91,6 +102,12 @@ export class ScanExclusionStore {
 	applySuggestion = (suggestion: DefenderExclusionSuggestion) => this.#request('php', suggestion.change, suggestion.request, suggestionMessage);
 
 	/**
+	 * Removes the exclusions of the executables no longer installed (`info.uninstalledProcesses`,
+	 * one UAC prompt); once applied, `info` is reloaded. `null` while another request is open.
+	 */
+	removeUninstalled = () => this.#request('uninstalled', 'remove', uninstalledRemovalRequest(), suggestionMessage);
+
+	/**
 	 * Copies the PowerShell commands adding `target`'s exclusion, for whoever manages the PC: no
 	 * prompt, nothing changed. `false` when they could not be built (the error is told) or copied.
 	 */
@@ -112,9 +129,12 @@ export class ScanExclusionStore {
 		return this.#request(target, change, exclusionRequest(target, change, projectsFolder), (r) => scanExclusionMessage(target, r));
 	}
 
-	/** Sends `request` (about `target`) and tells its end with `message`. */
+	/**
+	 * Sends `request` (about `target`) and tells its end with `message`. An applied removal of the
+	 * uninstalled executables reloads `info` when it was loaded: their list is now empty.
+	 */
 	async #request(
-		target: DefenderTarget,
+		target: PendingTarget,
 		change: ScanExclusionChange,
 		request: DefenderExclusionRequest,
 		message: (result: DefenderExclusionResult) => string
@@ -126,7 +146,9 @@ export class ScanExclusionStore {
 			warning: (r) => (r.outcome === 'applied' ? null : message(r))
 		});
 		this.busy = null;
-		if (result.ok) this.last[target] = result.value;
+		if (!result.ok) return result;
+		if (target !== 'uninstalled') this.last[target] = result.value;
+		if (request.uninstalled && result.value.outcome === 'applied' && this.info.status !== 'idle') await this.info.load();
 		return result;
 	}
 }

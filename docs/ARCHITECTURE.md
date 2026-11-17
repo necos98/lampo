@@ -216,7 +216,11 @@ accepts:
   `DefenderExclusionAdvice` proposes (never makes) the change: adding the new `php-cgi.exe`, or
   removing the exclusions of executables no longer installed (`--uninstalled`), only when Lampo
   already applied the exclusion and Defender is the active antivirus (the GUI shows a notice with
-  a button, the CLI prints the command and `defenderExclusion` in `--json`).
+  a button, the CLI prints the command and `defenderExclusion` in `--json`). The removal is
+  also available at any time: `lampo defender exclusion remove --uninstalled`, and in the GUI's
+  Defender settings panel, which lists the excluded executables no longer installed
+  (`DefenderExclusionInfoDto::uninstalled_processes`, empty when the record does not load) with
+  a button sending the same request.
   A process exclusion does not exclude the process image itself, and files written
   by other programs are still scanned; what is lost is the scan of a malicious file at the
   moment PHP or Apache reads it.

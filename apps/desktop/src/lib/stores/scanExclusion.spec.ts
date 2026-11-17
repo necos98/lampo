@@ -13,11 +13,13 @@ import { messages as m } from '../messages/index.js';
 import type { Notifier } from '../services/notifier.js';
 import { deferred, recordingNotifier, testBackend, testRunner } from '../testing/harness.js';
 import type { CopyText } from './logFiles.js';
-import { exclusionRequest, itCommandsText, needsItCommands, ScanExclusionStore, type DefenderTarget } from './scanExclusion.svelte.js';
+import { exclusionRequest, itCommandsText, needsItCommands, ScanExclusionStore, uninstalledRemovalRequest, type DefenderTarget } from './scanExclusion.svelte.js';
 
 const FOLDER = 'C:\\Users\\dev\\AppData\\Local\\Lampo\\mysql';
 const PROCESSES = ['C:\\Users\\dev\\AppData\\Local\\Lampo\\packages\\apache-2.4\\bin\\httpd.exe', 'C:\\Users\\dev\\AppData\\Local\\Lampo\\packages\\php-8.3\\php-cgi.exe'];
 const PROJECTS = 'C:\\Users\\dev\\Desktop\\Progetti';
+/** A PHP Lampo excluded and then uninstalled. */
+const UNINSTALLED = 'C:\\Users\\dev\\AppData\\Local\\Lampo\\packages\\php-8.2\\php-cgi.exe';
 
 const result = (target: DefenderTarget, outcome: ScanExclusionOutcome, change: ScanExclusionChange = 'add'): DefenderExclusionResult => ({
 	change,
@@ -45,7 +47,7 @@ describe('ScanExclusionStore', () => {
 
 		await store.load();
 
-		expect(store.info.data).toEqual({ folder: FOLDER, processes: PROCESSES, projectsFolder: PROJECTS });
+		expect(store.info.data).toEqual({ folder: FOLDER, processes: PROCESSES, projectsFolder: PROJECTS, uninstalledProcesses: [UNINSTALLED] });
 		expect(store.last).toEqual({ php: null, mysql: null, projects: null });
 		expect(change).not.toHaveBeenCalled();
 	});
@@ -190,6 +192,81 @@ describe('ScanExclusionStore', () => {
 		expect(store.busy).toBeNull();
 		expect(store.last).toEqual({ php: null, mysql: null, projects: null });
 		expect(notifier.errors).toHaveLength(1);
+	});
+});
+
+describe('the exclusions of the PHP and Apache uninstalled since', () => {
+	/** A backend listing `UNINSTALLED` until a removal of the uninstalled executables answers `outcome` (`applied` empties it). */
+	function uninstalledBackend(outcome: ScanExclusionOutcome) {
+		let uninstalled = [UNINSTALLED];
+		const info = vi.fn(async () => ({ folder: FOLDER, processes: PROCESSES, projectsFolder: PROJECTS, uninstalledProcesses: [...uninstalled] }));
+		const change = vi.fn(async (request: DefenderExclusionRequest): Promise<DefenderExclusionResult> => {
+			const processes = request.uninstalled ? uninstalled : [];
+			if (request.uninstalled && outcome === 'applied') uninstalled = [];
+			return { change: request.change, outcome, folder: null, processes, projects: null };
+		});
+		const { backend } = testBackend({ defenderExclusionInfo: info, changeDefenderExclusion: change });
+		return { backend, info, change };
+	}
+
+	it('removing them asks for the removal of the uninstalled ones only, then reloads an empty list', async () => {
+		const { backend, info, change } = uninstalledBackend('applied');
+		const notifier = recordingNotifier();
+		const store = storeFor(backend, notifier);
+		await store.load();
+		expect(store.info.data?.uninstalledProcesses).toEqual([UNINSTALLED]);
+
+		const action = store.removeUninstalled();
+		expect(store.busy).toEqual({ target: 'uninstalled', change: 'remove' });
+		await action;
+
+		expect(change).toHaveBeenCalledExactlyOnceWith(uninstalledRemovalRequest());
+		expect(uninstalledRemovalRequest()).toEqual({ change: 'remove', php: false, mysql: false, projects: false, projectsFolder: null, uninstalled: true });
+		expect(store.busy).toBeNull();
+		expect(info).toHaveBeenCalledTimes(2);
+		expect(store.info.data?.uninstalledProcesses).toEqual([]);
+		expect(notifier.successes).toEqual([m.settings.defender.php.suggestion.done.remove]);
+		expect(store.last).toEqual({ php: null, mysql: null, projects: null });
+	});
+
+	it.each(['cancelled', 'refused'] as const)('a removal that is %s says why and keeps the list', async (outcome) => {
+		const { backend, info } = uninstalledBackend(outcome);
+		const notifier = recordingNotifier();
+		const store = storeFor(backend, notifier);
+		await store.load();
+
+		await store.removeUninstalled();
+
+		expect(notifier.warnings).toEqual([m.settings.defender.outcome[outcome]]);
+		expect(info).toHaveBeenCalledOnce();
+		expect(store.info.data?.uninstalledProcesses).toEqual([UNINSTALLED]);
+	});
+
+	it('a removal while another prompt is open is ignored', async () => {
+		const pending = deferred<DefenderExclusionResult>();
+		const change = vi.fn(() => pending.promise);
+		const { backend } = testBackend({ changeDefenderExclusion: change });
+		const store = storeFor(backend);
+
+		const first = store.add('php');
+		expect(await store.removeUninstalled()).toBeNull();
+		pending.resolve(result('php', 'applied'));
+		await first;
+
+		expect(change).toHaveBeenCalledOnce();
+	});
+
+	it('a removal proposed after an uninstall reloads the list only when it was loaded', async () => {
+		const { backend, info } = uninstalledBackend('applied');
+		const store = storeFor(backend);
+		const suggestion: DefenderExclusionSuggestion = { change: 'remove', processes: [UNINSTALLED], request: uninstalledRemovalRequest(), command: '' };
+
+		await store.applySuggestion(suggestion);
+		expect(info).not.toHaveBeenCalled();
+
+		await store.load();
+		await store.applySuggestion(suggestion);
+		expect(info).toHaveBeenCalledTimes(2);
 	});
 });
 

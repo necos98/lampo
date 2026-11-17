@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use lampo_domain::address::SiteAddress;
 use lampo_domain::package::PackageKind;
 use lampo_domain::paths::LampoPaths;
-use lampo_domain::ports::{ProjectRepository, ScanExclusionEditor};
+use lampo_domain::ports::{ProcessExclusionRecordWriter, ProjectRepository, ScanExclusionEditor};
 use lampo_domain::project::{DisplayName, Project, ProjectEnvironment, ProjectId, ProjectRoot};
 use lampo_domain::scan_exclusion::{ProcessExclusionRecord, ProcessExclusionRequest, ScanExclusionChange, ScanExclusionOutcome, ScanExclusionTargets};
 use lampo_domain::hostname::Tld;
@@ -140,9 +140,58 @@ async fn php_and_mysql_together_are_one_request() {
 #[tokio::test]
 async fn info_lists_what_each_part_covers() {
     let s = setup(Ok(ScanExclusionOutcome::Applied));
-    assert_eq!(s.use_case.info().unwrap(), DefenderExclusionInfoDto { folder: MYSQL_FOLDER.into(), processes: Vec::new(), projects_folder: None });
+    assert_eq!(s.use_case.info().unwrap(), DefenderExclusionInfoDto { folder: MYSQL_FOLDER.into(), processes: Vec::new(), projects_folder: None, uninstalled_processes: Vec::new() });
     install_servers(&s.installed);
     assert_eq!(s.use_case.info().unwrap().processes, SERVERS.map(String::from).to_vec());
+}
+
+/// A PHP Lampo excluded and then uninstalled.
+const UNINSTALLED_PHP: &str = r"C:\lampo\packages\php-8.2\php-cgi.exe";
+
+/// The record of an applied exclusion of every installed server and of [`UNINSTALLED_PHP`].
+fn excluded_with_an_uninstalled_php(record: &MemExclusionRecord) {
+    let mut excluded = servers();
+    excluded.push(PathBuf::from(UNINSTALLED_PHP));
+    record.write(&ProcessExclusionRecord { excluded, ..Default::default() }).unwrap();
+}
+
+#[tokio::test]
+async fn info_lists_the_excluded_executables_no_longer_installed() {
+    let s = setup(Ok(ScanExclusionOutcome::Applied));
+    install_servers(&s.installed);
+    excluded_with_an_uninstalled_php(&s.record);
+    let info = s.use_case.info().unwrap();
+    assert_eq!(info.uninstalled_processes, vec![UNINSTALLED_PHP.to_string()]);
+    assert_eq!(info.processes, SERVERS.map(String::from).to_vec(), "the installed ones stay in `php`");
+}
+
+#[tokio::test]
+async fn info_lists_nothing_uninstalled_while_every_excluded_executable_is_installed() {
+    let s = setup(Ok(ScanExclusionOutcome::Applied));
+    install_servers(&s.installed);
+    s.record.write(&ProcessExclusionRecord { excluded: servers(), ..Default::default() }).unwrap();
+    assert!(s.use_case.info().unwrap().uninstalled_processes.is_empty());
+}
+
+#[tokio::test]
+async fn info_without_a_readable_record_lists_nothing_uninstalled() {
+    let s = setup(Ok(ScanExclusionOutcome::Applied));
+    install_servers(&s.installed);
+    excluded_with_an_uninstalled_php(&s.record);
+    s.record.corrupt();
+    let info = s.use_case.info().unwrap();
+    assert!(info.uninstalled_processes.is_empty());
+    assert_eq!(info.processes, SERVERS.map(String::from).to_vec(), "the rest is still listed");
+}
+
+#[tokio::test]
+async fn removing_the_uninstalled_exclusions_empties_the_list() {
+    let s = setup(Ok(ScanExclusionOutcome::Applied));
+    install_servers(&s.installed);
+    excluded_with_an_uninstalled_php(&s.record);
+    s.use_case.change(DefenderExclusionRequestDto::remove_uninstalled(), gui()).await.unwrap();
+    assert_eq!(s.editor.calls(), vec![(ScanExclusionTargets { processes: vec![PathBuf::from(UNINSTALLED_PHP)], ..Default::default() }, ScanExclusionChange::Remove)]);
+    assert!(s.use_case.info().unwrap().uninstalled_processes.is_empty());
 }
 
 #[tokio::test]

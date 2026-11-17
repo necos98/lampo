@@ -769,6 +769,13 @@ export const it = {
 					remove: 'Esclusione rimossa: Defender analizza di nuovo la cartella dei progetti.'
 				} satisfies Record<ScanExclusionChange, string>
 			},
+			/** Shown only while an exclusion Lampo applied names a PHP or Apache uninstalled since. */
+			uninstalled: {
+				title: 'PHP e Apache disinstallati',
+				help: 'Lampo aveva escluso questi eseguibili, poi disinstallati: l’esclusione resta in Defender finché non la rimuovi. Se in quel percorso ricomparisse un eseguibile, Defender non analizzerebbe i file che apre.',
+				targets: 'Eseguibili non più installati',
+				remove: 'Rimuovi esclusioni dei PHP/Apache disinstallati'
+			},
 			outcome: {
 				cancelled: 'Conferma di amministratore annullata: nessuna modifica.',
 				'defender-unavailable': 'Microsoft Defender non è installato o non è l’antivirus attivo (c’è un altro antivirus, o è disattivato): nessuna modifica. Un altro antivirus ha le sue esclusioni.',

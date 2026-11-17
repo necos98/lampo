@@ -187,7 +187,10 @@ Tre esclusioni facoltative, da aggiungere solo se le vuoi:
   un nuovo PHP propone di aggiornarla e disinstallarne uno propone di togliere l'esclusione del suo
   eseguibile (`lampo defender exclusion remove --uninstalled`): nella GUI con un pulsante, nella
   CLI con il comando da eseguire (in `--json` il campo `defenderExclusion`). Solo una proposta:
-  la modifica la fai tu, con la conferma UAC.
+  la modifica la fai tu, con la conferma UAC. Puoi farla anche più tardi, in ogni momento: con lo
+  stesso comando, o nella GUI da Impostazioni › CLI e integrazioni › Microsoft Defender, che
+  elenca gli eseguibili esclusi e non più installati (PHP o Apache) con il pulsante «Rimuovi
+  esclusioni dei PHP/Apache disinstallati».
 - **Dati MySQL** (`--mysql`): le suite di test ricreano il database a ogni esecuzione e Defender
   analizza ogni scrittura dei file di MySQL (`.ibd`, redo log). Lampo esclude la sola cartella dei
   dati MySQL, `%LOCALAPPDATA%\Lampo\mysql` (i dati di tutte le istanze).

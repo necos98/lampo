@@ -1073,7 +1073,13 @@ processes: Array<string>,
  * The suggested projects folder (`projects`): the deepest folder holding the folders of the
  * registered projects that may be excluded; `null` when there is none.
  */
-projectsFolder: string | null, };
+projectsFolder: string | null, 
+/**
+ * The executables Lampo excluded that are no longer installed (`uninstalled`, only to
+ * remove): a PHP or Apache uninstalled since. Empty when the record of the exclusions does
+ * not load.
+ */
+uninstalledProcesses: Array<string>, };
 
 /**
  * What one Defender exclusion excludes.

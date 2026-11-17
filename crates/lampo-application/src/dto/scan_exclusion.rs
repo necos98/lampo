@@ -105,6 +105,10 @@ pub struct DefenderExclusionInfoDto {
     /// The suggested projects folder (`projects`): the deepest folder holding the folders of the
     /// registered projects that may be excluded; `null` when there is none.
     pub projects_folder: Option<String>,
+    /// The executables Lampo excluded that are no longer installed (`uninstalled`, only to
+    /// remove): a PHP or Apache uninstalled since. Empty when the record of the exclusions does
+    /// not load.
+    pub uninstalled_processes: Vec<String>,
 }
 
 /// A change of the PHP process exclusion Lampo proposes after a PHP is installed or uninstalled,

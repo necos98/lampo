@@ -95,6 +95,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 		'C:\\Users\\dev\\AppData\\Local\\Lampo\\packages\\php-8.3\\php-cgi.exe'
 	];
 	const suggestedProjectsFolder = 'C:\\Users\\dev\\Desktop\\Progetti';
+	// A PHP Lampo excluded and then uninstalled: its exclusion is left until it is removed.
+	let uninstalledExcluded = ['C:\\Users\\dev\\AppData\\Local\\Lampo\\packages\\php-8.2\\php-cgi.exe'];
 	const expectedPlugin = '0.1.0-mock-h1a2b3c4d';
 	let claudeCode: T.ClaudeCodeStatus = {
 		state: 'not-installed',
@@ -807,16 +809,23 @@ export function createMockBackend({ fresh }: Options): Backend {
 		},
 		// The browser has no Defender to read: nothing to propose.
 		defenderExclusionSuggestions: async () => [],
-		defenderExclusionInfo: async () => ({ folder: mysqlDataFolder, processes: [...serverExecutables], projectsFolder: suggestedProjectsFolder }),
+		defenderExclusionInfo: async () => ({
+			folder: mysqlDataFolder,
+			processes: [...serverExecutables],
+			projectsFolder: suggestedProjectsFolder,
+			uninstalledProcesses: [...uninstalledExcluded]
+		}),
 		// The browser has no UAC prompt nor Defender: every change is confirmed.
-		changeDefenderExclusion: async ({ change, php, mysql, projects, projectsFolder }) => {
+		changeDefenderExclusion: async ({ change, php, mysql, projects, projectsFolder, uninstalled }) => {
 			await sleep(1200);
 			if (php) phpExcluded = change === 'add';
+			const removedUninstalled = uninstalled ? uninstalledExcluded : [];
+			if (uninstalled) uninstalledExcluded = [];
 			return {
 				change,
 				outcome: 'applied',
 				folder: mysql ? mysqlDataFolder : null,
-				processes: php ? [...serverExecutables] : [],
+				processes: [...(php ? serverExecutables : []), ...removedUninstalled],
 				projects: projects ? (projectsFolder ?? suggestedProjectsFolder) : null
 			};
 		}

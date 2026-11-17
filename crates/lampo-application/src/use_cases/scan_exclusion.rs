@@ -20,7 +20,8 @@
 //! request naming `php` is remembered ([`ProcessExclusionRecord`]): the doctor's `defender` check
 //! tells from it whether every installed PHP is covered, and installing or uninstalling a PHP
 //! proposes the change ([`super::scan_exclusion_advice`]). `uninstalled` names only the excluded
-//! executables no longer installed, to remove them and keep the installed ones excluded.
+//! executables no longer installed, to remove them and keep the installed ones excluded; `info`
+//! lists them, so Settings can offer that removal at any time.
 //!
 //! When a policy controls Defender's exclusions (group policy, Intune), `commands` gives the
 //! `Add-MpPreference` lines of the same targets, for whoever manages the PC; it prompts for
@@ -86,9 +87,15 @@ impl DefenderExclusion {
         Ok(server_executables(&self.installed.list()?))
     }
 
+    /// The executables Lampo excluded that are not among `installed` (the server executables
+    /// installed now).
+    fn excluded_uninstalled(&self, installed: &[PathBuf]) -> AppResult<Vec<PathBuf>> {
+        Ok(self.record_reader.read()?.excluded_except(installed))
+    }
+
     /// The executables Lampo excluded that are no longer installed. `Validation` when there is none.
     fn uninstalled_executables(&self) -> AppResult<Vec<PathBuf>> {
-        let uninstalled = self.record_reader.read()?.excluded_except(&self.server_executables()?);
+        let uninstalled = self.excluded_uninstalled(&self.server_executables()?)?;
         if uninstalled.is_empty() {
             return Err(validation("every executable Lampo excluded is still installed: there is no exclusion of an uninstalled PHP or Apache to remove"));
         }
@@ -116,12 +123,19 @@ impl DefenderExclusion {
         }
     }
 
-    /// What `mysql`, `php` and `projects` would cover now.
+    /// What `mysql`, `php`, `projects` and `uninstalled` would cover now. A record that does not
+    /// load lists no uninstalled executable: the rest is still right, so it is only logged.
     pub fn info(&self) -> AppResult<DefenderExclusionInfoDto> {
+        let processes = self.server_executables()?;
+        let uninstalled = self.excluded_uninstalled(&processes).unwrap_or_else(|e| {
+            tracing::warn!("the record of the Defender exclusions does not load, no exclusion of an uninstalled executable is listed: {e}");
+            Vec::new()
+        });
         Ok(DefenderExclusionInfoDto {
             folder: display(&self.folder()),
-            processes: self.server_executables()?.iter().map(|p| display(p)).collect(),
+            processes: displayed(&processes),
             projects_folder: self.suggested_projects_folder()?.as_deref().map(display),
+            uninstalled_processes: displayed(&uninstalled),
         })
     }
 
@@ -146,7 +160,7 @@ impl DefenderExclusion {
             change: request.change,
             outcome: outcome_to_dto(outcome),
             folder: targets.folder.as_deref().map(display),
-            processes: targets.processes.iter().map(|p| display(p)).collect(),
+            processes: displayed(&targets.processes),
             projects: targets.projects.as_deref().map(display),
         })
     }
@@ -249,6 +263,10 @@ fn projects_folder_candidates(roots: &[ProjectRoot]) -> Vec<PathBuf> {
 
 fn display(path: &Path) -> String {
     path.display().to_string()
+}
+
+fn displayed(paths: &[PathBuf]) -> Vec<String> {
+    paths.iter().map(|p| display(p)).collect()
 }
 
 fn change_from_dto(change: ScanExclusionChangeDto) -> ScanExclusionChange {
