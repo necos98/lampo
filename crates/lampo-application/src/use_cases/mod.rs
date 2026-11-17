@@ -39,6 +39,7 @@ pub(crate) mod requirements;
 pub mod resolution;
 pub mod scaffold;
 pub mod scan_exclusion;
+pub mod scan_exclusion_advice;
 pub mod service_catalog;
 pub(crate) mod service_leases;
 pub mod services;
@@ -85,6 +86,7 @@ pub use projects::{CreateProject, DeleteProject, DetectProject, ProjectQueries, 
 pub use resolution::SiteResolver;
 pub use scaffold::{ScaffoldProject, ScaffoldProjectDeps};
 pub use scan_exclusion::DefenderExclusion;
+pub use scan_exclusion_advice::DefenderExclusionAdvice;
 pub use service_catalog::ServiceCatalog;
 pub use service_leases::ServiceLease;
 pub use services::{OfflineServiceStatus, ServiceControl, ServiceControlDeps, ServiceEnsurer, ServiceQueries, ServiceStatusSource};

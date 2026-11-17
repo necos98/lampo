@@ -182,7 +182,11 @@ Tre esclusioni facoltative, da aggiungere solo se le vuoi:
   `add --php`. Lampo ricorda l'esito delle richieste: `lampo doctor` (check `defender`) avvisa
   quando la protezione in tempo reale di Defender è attiva e un PHP installato non è coperto da
   un'esclusione applicata, con il comando da eseguire o, se le esclusioni le gestisce l'IT,
-  `lampo defender exclusion commands --php`.
+  `lampo defender exclusion commands --php`. Se l'esclusione era già stata applicata, installare
+  un nuovo PHP propone di aggiornarla e disinstallarne uno propone di togliere l'esclusione del suo
+  eseguibile (`lampo defender exclusion remove --uninstalled`): nella GUI con un pulsante, nella
+  CLI con il comando da eseguire (in `--json` il campo `defenderExclusion`). Solo una proposta:
+  la modifica la fai tu, con la conferma UAC.
 - **Dati MySQL** (`--mysql`): le suite di test ricreano il database a ogni esecuzione e Defender
   analizza ogni scrittura dei file di MySQL (`.ibd`, redo log). Lampo esclude la sola cartella dei
   dati MySQL, `%LOCALAPPDATA%\Lampo\mysql` (i dati di tutte le istanze).

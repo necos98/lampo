@@ -20,6 +20,8 @@ export const rowKey = (kind: string, series: string, phpVersion: string | null) 
 export const installTaskKey = (kind: string, series: string, phpVersion: string | null) => `install:${rowKey(kind, series, phpVersion)}`;
 /** Key of the uninstall task of exactly one installed build. */
 export const uninstallTaskKey = (id: PackageId) => `uninstall:${id.kind}|${id.version}|${id.phpVersion ?? ''}`;
+/** Whether `taskKey` installs or uninstalls a package of `kind` (not an add-on built for it). */
+export const isPackageTaskOf = (taskKey: string, kind: string) => [`install:${kind}|`, `uninstall:${kind}|`].some((prefix) => taskKey.startsWith(prefix));
 
 /**
  * One row per kind + series (+ PHP minor). Series, groups and ordering all come from the backend:

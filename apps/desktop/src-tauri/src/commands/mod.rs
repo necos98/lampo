@@ -90,6 +90,7 @@ macro_rules! lampo_command_handler {
             $crate::commands::scan_exclusion::defender_exclusion_info,
             $crate::commands::scan_exclusion::change_defender_exclusion,
             $crate::commands::scan_exclusion::defender_exclusion_commands,
+            $crate::commands::scan_exclusion::defender_exclusion_suggestions,
         ]
     };
 }

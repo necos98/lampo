@@ -142,8 +142,10 @@ pub fn build() -> AppResult<CliContext> {
             projects_repo.clone(),
             paths.clone(),
             exclusion_record.clone(),
-            exclusion_record,
+            exclusion_record.clone(),
         )),
+        // `package install|uninstall` of a PHP: the exclusion change to propose.
+        defender_advice: Arc::new(DefenderExclusionAdvice::new(Arc::new(PowerShellDefenderState::default()), exclusion_record, installed.clone())),
         packages: Arc::new(PackageCatalog::new(PackageCatalogDeps {
             // Offline listing: embedded catalog only; live data comes through the app.
             sources: vec![Arc::new(lampo_infra_packages::EmbeddedCatalog::new())],

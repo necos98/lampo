@@ -138,6 +138,10 @@ pub struct Fake {
     /// The request of every `defender exclusion commands` (answered with `scan_exclusion_result`'s
     /// error, if any).
     pub scan_exclusion_command_calls: Mutex<Vec<DefenderExclusionRequestDto>>,
+    /// What the Defender advice proposes (default: nothing).
+    pub defender_suggestions: Mutex<Vec<DefenderExclusionSuggestionDto>>,
+    /// How many times the Defender advice was asked.
+    pub defender_advice_calls: AtomicUsize,
 }
 
 impl Fake {
@@ -180,6 +184,8 @@ impl Fake {
             scan_exclusion_result: Mutex::new(Ok(ScanExclusionOutcomeDto::Applied)),
             scan_exclusion_calls: Mutex::new(Vec::new()),
             scan_exclusion_command_calls: Mutex::new(Vec::new()),
+            defender_suggestions: Mutex::new(Vec::new()),
+            defender_advice_calls: AtomicUsize::new(0),
         })
     }
 
@@ -220,6 +226,7 @@ impl Fake {
             hook_input: self.clone(),
             shims: self.clone(),
             scan_exclusion: self.clone(),
+            defender_advice: self.clone(),
             offline_status: self.clone(),
             app: self.clone(),
             runner: self.clone(),
@@ -407,6 +414,14 @@ impl Fake {
     fn scan_exclusion_outcome(&self, request: DefenderExclusionRequestDto, context: CallContext) -> AppResult<ScanExclusionOutcomeDto> {
         self.scan_exclusion_calls.lock().unwrap().push((request, context));
         self.scan_exclusion_result.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl DefenderAdvisor for Fake {
+    async fn suggestions(&self) -> Vec<DefenderExclusionSuggestionDto> {
+        self.defender_advice_calls.fetch_add(1, Ordering::SeqCst);
+        self.defender_suggestions.lock().unwrap().clone()
     }
 }
 

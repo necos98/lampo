@@ -701,7 +701,7 @@ export const it = {
 			php: {
 				title: 'Processi PHP e Apache',
 				help: 'Rimedio alla lentezza della prima visita di un sito (anche 8-24 secondi): Defender analizza ogni file PHP la prima volta che viene letto, e di nuovo dopo ogni aggiornamento delle definizioni, riavvio o modifica. Con l’esclusione dei processi non analizza più i file aperti da PHP e Apache, per tutti i progetti, senza escludere nessuna cartella di sorgenti.',
-				risk: 'Il compromesso: un file dannoso letto da PHP o Apache non verrebbe analizzato in quel momento (lo è comunque quando un altro programma lo scrive, lo copia o lo esegue). Sono esclusi solo gli eseguibili installati ora: dopo aver installato un’altra versione di PHP, aggiungi di nuovo l’esclusione.',
+				risk: 'Il compromesso: un file dannoso letto da PHP o Apache non verrebbe analizzato in quel momento (lo è comunque quando un altro programma lo scrive, lo copia o lo esegue). Sono esclusi solo gli eseguibili installati ora: dopo aver installato un’altra versione di PHP, aggiungi di nuovo l’esclusione (Lampo te lo propone).',
 				targets: 'Eseguibili',
 				none: 'Nessun PHP o Apache installato: non c’è nessun eseguibile da escludere.',
 				confirmAdd: {
@@ -712,7 +712,20 @@ export const it = {
 				done: {
 					add: 'Esclusione aggiunta: Defender non analizza più i file aperti da PHP e Apache.',
 					remove: 'Esclusione rimossa: Defender analizza di nuovo i file aperti da PHP e Apache.'
-				} satisfies Record<ScanExclusionChange, string>
+				} satisfies Record<ScanExclusionChange, string>,
+				/** Proposed after a PHP is installed or uninstalled, when Lampo had applied the exclusion: never made without a click. */
+				suggestion: {
+					add: 'Il PHP appena installato non è coperto dall’esclusione di Microsoft Defender: la prima visita dei siti che lo usano può tornare lenta.',
+					remove: 'L’esclusione di Microsoft Defender nomina ancora il PHP disinstallato: puoi rimuoverla.',
+					action: {
+						add: 'Aggiorna l’esclusione di Defender',
+						remove: 'Rimuovi l’esclusione'
+					} satisfies Record<ScanExclusionChange, string>,
+					done: {
+						add: 'Esclusione aggiornata: Defender non analizza più i file aperti dal nuovo PHP.',
+						remove: 'Esclusione rimossa: riguardava solo i PHP disinstallati, gli altri restano esclusi.'
+					} satisfies Record<ScanExclusionChange, string>
+				}
 			},
 			mysql: {
 				title: 'Dati MySQL',

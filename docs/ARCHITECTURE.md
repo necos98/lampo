@@ -212,7 +212,12 @@ accepts:
   root), since a standard user cannot read Defender's exclusions; the doctor's `defender` check
   warns when real-time protection is on (`Get-MpComputerStatus`, readable without elevation) and
   an installed `php-cgi.exe` is not among them, and stays silent when Defender is passive, absent
-  or its state cannot be read within a few seconds. A process exclusion does not exclude the process image itself, and files written
+  or its state cannot be read within a few seconds. After a PHP is installed or uninstalled,
+  `DefenderExclusionAdvice` proposes (never makes) the change: adding the new `php-cgi.exe`, or
+  removing the exclusions of executables no longer installed (`--uninstalled`), only when Lampo
+  already applied the exclusion and Defender is the active antivirus (the GUI shows a notice with
+  a button, the CLI prints the command and `defenderExclusion` in `--json`).
+  A process exclusion does not exclude the process image itself, and files written
   by other programs are still scanned; what is lost is the scan of a malicious file at the
   moment PHP or Apache reads it.
 * **The MySQL data folder** (`lampo defender exclusion add|remove --mysql`, or the original

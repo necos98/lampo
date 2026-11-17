@@ -157,3 +157,10 @@ pub trait ScanExclusionAdmin: Send + Sync {
     /// The PowerShell commands making `request`'s change, for whoever manages the PC (no prompt).
     fn commands(&self, request: DefenderExclusionRequestDto) -> AppResult<Vec<DefenderExclusionCommandDto>>;
 }
+
+/// The Defender exclusion changes to propose after a PHP is installed or uninstalled (read in
+/// this process, never prompting); none when nothing can be read.
+#[async_trait]
+pub trait DefenderAdvisor: Send + Sync {
+    async fn suggestions(&self) -> Vec<DefenderExclusionSuggestionDto>;
+}

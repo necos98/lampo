@@ -18,7 +18,9 @@
 //! `--allow-elevation`) is refused before anything happens. The executables are those installed
 //! when the request is made: a PHP installed later needs a new request. The outcome of every
 //! request naming `php` is remembered ([`ProcessExclusionRecord`]): the doctor's `defender` check
-//! tells from it whether every installed PHP is covered.
+//! tells from it whether every installed PHP is covered, and installing or uninstalling a PHP
+//! proposes the change ([`super::scan_exclusion_advice`]). `uninstalled` names only the excluded
+//! executables no longer installed, to remove them and keep the installed ones excluded.
 //!
 //! When a policy controls Defender's exclusions (group policy, Intune), `commands` gives the
 //! `Add-MpPreference` lines of the same targets, for whoever manages the PC; it prompts for
@@ -27,7 +29,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use lampo_domain::package::{EntryRole, PackageKind};
+use lampo_domain::package::{EntryRole, InstalledPackage, PackageKind};
 use lampo_domain::paths::LampoPaths;
 use lampo_domain::ports::{InstalledPackageRegistry, ProcessExclusionRecordReader, ProcessExclusionRecordWriter, ProjectRepository, ScanExclusionEditor};
 use lampo_domain::project::ProjectRoot;
@@ -43,10 +45,14 @@ use crate::dto::{
 use crate::error::{AppError, AppResult, ErrorCode};
 
 /// The server executable of PHP: the one opening the projects' sources.
-pub(crate) const PHP_SERVER: (PackageKind, EntryRole) = (PackageKind::PHP, EntryRole::FastCgi);
+const PHP_SERVER: (PackageKind, EntryRole) = (PackageKind::PHP, EntryRole::FastCgi);
 /// The server executable of each package kind the `php` part names.
 const SERVER_EXECUTABLES: [(PackageKind, EntryRole); 2] = [PHP_SERVER, (PackageKind::APACHE, EntryRole::Server)];
 const SEPARATOR: char = '\\';
+/// The request excluding every installed server executable (one UAC prompt).
+pub(crate) const ADD_PHP_COMMAND: &str = "lampo defender exclusion add --php --allow-elevation";
+/// The request removing the exclusions of the executables no longer installed (one UAC prompt).
+pub(crate) const REMOVE_UNINSTALLED_COMMAND: &str = "lampo defender exclusion remove --uninstalled --allow-elevation";
 
 pub struct DefenderExclusion {
     editor: Arc<dyn ScanExclusionEditor>,
@@ -76,18 +82,17 @@ impl DefenderExclusion {
         self.paths.service_kind_dir(&ServiceKind::MYSQL)
     }
 
-    /// `php-cgi.exe` of every installed PHP and `httpd.exe` of every installed Apache.
     fn server_executables(&self) -> AppResult<Vec<PathBuf>> {
-        let mut executables: Vec<PathBuf> = self
-            .installed
-            .list()?
-            .iter()
-            .filter_map(|package| SERVER_EXECUTABLES.iter().find(|(kind, _)| *kind == package.id.kind).and_then(|(_, role)| package.entry(*role)))
-            .map(Path::to_path_buf)
-            .collect();
-        executables.sort();
-        executables.dedup();
-        Ok(executables)
+        Ok(server_executables(&self.installed.list()?))
+    }
+
+    /// The executables Lampo excluded that are no longer installed. `Validation` when there is none.
+    fn uninstalled_executables(&self) -> AppResult<Vec<PathBuf>> {
+        let uninstalled = self.record_reader.read()?.excluded_except(&self.server_executables()?);
+        if uninstalled.is_empty() {
+            return Err(validation("every executable Lampo excluded is still installed: there is no exclusion of an uninstalled PHP or Apache to remove"));
+        }
+        Ok(uninstalled)
     }
 
     /// The deepest folder holding every registered project's parent folder that the adapter
@@ -134,7 +139,7 @@ impl DefenderExclusion {
         let targets = self.targets(&request)?;
         let change = change_from_dto(request.change);
         let outcome = self.editor.change(&targets, change).await?;
-        if request.php {
+        if request.php || request.uninstalled {
             self.remember(ProcessExclusionRequest { change, outcome, processes: targets.processes.clone() });
         }
         Ok(DefenderExclusionResultDto {
@@ -157,11 +162,15 @@ impl DefenderExclusion {
         Ok(defender_commands::exclusion_commands(&targets, change))
     }
 
-    /// The targets `request` names now. `PackageMissing` for `php` without any PHP or Apache.
+    /// The targets `request` names now. `PackageMissing` for `php` without any PHP or Apache,
+    /// `Validation` for `uninstalled` without any excluded executable uninstalled since.
     fn targets(&self, request: &DefenderExclusionRequestDto) -> AppResult<ScanExclusionTargets> {
-        let processes = if request.php { self.server_executables()? } else { Vec::new() };
+        let mut processes = if request.php { self.server_executables()? } else { Vec::new() };
         if request.php && processes.is_empty() {
             return Err(AppError::new(ErrorCode::PackageMissing, "no PHP or Apache package is installed: there is no php-cgi.exe or httpd.exe to exclude"));
+        }
+        if request.uninstalled {
+            processes.extend(self.uninstalled_executables()?);
         }
         let projects = if request.projects { Some(self.projects_folder(request.projects_folder.as_deref())?) } else { None };
         Ok(ScanExclusionTargets { folder: request.mysql.then(|| self.folder()), processes, projects })
@@ -187,15 +196,36 @@ impl DefenderExclusion {
     }
 }
 
-/// `Validation` when `request` names nothing, or a projects folder without `projects`.
+/// `Validation` when `request` names nothing, a projects folder without `projects`, or adds
+/// `uninstalled` (an executable no longer installed is never excluded).
 fn check_request(request: &DefenderExclusionRequestDto) -> AppResult<()> {
-    if !request.php && !request.mysql && !request.projects {
+    if !request.php && !request.mysql && !request.projects && !request.uninstalled {
         return Err(validation("name what to exclude: --php, --mysql, --projects or more of them"));
+    }
+    if request.uninstalled && request.change == ScanExclusionChangeDto::Add {
+        return Err(validation("the executables no longer installed can only have their exclusion removed"));
     }
     if request.projects_folder.is_some() && !request.projects {
         return Err(validation("a projects folder needs `projects`"));
     }
     Ok(())
+}
+
+/// `php-cgi.exe` of every installed PHP and `httpd.exe` of every installed Apache, sorted.
+pub(crate) fn server_executables(installed: &[InstalledPackage]) -> Vec<PathBuf> {
+    let mut executables: Vec<PathBuf> = installed
+        .iter()
+        .filter_map(|package| SERVER_EXECUTABLES.iter().find(|(kind, _)| *kind == package.id.kind).and_then(|(_, role)| package.entry(*role)))
+        .map(Path::to_path_buf)
+        .collect();
+    executables.sort();
+    executables.dedup();
+    executables
+}
+
+/// `php-cgi.exe` of every installed PHP.
+pub(crate) fn php_servers(installed: &[InstalledPackage]) -> Vec<&Path> {
+    installed.iter().filter(|package| package.id.kind == PHP_SERVER.0).filter_map(|package| package.entry(PHP_SERVER.1)).collect()
 }
 
 /// The folders that may hold every project, deepest first: the common ancestor of the projects'

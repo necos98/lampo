@@ -1,6 +1,7 @@
 //! Fakes of the Defender ports the doctor and the exclusion requests use.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -9,32 +10,41 @@ use lampo_domain::scan_exclusion::{DefenderState, ProcessExclusionRecord, ScanEx
 use lampo_domain::{PortError, PortResult};
 
 use super::{World, lock};
-use crate::use_cases::DefenderExclusion;
+use crate::use_cases::{DefenderExclusion, DefenderExclusionAdvice};
 
 /// Answers with a fixed state; by default Defender is not the active antivirus (no finding).
-pub struct FakeDefender(Mutex<PortResult<DefenderState>>);
+pub struct FakeDefender {
+    state: Mutex<PortResult<DefenderState>>,
+    reads: AtomicUsize,
+}
 
 impl Default for FakeDefender {
     fn default() -> Self {
-        Self(Mutex::new(Ok(DefenderState::Unavailable)))
+        Self { state: Mutex::new(Ok(DefenderState::Unavailable)), reads: AtomicUsize::new(0) }
     }
 }
 
 impl FakeDefender {
     pub fn set(&self, state: DefenderState) {
-        *lock(&self.0) = Ok(state);
+        *lock(&self.state) = Ok(state);
     }
 
     /// The state cannot be read (PowerShell failing or timing out).
     pub fn unreadable(&self) {
-        *lock(&self.0) = Err(PortError::process("powershell", "did not answer in time"));
+        *lock(&self.state) = Err(PortError::process("powershell", "did not answer in time"));
+    }
+
+    /// How many times the state was read (each read may take seconds).
+    pub fn reads(&self) -> usize {
+        self.reads.load(Ordering::SeqCst)
     }
 }
 
 #[async_trait]
 impl DefenderStateReader for FakeDefender {
     async fn state(&self) -> PortResult<DefenderState> {
-        lock(&self.0).clone()
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        lock(&self.state).clone()
     }
 }
 
@@ -102,5 +112,11 @@ impl World {
             self.exclusion_record.clone(),
             self.exclusion_record.clone(),
         )
+    }
+
+    /// What this world proposes about the PHP exclusion, from [`World::defender`] and
+    /// [`World::exclusion_record`].
+    pub fn defender_exclusion_advice(&self) -> DefenderExclusionAdvice {
+        DefenderExclusionAdvice::new(self.defender.clone(), self.exclusion_record.clone(), self.installed.clone())
     }
 }

@@ -73,7 +73,8 @@ export const COMMANDS = {
 	uninstallClaudeCode: 'uninstall_claude_code',
 	defenderExclusionInfo: 'defender_exclusion_info',
 	changeDefenderExclusion: 'change_defender_exclusion',
-	defenderExclusionCommands: 'defender_exclusion_commands'
+	defenderExclusionCommands: 'defender_exclusion_commands',
+	defenderExclusionSuggestions: 'defender_exclusion_suggestions'
 } as const;
 
 export type CommandName = (typeof COMMANDS)[keyof typeof COMMANDS];
@@ -179,3 +180,5 @@ export const uninstallClaudeCode = () => call<T.ClaudeCodeAction>(COMMANDS.unins
 export const defenderExclusionInfo = () => call<T.DefenderExclusionInfo>(COMMANDS.defenderExclusionInfo);
 export const changeDefenderExclusion = (request: T.DefenderExclusionRequest) => call<T.DefenderExclusionResult>(COMMANDS.changeDefenderExclusion, { request });
 export const defenderExclusionCommands = (request: T.DefenderExclusionRequest) => call<T.DefenderExclusionCommand[]>(COMMANDS.defenderExclusionCommands, { request });
+/** After a PHP is installed or uninstalled: the exclusion changes to propose (none unless Lampo applied the PHP exclusion and Defender is active). */
+export const defenderExclusionSuggestions = () => call<T.DefenderExclusionSuggestion[]>(COMMANDS.defenderExclusionSuggestions);

@@ -55,6 +55,8 @@ pub struct AppState {
     pub shims: Arc<ShimSetup>,
     pub claude_code: Arc<ClaudeCodeSetup>,
     pub scan_exclusion: Arc<DefenderExclusion>,
+    /// What to propose about the PHP exclusion after a PHP is installed or uninstalled.
+    pub defender_advice: Arc<DefenderExclusionAdvice>,
 
     pub startup: Arc<Startup>,
     pub shutdown: Arc<Shutdown>,

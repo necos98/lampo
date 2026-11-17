@@ -3,6 +3,8 @@
 use lampo_application::control::ControlRequest;
 use lampo_application::dto::*;
 use lampo_application::AppResult;
+use lampo_domain::package::PackageKind;
+use serde::Serialize;
 
 use super::{Cmd, validation};
 use crate::cli::PackageCommand;
@@ -25,7 +27,9 @@ pub async fn run(c: &Cmd<'_>, command: PackageCommand) -> AppResult<i32> {
             let (version, series) = split_version(package_version.as_deref());
             let request = InstallPackageRequest { kind, version, series, php_version: php };
             let installed: InstalledPackageDto = c.app(ControlRequest::PackageInstall(request)).await?;
-            c.io.emit(&installed, render::installed_one);
+            let defender_exclusion = defender_suggestions(c, &installed.id).await;
+            let change = PackageChange { package: installed, defender_exclusion };
+            c.io.emit(&change, |change| render::with_defender_suggestions(render::installed_one(&change.package), &change.defender_exclusion));
         }
         PackageCommand::Uninstall { kind, package_version, yes: false, php } => {
             let what = [Some(kind), package_version, php.map(|p| format!("--php {p}"))].into_iter().flatten().collect::<Vec<_>>().join(" ");
@@ -35,7 +39,9 @@ pub async fn run(c: &Cmd<'_>, command: PackageCommand) -> AppResult<i32> {
             let (version, series) = split_version(package_version.as_deref());
             let request = UninstallPackageRequest { kind, version, series, php_version: php };
             let removed: PackageIdDto = c.app(ControlRequest::PackageUninstall(request)).await?;
-            c.io.emit(&removed, render::uninstalled);
+            let defender_exclusion = defender_suggestions(c, &removed).await;
+            let change = PackageChange { package: removed, defender_exclusion };
+            c.io.emit(&change, |change| render::with_defender_suggestions(render::uninstalled(&change.package), &change.defender_exclusion));
         }
         PackageCommand::Extensions { php } => {
             let list = c.ctx.php_extensions.list(&c.resolve_request(), php.as_deref())?;
@@ -43,6 +49,27 @@ pub async fn run(c: &Cmd<'_>, command: PackageCommand) -> AppResult<i32> {
         }
     }
     Ok(0)
+}
+
+/// What `install` and `uninstall` print: the package, and after a PHP the Defender exclusion
+/// changes Lampo proposes (`defenderExclusion`, only when there is one). Never made from here:
+/// each is a command the user runs.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PackageChange<T> {
+    #[serde(flatten)]
+    package: T,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    defender_exclusion: Vec<DefenderExclusionSuggestionDto>,
+}
+
+/// The changes to propose after `id` was installed or uninstalled: only for a PHP, so Defender's
+/// state (a few seconds at most) is never read for another package.
+async fn defender_suggestions(c: &Cmd<'_>, id: &PackageIdDto) -> Vec<DefenderExclusionSuggestionDto> {
+    match id.kind == PackageKind::PHP.as_str() {
+        true => c.ctx.defender_advice.suggestions().await,
+        false => Vec::new(),
+    }
 }
 
 /// `8.3` (up to two numeric parts) is a series: latest patch. `8.3.12` (three or more) is an

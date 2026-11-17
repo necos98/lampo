@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { DefenderExclusionCommand, DefenderExclusionRequest, DefenderExclusionResult, ScanExclusionChange, ScanExclusionOutcome } from '../api/index.js';
+import type {
+	DefenderExclusionCommand,
+	DefenderExclusionRequest,
+	DefenderExclusionResult,
+	DefenderExclusionSuggestion,
+	ScanExclusionChange,
+	ScanExclusionOutcome
+} from '../api/index.js';
 import type { Backend } from '../backend/ports.js';
 import { messages as m } from '../messages/index.js';
 import type { Notifier } from '../services/notifier.js';
@@ -44,8 +51,8 @@ describe('ScanExclusionStore', () => {
 	});
 
 	it.each([
-		['php', { change: 'add', php: true, mysql: false, projects: false, projectsFolder: null }],
-		['mysql', { change: 'add', php: false, mysql: true, projects: false, projectsFolder: null }]
+		['php', { change: 'add', php: true, mysql: false, projects: false, projectsFolder: null, uninstalled: false }],
+		['mysql', { change: 'add', php: false, mysql: true, projects: false, projectsFolder: null, uninstalled: false }]
 	] as const)('adding %s asks for that exclusion only, is busy meanwhile, then remembers it and says it is done', async (target, request) => {
 		const pending = deferred<DefenderExclusionResult>();
 		const change = vi.fn(() => pending.promise);
@@ -86,16 +93,16 @@ describe('ScanExclusionStore', () => {
 		await store.add('php', PROJECTS);
 
 		expect(change.mock.calls.map(([request]) => request)).toEqual([
-			{ change: 'add', php: false, mysql: false, projects: true, projectsFolder: PROJECTS },
-			{ change: 'remove', php: false, mysql: false, projects: true, projectsFolder: PROJECTS },
-			{ change: 'add', php: true, mysql: false, projects: false, projectsFolder: null }
+			{ change: 'add', php: false, mysql: false, projects: true, projectsFolder: PROJECTS, uninstalled: false },
+			{ change: 'remove', php: false, mysql: false, projects: true, projectsFolder: PROJECTS, uninstalled: false },
+			{ change: 'add', php: true, mysql: false, projects: false, projectsFolder: null, uninstalled: false }
 		]);
 		expect(store.last.projects).toEqual(result('projects', 'applied', 'remove'));
 		expect(notifier.successes).toEqual([m.settings.defender.projects.done.add, m.settings.defender.projects.done.remove, m.settings.defender.php.done.add]);
 	});
 
 	it('a projects request without a folder lets the backend suggest one', () => {
-		expect(exclusionRequest('projects', 'add')).toEqual({ change: 'add', php: false, mysql: false, projects: true, projectsFolder: null });
+		expect(exclusionRequest('projects', 'add')).toEqual({ change: 'add', php: false, mysql: false, projects: true, projectsFolder: null, uninstalled: false });
 	});
 
 	it('each option keeps its own last request', async () => {
@@ -136,6 +143,36 @@ describe('ScanExclusionStore', () => {
 		expect(notifier.successes).toEqual([]);
 		expect(notifier.errors).toEqual([]);
 		expect(store.last.php?.outcome).toBe(outcome);
+	});
+
+	it('a proposed change sends the request it carries and says what it did', async () => {
+		const change = vi.fn(answering('applied'));
+		const notifier = recordingNotifier();
+		const { backend } = testBackend({ changeDefenderExclusion: change });
+		const store = storeFor(backend, notifier);
+		const removal: DefenderExclusionSuggestion = {
+			change: 'remove',
+			processes: [PROCESSES[1]],
+			request: { change: 'remove', php: false, mysql: false, projects: false, projectsFolder: null, uninstalled: true },
+			command: 'lampo defender exclusion remove --uninstalled --allow-elevation'
+		};
+
+		await store.applySuggestion(removal);
+		await store.applySuggestion({ ...removal, change: 'add', request: exclusionRequest('php', 'add') });
+
+		expect(change.mock.calls.map(([request]) => request)).toEqual([removal.request, exclusionRequest('php', 'add')]);
+		expect(notifier.successes).toEqual([m.settings.defender.php.suggestion.done.remove, m.settings.defender.php.suggestion.done.add]);
+		expect(store.busy).toBeNull();
+	});
+
+	it('a proposed change that does not apply says why', async () => {
+		const notifier = recordingNotifier();
+		const { backend } = testBackend({ changeDefenderExclusion: answering('cancelled') });
+		const request = exclusionRequest('php', 'add');
+
+		await storeFor(backend, notifier).applySuggestion({ change: 'add', processes: [], request, command: '' });
+
+		expect(notifier.warnings).toEqual([m.settings.defender.outcome.cancelled]);
 	});
 
 	it('a failure is an error and keeps the previous request', async () => {
@@ -179,8 +216,8 @@ describe('commands for whoever manages the PC', () => {
 	});
 
 	it.each([
-		['php', undefined, { change: 'add', php: true, mysql: false, projects: false, projectsFolder: null }],
-		['projects', ` ${PROJECTS} `, { change: 'add', php: false, mysql: false, projects: true, projectsFolder: PROJECTS }]
+		['php', undefined, { change: 'add', php: true, mysql: false, projects: false, projectsFolder: null, uninstalled: false }],
+		['projects', ` ${PROJECTS} `, { change: 'add', php: false, mysql: false, projects: true, projectsFolder: PROJECTS, uninstalled: false }]
 	] as const)('copying %s asks for the addition’s commands and copies their text, without any change', async (target, folder, request) => {
 		const commands = [command('process', PROCESSES[0])];
 		const build = vi.fn(async () => commands);

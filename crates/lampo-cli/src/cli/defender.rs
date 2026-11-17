@@ -13,9 +13,14 @@ pub enum DefenderCommand {
     /// longer waits seconds for Defender to scan its PHP sources (which it does again after
     /// every definition update, reboot or change), for every project wherever it is, and no
     /// source folder is excluded. The executables are those installed now: after installing
-    /// another PHP, run `add --php` again. The trade-off: a malicious file read by PHP or
+    /// another PHP, run `add --php` again (`lampo package install` proposes it when the
+    /// exclusion was applied before). The trade-off: a malicious file read by PHP or
     /// Apache is not scanned at that moment (it still is when written by another program,
     /// copied or run).
+    ///
+    /// --uninstalled (remove only): the process exclusions Lampo applied to a php-cgi.exe or
+    /// httpd.exe uninstalled since, leaving the installed ones excluded (`lampo package
+    /// uninstall` of a PHP proposes it). Exit 4 when there is none.
     ///
     /// --mysql: the folder `%LOCALAPPDATA%\Lampo\mysql` (the data of every MySQL instance),
     /// which test suites rewrite all the time; same as `lampo mysql defender-exclusion`.
@@ -44,6 +49,7 @@ pub enum DefenderCommand {
     ///   lampo defender exclusion add --projects --allow-elevation
     ///   lampo defender exclusion add --projects "C:\Users\me\Desktop\Progetti" --allow-elevation
     ///   lampo defender exclusion remove --php --allow-elevation --json
+    ///   lampo defender exclusion remove --uninstalled --allow-elevation
     #[command(subcommand, verbatim_doc_comment)]
     Exclusion(ExclusionCommand),
 }
@@ -83,6 +89,9 @@ pub struct ExclusionTargets {
     /// A folder holding your projects; without a value, the one suggested from the registered projects.
     #[arg(long, value_name = "FOLDER", num_args = 0..=1)]
     pub projects: Option<Option<String>>,
+    /// The exclusions of the PHP/Apache executables uninstalled since (remove only).
+    #[arg(long)]
+    pub uninstalled: bool,
 }
 
 /// What the commands exclude: the selectors of `add`, --php when none is named.
@@ -103,6 +112,6 @@ impl CommandTargets {
     /// The targets named, --php when none is.
     pub fn or_php(self) -> ExclusionTargets {
         let php = self.php || (!self.mysql && self.projects.is_none());
-        ExclusionTargets { php, mysql: self.mysql, projects: self.projects }
+        ExclusionTargets { php, mysql: self.mysql, projects: self.projects, uninstalled: false }
     }
 }

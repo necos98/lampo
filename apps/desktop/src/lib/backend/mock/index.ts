@@ -804,6 +804,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 			const folders = [...(mysql ? [mysqlDataFolder] : []), ...(projects ? [projectsFolder ?? suggestedProjectsFolder] : [])];
 			return [...folders.map((folder) => line('path', folder)), ...(php ? serverExecutables.map((exe) => line('process', exe)) : [])];
 		},
+		// The browser has no Defender to read: nothing to propose.
+		defenderExclusionSuggestions: async () => [],
 		defenderExclusionInfo: async () => ({ folder: mysqlDataFolder, processes: [...serverExecutables], projectsFolder: suggestedProjectsFolder }),
 		// The browser has no UAC prompt nor Defender: every change is confirmed.
 		changeDefenderExclusion: async ({ change, php, mysql, projects, projectsFolder }) => {

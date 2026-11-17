@@ -1028,7 +1028,12 @@ projects: boolean,
 /**
  * The projects folder to exclude (an absolute path); only with `projects`.
  */
-projectsFolder?: string | null, };
+projectsFolder?: string | null, 
+/**
+ * The process exclusions Lampo applied to server executables no longer installed (a PHP or
+ * Apache uninstalled since): only to remove them, leaving the installed ones excluded.
+ */
+uninstalled: boolean, };
 
 /**
  * The result of one request (see [`ScanExclusionResultDto`]: there is no "active" state).
@@ -1078,6 +1083,26 @@ export type DefenderExclusionCommand = { kind: DefenderExclusionKind, path: stri
 /**
  * `Add-MpPreference -ExclusionProcess '<path>'` (or `Remove-MpPreference`, `-ExclusionPath`),
  * one line, the path quoted for PowerShell.
+ */
+command: string, };
+
+/**
+ * A change of the PHP process exclusion Lampo proposes after a PHP is installed or uninstalled,
+ * and never makes by itself: only when an exclusion Lampo applied is in place and Microsoft
+ * Defender is the active antivirus.
+ */
+export type DefenderExclusionSuggestion = { change: ScanExclusionChange, 
+/**
+ * The executables concerned: the installed `php-cgi.exe` not excluded yet (`add`), or the
+ * excluded executables no longer installed (`remove`).
+ */
+processes: Array<string>, 
+/**
+ * The request making the change (one UAC prompt).
+ */
+request: DefenderExclusionRequest, 
+/**
+ * The CLI command making the change.
  */
 command: string, };
 

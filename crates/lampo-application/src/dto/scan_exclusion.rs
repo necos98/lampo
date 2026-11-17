@@ -60,12 +60,21 @@ pub struct DefenderExclusionRequestDto {
     #[serde(default)]
     #[cfg_attr(test, ts(optional = nullable))]
     pub projects_folder: Option<String>,
+    /// The process exclusions Lampo applied to server executables no longer installed (a PHP or
+    /// Apache uninstalled since): only to remove them, leaving the installed ones excluded.
+    #[serde(default)]
+    pub uninstalled: bool,
 }
 
 impl DefenderExclusionRequestDto {
     /// A request naming no projects folder.
     pub fn new(change: ScanExclusionChangeDto, php: bool, mysql: bool) -> Self {
-        Self { change, php, mysql, projects: false, projects_folder: None }
+        Self { change, php, mysql, projects: false, projects_folder: None, uninstalled: false }
+    }
+
+    /// The removal of the exclusions of the executables no longer installed.
+    pub fn remove_uninstalled() -> Self {
+        Self { uninstalled: true, ..Self::new(ScanExclusionChangeDto::Remove, false, false) }
     }
 }
 
@@ -96,6 +105,23 @@ pub struct DefenderExclusionInfoDto {
     /// The suggested projects folder (`projects`): the deepest folder holding the folders of the
     /// registered projects that may be excluded; `null` when there is none.
     pub projects_folder: Option<String>,
+}
+
+/// A change of the PHP process exclusion Lampo proposes after a PHP is installed or uninstalled,
+/// and never makes by itself: only when an exclusion Lampo applied is in place and Microsoft
+/// Defender is the active antivirus.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DefenderExclusionSuggestion"))]
+#[serde(rename_all = "camelCase")]
+pub struct DefenderExclusionSuggestionDto {
+    pub change: ScanExclusionChangeDto,
+    /// The executables concerned: the installed `php-cgi.exe` not excluded yet (`add`), or the
+    /// excluded executables no longer installed (`remove`).
+    pub processes: Vec<String>,
+    /// The request making the change (one UAC prompt).
+    pub request: DefenderExclusionRequestDto,
+    /// The CLI command making the change.
+    pub command: String,
 }
 
 /// What one Defender exclusion excludes.

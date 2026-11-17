@@ -115,6 +115,12 @@ impl ProcessExclusionRecord {
     pub fn is_excluded(&self, executable: &Path) -> bool {
         self.excluded.iter().any(|exe| same_path(exe, executable))
     }
+
+    /// The executables Defender confirmed excluded that are not among `installed` (ignoring
+    /// case): left behind by a package uninstalled since.
+    pub fn excluded_except(&self, installed: &[PathBuf]) -> Vec<PathBuf> {
+        self.excluded.iter().filter(|exe| !installed.iter().any(|kept| same_path(exe, kept))).cloned().collect()
+    }
 }
 
 fn same_path(a: &Path, b: &Path) -> bool {
@@ -155,6 +161,15 @@ mod tests {
         assert_eq!(record.excluded, [PathBuf::from(PHP_74)], "ignoring case");
         record.record(request(ScanExclusionChange::Remove, ScanExclusionOutcome::NotConfirmed, &[PHP_74]));
         assert!(record.is_excluded(Path::new(PHP_74)), "not confirmed: still believed excluded");
+    }
+
+    #[test]
+    fn excluded_except_keeps_what_is_no_longer_installed() {
+        let mut record = ProcessExclusionRecord::default();
+        assert!(record.excluded_except(&[]).is_empty());
+        record.record(request(ScanExclusionChange::Add, ScanExclusionOutcome::Applied, &[PHP_83, PHP_74]));
+        assert_eq!(record.excluded_except(&[PathBuf::from(PHP_83.to_uppercase())]), [PathBuf::from(PHP_74)], "ignoring case");
+        assert!(record.excluded_except(&[PathBuf::from(PHP_74), PathBuf::from(PHP_83)]).is_empty());
     }
 
     #[test]

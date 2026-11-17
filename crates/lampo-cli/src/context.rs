@@ -79,6 +79,7 @@ pub struct CliContext {
     pub hook_input: Arc<dyn HookInput>,
     pub shims: Arc<dyn ShimAdmin>,
     pub scan_exclusion: Arc<dyn ScanExclusionAdmin>,
+    pub defender_advice: Arc<dyn DefenderAdvisor>,
     pub offline_status: Arc<dyn OfflineStatus>,
     pub app: Arc<dyn AppGateway>,
     pub runner: Arc<dyn ProgramRunner>,

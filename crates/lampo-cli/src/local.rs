@@ -193,3 +193,10 @@ impl ScanExclusionAdmin for DefenderExclusion {
         DefenderExclusion::commands(self, request)
     }
 }
+
+#[async_trait]
+impl DefenderAdvisor for DefenderExclusionAdvice {
+    async fn suggestions(&self) -> Vec<DefenderExclusionSuggestionDto> {
+        DefenderExclusionAdvice::suggestions(self).await
+    }
+}

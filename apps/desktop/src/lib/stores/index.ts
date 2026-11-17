@@ -9,6 +9,7 @@ import { messages as m } from '../messages/index.js';
 import { notifier } from '../services/notifier.js';
 import { copyText } from '../services/platform.js';
 import { AutoRestartNotices } from './autoRestartNotices.js';
+import { DefenderExclusionNotices } from './defenderExclusionNotices.js';
 import { DiagnosticsStore } from './diagnostics.svelte.js';
 import { ElevationStore } from './elevation.svelte.js';
 import { FirstRunStore } from './firstRun.svelte.js';
@@ -60,6 +61,12 @@ const autoRestartNotices = new AutoRestartNotices(
 	m.services.autoRestart,
 	(service) => services.list.data?.find((s) => s.service === service)?.label ?? service
 );
+/** After a PHP is installed or uninstalled, the proposed change of the Defender exclusion, made only on a click. */
+const defenderExclusionNotices = new DefenderExclusionNotices(
+	{ onTaskFinished: (listener) => tasks.onFinished(listener), suggestions: () => backend.commands.defenderExclusionSuggestions(), apply: (s) => scanExclusion.applySuggestion(s) },
+	notifier,
+	m.settings.defender.php.suggestion
+);
 /** A new-project setup survives leaving the create screen; its end is announced from anywhere. */
 const scaffoldSession = new ScaffoldSession(tasks, () =>
 	notifier.success(m.create.readyElsewhere, { label: m.create.register, run: () => void goto(CREATE_PROJECT_ROUTE) })
@@ -87,7 +94,7 @@ interface Startable {
  * Returns a disposer that removes all listeners.
  */
 export async function startStores(): Promise<() => void> {
-	const startables: Startable[] = [elevation, tasks, projects, services, packages, worktrees, settings, firstRun, scaffoldSession, autoRestartNotices];
+	const startables: Startable[] = [elevation, tasks, projects, services, packages, worktrees, settings, firstRun, scaffoldSession, autoRestartNotices, defenderExclusionNotices];
 	// Subscribe before loading, so nothing that happens during the first load is missed.
 	const stops = await Promise.all(startables.map((s) => s.start()));
 	void firstRun.load();

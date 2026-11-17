@@ -12,13 +12,11 @@ use std::sync::Arc;
 use lampo_domain::ports::ProcessExclusionRecordReader;
 use lampo_domain::scan_exclusion::{DefenderState, ProcessExclusionRecord, ScanExclusionOutcome};
 
-use super::super::scan_exclusion::PHP_SERVER;
+use super::super::scan_exclusion::{ADD_PHP_COMMAND, php_servers};
 use super::{DoctorCheck, DoctorFacts, check};
 use crate::dto::{CheckStatus, DoctorCheckDto, DoctorReportDto};
 
 const ID: &str = "defender";
-/// The request that excludes every installed PHP (one UAC prompt).
-const ADD_EXCLUSION: &str = "lampo defender exclusion add --php --allow-elevation";
 /// The commands for whoever manages a PC where a policy controls Defender.
 const IT_COMMANDS: &str = "lampo defender exclusion commands --php";
 
@@ -48,7 +46,7 @@ impl DoctorCheck for DefenderCheck {
             DefenderState::Passive => return check(ID, CheckStatus::Ok, "Microsoft Defender runs in passive mode next to another antivirus: it does not slow PHP down", None),
             DefenderState::Unavailable => return check(ID, CheckStatus::Ok, "Microsoft Defender is not the active antivirus: it does not slow PHP down", None),
         }
-        let php_servers: Vec<&Path> = facts.installed.iter().filter(|p| p.id.kind == PHP_SERVER.0).filter_map(|p| p.entry(PHP_SERVER.1)).collect();
+        let php_servers = php_servers(&facts.installed);
         if php_servers.is_empty() {
             return check(ID, CheckStatus::Ok, "no PHP is installed for Microsoft Defender to slow down", None);
         }
@@ -68,7 +66,7 @@ impl DoctorCheck for DefenderCheck {
                 "Microsoft Defender's real-time protection scans every PHP file the first request to a site opens (8-24 s): {finding}{}",
                 last_outcome(&record).map(|outcome| format!(" ({outcome})")).unwrap_or_default()
             ),
-            Some(format!("{ADD_EXCLUSION} (where a policy manages Defender, give the commands of `{IT_COMMANDS}` to whoever manages the PC)")),
+            Some(format!("{ADD_PHP_COMMAND} (where a policy manages Defender, give the commands of `{IT_COMMANDS}` to whoever manages the PC)")),
         )
     }
 }

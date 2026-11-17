@@ -19,6 +19,7 @@ mod projects;
 mod runtime_workers;
 mod scaffold;
 mod scan_exclusion;
+mod scan_exclusion_advice;
 mod service_lifecycle;
 mod settings;
 mod store_reads;

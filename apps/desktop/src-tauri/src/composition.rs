@@ -124,6 +124,9 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         exclusion_record.clone(),
         exclusion_record.clone(),
     ));
+    // Read after a PHP is installed or uninstalled: the change to propose, never made by itself.
+    let defender_state: Arc<dyn DefenderStateReader> = Arc::new(web::PowerShellDefenderState::default());
+    let defender_advice = Arc::new(DefenderExclusionAdvice::new(defender_state.clone(), exclusion_record.clone(), installed.clone()));
 
     let php_ini: Arc<dyn PhpIniWriter> = Arc::new(web::PhpIniRenderer);
 
@@ -363,7 +366,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
             installed,
             control: Arc::new(services::NamedPipeControlClient::new(pipe)),
             service_states: service_queries,
-            defender: Arc::new(web::PowerShellDefenderState::default()),
+            defender: defender_state,
             checks: standard_checks(StandardChecksDeps {
                 vc,
                 port_probe,
@@ -381,6 +384,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         shims: shims.clone(),
         claude_code: claude_code.clone(),
         scan_exclusion,
+        defender_advice,
         startup: Arc::new(
             Startup::new(env, settings, shims, app_location).with_claude_code(claude_code).with_package_sweeper(Arc::new(packages::FsLeftoverSweeper::new(&paths, package_slots))),
         ),

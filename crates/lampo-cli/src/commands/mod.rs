@@ -31,6 +31,8 @@ mod logs_tests;
 #[cfg(test)]
 mod mysql_tests;
 #[cfg(test)]
+mod packages_tests;
+#[cfg(test)]
 mod project_bulk_tests;
 #[cfg(test)]
 mod project_env_tests;

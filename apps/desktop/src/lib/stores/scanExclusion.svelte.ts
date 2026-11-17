@@ -1,4 +1,12 @@
-import type { DefenderExclusionCommand, DefenderExclusionInfo, DefenderExclusionRequest, DefenderExclusionResult, ScanExclusionChange, ScanExclusionOutcome } from '../api/index.js';
+import type {
+	DefenderExclusionCommand,
+	DefenderExclusionInfo,
+	DefenderExclusionRequest,
+	DefenderExclusionResult,
+	DefenderExclusionSuggestion,
+	ScanExclusionChange,
+	ScanExclusionOutcome
+} from '../api/index.js';
 import type { Backend } from '../backend/ports.js';
 import { messages as m } from '../messages/index.js';
 import type { Notifier } from '../services/notifier.js';
@@ -25,6 +33,12 @@ export function scanExclusionMessage(target: DefenderTarget, result: DefenderExc
 	return result.outcome === 'applied' ? t[target].done[result.change] : t.outcome[result.outcome];
 }
 
+/** What the user is told when a change proposed after a PHP install or uninstall ends. */
+export function suggestionMessage(result: DefenderExclusionResult): string {
+	const t = m.settings.defender;
+	return result.outcome === 'applied' ? t.php.suggestion.done[result.change] : t.outcome[result.outcome];
+}
+
 /** The outcomes that mean a policy controls Defender's exclusions: whoever manages the PC can add them. */
 const MANAGED_OUTCOMES: ReadonlySet<ScanExclusionOutcome> = new Set(['refused', 'not-confirmed']);
 
@@ -41,7 +55,7 @@ export function itCommandsText(commands: readonly DefenderExclusionCommand[]): s
 /** The request naming `target` only; `projectsFolder` is the folder of a `projects` request. */
 export function exclusionRequest(target: DefenderTarget, change: ScanExclusionChange, projectsFolder?: string): DefenderExclusionRequest {
 	const projects = target === 'projects';
-	return { change, php: target === 'php', mysql: target === 'mysql', projects, projectsFolder: projects ? (projectsFolder?.trim() ?? null) : null };
+	return { change, php: target === 'php', mysql: target === 'mysql', projects, projectsFolder: projects ? (projectsFolder?.trim() ?? null) : null, uninstalled: false };
 }
 
 /**
@@ -73,6 +87,9 @@ export class ScanExclusionStore {
 	add = (target: DefenderTarget, projectsFolder?: string) => this.#change(target, 'add', projectsFolder);
 	remove = (target: DefenderTarget, projectsFolder?: string) => this.#change(target, 'remove', projectsFolder);
 
+	/** Makes the change proposed after a PHP was installed or uninstalled (one UAC prompt); `null` while another request is open. */
+	applySuggestion = (suggestion: DefenderExclusionSuggestion) => this.#request('php', suggestion.change, suggestion.request, suggestionMessage);
+
 	/**
 	 * Copies the PowerShell commands adding `target`'s exclusion, for whoever manages the PC: no
 	 * prompt, nothing changed. `false` when they could not be built (the error is told) or copied.
@@ -91,11 +108,19 @@ export class ScanExclusionStore {
 	 * `null` while another request is open: its prompt must end first. An outcome other than
 	 * `applied` is a warning, not an error: nothing changed and the toast says why.
 	 */
-	async #change(target: DefenderTarget, change: ScanExclusionChange, projectsFolder?: string): Promise<Outcome<DefenderExclusionResult> | null> {
+	#change(target: DefenderTarget, change: ScanExclusionChange, projectsFolder?: string): Promise<Outcome<DefenderExclusionResult> | null> {
+		return this.#request(target, change, exclusionRequest(target, change, projectsFolder), (r) => scanExclusionMessage(target, r));
+	}
+
+	/** Sends `request` (about `target`) and tells its end with `message`. */
+	async #request(
+		target: DefenderTarget,
+		change: ScanExclusionChange,
+		request: DefenderExclusionRequest,
+		message: (result: DefenderExclusionResult) => string
+	): Promise<Outcome<DefenderExclusionResult> | null> {
 		if (this.busy) return null;
 		this.busy = { target, change };
-		const request = exclusionRequest(target, change, projectsFolder);
-		const message = (r: DefenderExclusionResult) => scanExclusionMessage(target, r);
 		const result = await this.#runner.run(() => this.#backend.commands.changeDefenderExclusion(request), {
 			success: message,
 			warning: (r) => (r.outcome === 'applied' ? null : message(r))

@@ -1,7 +1,7 @@
 //! `defender exclusion` and `mysql defender-exclusion`: what happened, and what the user can do
 //! about it.
 
-use lampo_application::dto::{DefenderExclusionCommandDto, DefenderExclusionResultDto, ScanExclusionChangeDto, ScanExclusionOutcomeDto, ScanExclusionResultDto};
+use lampo_application::dto::{DefenderExclusionCommandDto, DefenderExclusionResultDto, DefenderExclusionSuggestionDto, ScanExclusionChangeDto, ScanExclusionOutcomeDto, ScanExclusionResultDto};
 
 /// `mysql defender-exclusion`.
 pub fn scan_exclusion(r: &ScanExclusionResultDto) -> String {
@@ -49,6 +49,29 @@ fn selectors(r: &DefenderExclusionResultDto) -> String {
     let projects = r.projects.as_ref().map(|folder| format!("--projects \"{folder}\""));
     let selectors: Vec<&str> = [(!r.processes.is_empty()).then_some("--php"), r.folder.is_some().then_some("--mysql"), projects.as_deref()].into_iter().flatten().collect();
     selectors.join(" ")
+}
+
+/// `package install|uninstall` of a PHP: `summary`, then the Defender exclusion changes Lampo
+/// proposes, each with its command.
+pub fn with_defender_suggestions(summary: String, suggestions: &[DefenderExclusionSuggestionDto]) -> String {
+    let mut lines = vec![summary];
+    lines.extend(suggestions.iter().map(defender_suggestion));
+    lines.join("\n")
+}
+
+fn defender_suggestion(s: &DefenderExclusionSuggestionDto) -> String {
+    let processes = s.processes.join(", ");
+    let command = &s.command;
+    match s.change {
+        ScanExclusionChangeDto::Add => format!(
+            "Microsoft Defender scans the files opened by {processes}: the exclusion Lampo applied does not cover it. \
+             Update it with `{command}` (one UAC prompt)."
+        ),
+        ScanExclusionChangeDto::Remove => format!(
+            "The Defender exclusion Lampo applied still names {processes}, no longer installed. \
+             Remove it with `{command}` (one UAC prompt)."
+        ),
+    }
 }
 
 /// `defender exclusion commands`: the PowerShell lines only, one per exclusion, ready to be sent

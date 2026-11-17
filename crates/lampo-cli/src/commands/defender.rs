@@ -1,4 +1,4 @@
-//! `defender exclusion add|remove|commands [--php] [--mysql] [--projects [<folder>]]`: runs in this
+//! `defender exclusion add|remove|commands [--php] [--mysql] [--projects [<folder>]] [--uninstalled]`: runs in this
 //! process (the UAC prompt belongs to the terminal), never in the app, which owns no state of it.
 
 use lampo_application::dto::{DefenderExclusionRequestDto, ScanExclusionChangeDto, ScanExclusionOutcomeDto};
@@ -38,6 +38,7 @@ fn request(c: &Cmd<'_>, change: ScanExclusionChangeDto, targets: ExclusionTarget
     DefenderExclusionRequestDto {
         projects: targets.projects.is_some(),
         projects_folder: targets.projects.flatten().map(|folder| c.ctx.env.absolute(&folder)),
+        uninstalled: targets.uninstalled,
         ..DefenderExclusionRequestDto::new(change, targets.php, targets.mysql)
     }
 }
