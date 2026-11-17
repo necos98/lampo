@@ -106,6 +106,7 @@ fn declarations(cfg: &Config) -> Vec<(&'static str, Vec<Declaration>)> {
             CheckStatus, DoctorCheckDto, VcRuntimeIssueDto, PortConflictDto, ShadowedToolDto, DoctorReportDto, ShimStatusDto,
         ),
         section!("Integrations": ClaudeCodeStateDto, ClaudeCodeStatusDto, StepOutcomeDto, ClaudeCodeStepDto, ClaudeCodeActionDto),
+        section!("Defender exclusion": ScanExclusionChangeDto, ScanExclusionOutcomeDto, ScanExclusionResultDto, ScanExclusionInfoDto),
         section!("App": AppInfoDto),
         section!("Event payloads":
             ProgressStageDto, ProgressDto, TaskProgressPayload, TaskOutcomeDto, TaskFinishedPayload, ServiceStatusPayload,

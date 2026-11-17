@@ -306,6 +306,20 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         c("lampo shims install", "lampo shims install", "Install the shims and add their folder to the user PATH (no elevation).", true, false),
         c("lampo shims uninstall", "lampo shims uninstall [--json]", "Take the shim folder off the user PATH and delete the shims and the lampo copy in it.", true, false),
         c(
+            "lampo mysql defender-exclusion add",
+            "lampo mysql defender-exclusion add --allow-elevation [--json]",
+            "Exclude Lampo's MySQL data folder from Microsoft Defender (UAC prompt). Only when the user asks for it: never on your own.",
+            true,
+            false,
+        ),
+        c(
+            "lampo mysql defender-exclusion remove",
+            "lampo mysql defender-exclusion remove --allow-elevation [--json]",
+            "Let Microsoft Defender scan Lampo's MySQL data folder again (UAC prompt). Only when the user asks for it.",
+            true,
+            false,
+        ),
+        c(
             "lampo settings get",
             "lampo settings [get] [--json]",
             "Show the global settings: Apache, MySQL, Redis and Mailpit (SMTP + web UI) ports, default PHP, loopback port range.",

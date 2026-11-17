@@ -167,6 +167,36 @@ tuo utente, con `claude plugin …`) un plugin generato da Lampo in
   **Rimuovi** lo toglie da Claude Code. Lampo non tocca Claude Code se non lo chiedi tu, e lo
   disinstallatore toglie il plugin.
 
+## Esclusione da Microsoft Defender (facoltativa)
+
+Le suite di test ricreano il database a ogni esecuzione e Microsoft Defender analizza ogni
+scrittura dei file di MySQL (`.ibd`, redo log): con più agenti in parallelo `mysqld.exe` può
+occupare una parte notevole del tempo di scansione. Se vuoi, puoi escludere dall'analisi la sola
+cartella dei dati MySQL di Lampo, `%LOCALAPPDATA%\Lampo\mysql` (i dati di tutte le istanze):
+
+- dalla GUI: Impostazioni › CLI e integrazioni › Microsoft Defender, **Aggiungi esclusione** o
+  **Rimuovi esclusione**;
+- dalla CLI: `lampo mysql defender-exclusion add --allow-elevation` (o `remove`).
+
+Ogni modifica chiede la conferma di amministratore (UAC); Lampo non aggiunge mai l'esclusione da
+solo, né all'installazione né all'avvio. Viene esclusa solo quella cartella: mai i pacchetti, il
+resto dei dati, un processo (`mysqld.exe`, `php.exe`) o un'estensione. Il compromesso: sono file di
+dati, non programmi, ma un file dannoso salvato in quella cartella non verrebbe analizzato lì (lo è
+comunque quando viene copiato o eseguito altrove).
+
+Se Defender non è l'antivirus attivo (ne usi un altro, o è disattivato), o se le esclusioni sono
+gestite da Tamper Protection o dai criteri di chi gestisce il PC (Criteri di gruppo, Intune), Lampo
+lo dice e non cambia nulla (la CLI esce con codice 12; 8 se annulli il prompt UAC). Senza diritti
+di amministratore le esclusioni di Defender non si possono leggere, quindi Lampo mostra solo
+l'esito dell'ultima richiesta. Per controllarle, da un PowerShell amministratore:
+`(Get-MpPreference).ExclusionPath`. La funzione è disponibile solo con la cartella dati standard
+(non con `LAMPO_HOME`).
+
+Il disinstallatore non rimuove l'esclusione (i dati MySQL restano su disco): toglila prima con
+**Rimuovi esclusione** o `lampo mysql defender-exclusion remove --allow-elevation`, oppure dopo,
+da un PowerShell amministratore aperto con il tuo utente:
+`Remove-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Lampo\mysql"`.
+
 ## Documentazione
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): architettura, gestione dei processi, CLI e exit

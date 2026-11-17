@@ -5,6 +5,7 @@
 	import PageHeader from '#lib/components/common/PageHeader.svelte';
 	import AboutPanel from '#lib/components/settings/AboutPanel.svelte';
 	import ClaudeCodePanel from '#lib/components/settings/ClaudeCodePanel.svelte';
+	import DefenderPanel from '#lib/components/settings/DefenderPanel.svelte';
 	import DoctorPanel from '#lib/components/settings/DoctorPanel.svelte';
 	import PresetsPanel from '#lib/components/settings/PresetsPanel.svelte';
 	import SettingsForm from '#lib/components/settings/SettingsForm.svelte';
@@ -42,6 +43,8 @@
 			<ShimsPanel />
 			<Separator class="my-6" />
 			<ClaudeCodePanel />
+			<Separator class="my-6" />
+			<DefenderPanel />
 		</SettingsPanel>
 		<SettingsPanel id="presets"><PresetsPanel /></SettingsPanel>
 		<SettingsPanel id="doctor"><DoctorPanel /></SettingsPanel>

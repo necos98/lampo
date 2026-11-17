@@ -17,7 +17,7 @@ pub enum ExitCode {
     Conflict = 5,
     /// No project/site for the current directory (and none given).
     ProjectNotResolved = 6,
-    /// Needs the hosts-file UAC prompt; re-run with `--allow-elevation`.
+    /// Needs a UAC prompt (hosts file, Defender exclusion); re-run with `--allow-elevation`.
     ElevationRequired = 7,
     /// The UAC prompt was refused.
     ElevationDenied = 8,
@@ -50,7 +50,7 @@ impl ExitCode {
         (ExitCode::Validation, "invalid input"),
         (ExitCode::Conflict, "conflict (duplicate, port in use, in use)"),
         (ExitCode::ProjectNotResolved, "no project for the current directory"),
-        (ExitCode::ElevationRequired, "needs the hosts-file UAC prompt: re-run with --allow-elevation"),
+        (ExitCode::ElevationRequired, "needs a UAC prompt (hosts file, Defender exclusion): re-run with --allow-elevation"),
         (ExitCode::ElevationDenied, "UAC prompt refused"),
         (ExitCode::AppUnavailable, "Lampo app not running and could not be started"),
         (ExitCode::PackageMissing, "required package not installed"),

@@ -15,6 +15,7 @@ pub mod logs;
 pub mod packages;
 pub mod presets;
 pub mod projects;
+pub mod scan_exclusion;
 pub mod services;
 pub mod settings;
 pub mod tasks;
@@ -86,6 +87,8 @@ macro_rules! lampo_command_handler {
             $crate::commands::integrations::claude_code_status,
             $crate::commands::integrations::install_claude_code,
             $crate::commands::integrations::uninstall_claude_code,
+            $crate::commands::scan_exclusion::mysql_scan_exclusion_info,
+            $crate::commands::scan_exclusion::change_mysql_scan_exclusion,
         ]
     };
 }

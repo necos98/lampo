@@ -10,7 +10,7 @@ pub enum Origin {
     Cli,
 }
 
-/// Whether the call may trigger a UAC prompt (the elevated hosts-file helper).
+/// Whether the call may trigger a UAC prompt (the elevated helper: hosts file, Defender exclusion).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ElevationPolicy {

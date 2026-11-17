@@ -10,6 +10,8 @@ mod desktop;
 pub use desktop::opened;
 mod detection;
 pub use detection::detection;
+mod scan_exclusion;
+pub use scan_exclusion::scan_exclusion;
 mod unreadable;
 pub use unreadable::{unreadable_projects, unreadable_projects_warning};
 mod which;

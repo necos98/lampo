@@ -1,8 +1,10 @@
 //! CLI composition root: the only place in the CLI that names concrete adapters.
 //!
-//! The CLI builds only **read-only, file-based** use cases locally. Everything that mutates
-//! state or needs a process goes through [`ControlClient`] to the running app (started headless
-//! when needed), which is the single owner of service processes.
+//! The CLI builds locally the **read-only, file-based** use cases and the user-level actions that
+//! own no app state (`shims`, `open`, the Defender exclusion, whose UAC prompt belongs to the
+//! terminal). Everything else that mutates state or needs a process goes through
+//! [`ControlClient`] to the running app (started headless when needed), which is the single owner
+//! of service processes.
 
 use std::sync::Arc;
 
@@ -16,8 +18,9 @@ use lampo_domain::ports::{
 use lampo_domain::resolution::ResolverChain;
 use lampo_infra_services::{DpapiMysqlPasswords, FileLogReader, HeadlessAppLauncher, NamedPipeControlClient, SystemRandomPasswords, TcpPortProbe, TokioTimer, WindowsExternalAppLauncher};
 use lampo_infra_store as store;
-use lampo_infra_web::ElevatedHostsFile;
-use lampo_infra_web::hosts::elevation::RunAsLauncher;
+use lampo_infra_web::defender::profiles::RegistryProfiles;
+use lampo_infra_web::elevation::RunAsLauncher;
+use lampo_infra_web::{DefenderScanExclusion, ElevatedHostsFile};
 
 use crate::context::{CliContext, CliEnv};
 use crate::local::CtrlC;
@@ -47,6 +50,8 @@ pub fn build() -> AppResult<CliContext> {
     let shim_tools = lampo_domain::shim::tools::all();
     let shim_installer: Arc<dyn ShimInstaller> =
         Arc::new(store::ExeShimInstaller::new(app_dir.join("lampo-shim.exe"), shim_tools.iter().map(|t| t.name()).collect()).with_cli(app_dir.join("lampo.exe")));
+    // Hosts file and Defender exclusion; its UAC prompts belong to the terminal.
+    let elevated_helper = app_dir.join("lampo-hosts-helper.exe");
     // The registered service kinds (the same list as the app's).
     let services = Arc::new(ServiceCatalog::new(lampo_domain::service::builtin::all()));
 
@@ -75,7 +80,7 @@ pub fn build() -> AppResult<CliContext> {
         locator: locator.clone(),
         shim_dir: paths.shim_dir(),
         shim_tools: shim_tools.clone(),
-        hosts: Arc::new(ElevatedHostsFile::system(app_dir.join("lampo-hosts-helper.exe"), Arc::new(RunAsLauncher::default()))?),
+        hosts: Arc::new(ElevatedHostsFile::system(elevated_helper.clone(), Arc::new(RunAsLauncher::default()))?),
         fs: fs.clone(),
     });
 
@@ -127,6 +132,10 @@ pub fn build() -> AppResult<CliContext> {
             checks,
         })),
         shims: Arc::new(ShimSetup::new(shim_installer, user_path, locator, paths.clone(), shim_tools)),
+        scan_exclusion: Arc::new(MysqlScanExclusion::new(
+            Arc::new(DefenderScanExclusion::new(elevated_helper, Arc::new(RunAsLauncher::default()), Arc::new(RegistryProfiles))),
+            paths.clone(),
+        )),
         packages: Arc::new(PackageCatalog::new(PackageCatalogDeps {
             // Offline listing: embedded catalog only; live data comes through the app.
             sources: vec![Arc::new(lampo_infra_packages::EmbeddedCatalog::new())],

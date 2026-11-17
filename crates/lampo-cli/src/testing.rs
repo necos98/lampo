@@ -130,6 +130,10 @@ pub struct Fake {
     pub opened_logs: Mutex<Vec<(String, LogTarget)>>,
     /// What opening a log answers (default: success).
     pub open_log_result: Mutex<AppResult<()>>,
+    /// What a Defender exclusion request answers (default: applied).
+    pub scan_exclusion_result: Mutex<AppResult<ScanExclusionOutcomeDto>>,
+    /// The change and context of every Defender exclusion request.
+    pub scan_exclusion_calls: Mutex<Vec<(ScanExclusionChangeDto, CallContext)>>,
 }
 
 impl Fake {
@@ -169,6 +173,8 @@ impl Fake {
             projects: Mutex::new(vec![project_json()]),
             opened_logs: Mutex::new(Vec::new()),
             open_log_result: Mutex::new(Ok(())),
+            scan_exclusion_result: Mutex::new(Ok(ScanExclusionOutcomeDto::Applied)),
+            scan_exclusion_calls: Mutex::new(Vec::new()),
         })
     }
 
@@ -208,6 +214,7 @@ impl Fake {
             agent: self.clone(),
             hook_input: self.clone(),
             shims: self.clone(),
+            scan_exclusion: self.clone(),
             offline_status: self.clone(),
             app: self.clone(),
             runner: self.clone(),
@@ -379,6 +386,18 @@ impl ShimAdmin for Fake {
     fn uninstall(&self) -> AppResult<ShimStatusDto> {
         self.shim_installed.store(false, Ordering::SeqCst);
         ShimAdmin::status(self)
+    }
+}
+
+/// The folder every fake Defender exclusion names.
+pub const MYSQL_DATA_FOLDER: &str = r"C:\Users\me\AppData\Local\Lampo\mysql";
+
+#[async_trait]
+impl ScanExclusionAdmin for Fake {
+    async fn change(&self, change: ScanExclusionChangeDto, context: CallContext) -> AppResult<ScanExclusionResultDto> {
+        self.scan_exclusion_calls.lock().unwrap().push((change, context));
+        let outcome = self.scan_exclusion_result.lock().unwrap().clone()?;
+        Ok(ScanExclusionResultDto { change, outcome, folder: MYSQL_DATA_FOLDER.into() })
     }
 }
 

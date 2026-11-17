@@ -11,7 +11,7 @@ use lampo_domain::hostname::{Hostname, Tld};
 use lampo_domain::hosts::{HostsBlock, HostsEntry};
 use lampo_domain::ports::{HostsFileReader, HostsFileWriter};
 use lampo_domain::{PortError, PortResult};
-use lampo_infra_web::hosts::elevation::{HelperLauncher, LaunchOutcome};
+use lampo_infra_web::elevation::{HelperLauncher, LaunchOutcome};
 use lampo_infra_web::hosts::request::{HelperArgs, digest_of};
 use lampo_infra_web::hosts::{ElevatedHostsFile, helper_exit};
 

@@ -988,6 +988,30 @@ detail: string | null, };
  */
 export type ClaudeCodeAction = { ok: boolean, steps: Array<ClaudeCodeStep>, status: ClaudeCodeStatus, };
 
+// --- Defender exclusion ---
+
+export type ScanExclusionChange = "add" | "remove";
+
+/**
+ * How a request ended: none of these is an error, each is told to the user as it is.
+ */
+export type ScanExclusionOutcome = "applied" | "cancelled" | "defender-unavailable" | "refused" | "not-confirmed";
+
+/**
+ * The result of one request. Defender's exclusions cannot be read without administrator
+ * rights, so this is all Lampo knows: there is no "active" state.
+ */
+export type ScanExclusionResult = { change: ScanExclusionChange, outcome: ScanExclusionOutcome, 
+/**
+ * The excluded folder (`%LOCALAPPDATA%\Lampo\mysql`).
+ */
+folder: string, };
+
+/**
+ * What the exclusion would cover, shown before the user asks for it.
+ */
+export type ScanExclusionInfo = { folder: string, };
+
 // --- App ---
 
 export type AppInfo = { version: string, configDir: string, dataDir: string, shimDir: string, controlProtocolVersion: number, };

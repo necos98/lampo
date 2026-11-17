@@ -38,6 +38,7 @@ pub mod project_file;
 pub mod project_import;
 pub mod resolution;
 pub mod scaffold;
+pub mod scan_exclusion;
 pub mod service;
 pub mod settings;
 pub mod shim;

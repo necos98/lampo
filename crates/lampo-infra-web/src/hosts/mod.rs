@@ -3,10 +3,8 @@
 //! * [`merge`] — pure byte-level rewrite of the block (shared with the helper);
 //! * [`request`] — the helper's command line and request file, and the block validation;
 //! * [`helper`] — the logic of the elevated `lampo-hosts-helper.exe` (and its security rules);
-//! * [`elevation`] — how the helper is started (UAC `runas`, or a test launcher);
 //! * [`ElevatedHostsFile`] — the `HostsFileReader` / `HostsFileWriter` adapter.
 
-pub mod elevation;
 pub mod helper;
 pub mod merge;
 pub mod request;
@@ -21,8 +19,8 @@ use lampo_domain::hosts::HostsBlock;
 use lampo_domain::ports::{HostsFileReader, HostsFileWriter};
 use lampo_domain::{PortError, PortResult};
 
-use self::elevation::{HelperLauncher, LaunchOutcome};
 use self::request::HelperArgs;
+use crate::elevation::{HelperLauncher, LaunchOutcome};
 
 const HELPER: &str = "lampo-hosts-helper";
 const REQUEST_CONTEXT: &str = "writing the hosts request";

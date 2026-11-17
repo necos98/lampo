@@ -12,9 +12,7 @@ fn lampo(args: &[&str]) -> (i32, String, String) {
 fn root_help_documents_agents_json_and_exit_codes() {
     let (code, out, _) = lampo(&["--help"]);
     assert_eq!(code, 0);
-    for needle in
-        ["lampo agent context --json", "Exit codes:", " 7  needs the hosts-file UAC prompt", "14  doctor found problems", "--json", "--allow-elevation", "--no-start", "exec", "env"]
-    {
+    for needle in ["lampo agent context --json", "Exit codes:", " 7  needs a UAC prompt", "14  doctor found problems", "--json", "--allow-elevation", "--no-start", "exec", "env"] {
         assert!(out.contains(needle), "missing {needle:?} in:\n{out}");
     }
 }

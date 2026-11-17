@@ -180,3 +180,10 @@ impl Interrupt for CtrlC {
         }
     }
 }
+
+#[async_trait]
+impl ScanExclusionAdmin for MysqlScanExclusion {
+    async fn change(&self, change: ScanExclusionChangeDto, context: CallContext) -> AppResult<ScanExclusionResultDto> {
+        MysqlScanExclusion::change(self, change, context).await
+    }
+}

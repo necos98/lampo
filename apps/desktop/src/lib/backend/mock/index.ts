@@ -86,6 +86,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 		defaultAddressing: 'no-elevation'
 	};
 	let shims: T.ShimStatus = { shimDir: 'C:\\Users\\dev\\AppData\\Local\\Lampo\\shims', installed: true, onPath: false, shadowed: [{ tool: 'php', shim: 'C:\\Users\\dev\\AppData\\Local\\Lampo\\shims\\php.exe', shadowedBy: 'C:\\xampp\\php\\php.exe' }] };
+	const mysqlDataFolder = 'C:\\Users\\dev\\AppData\\Local\\Lampo\\mysql';
 	const expectedPlugin = '0.1.0-mock-h1a2b3c4d';
 	let claudeCode: T.ClaudeCodeStatus = {
 		state: 'not-installed',
@@ -776,6 +777,12 @@ export function createMockBackend({ fresh }: Options): Backend {
 			claudeCode = { ...claudeCode, state: 'not-installed', installedVersion: null, updateError: null };
 			const steps = [step('detect-claude', claudeCode.claudeVersion), step('remove-plugin'), step('remove-marketplace'), step('remove-files', claudeCode.pluginDir)];
 			return { ok: true, steps, status: clone(claudeCode) };
+		},
+		mysqlScanExclusionInfo: async () => ({ folder: mysqlDataFolder }),
+		// The browser has no UAC prompt nor Defender: every change is confirmed.
+		changeMysqlScanExclusion: async (change) => {
+			await sleep(1200);
+			return { change, outcome: 'applied', folder: mysqlDataFolder };
 		}
 	};
 

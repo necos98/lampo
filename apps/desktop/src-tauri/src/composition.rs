@@ -107,10 +107,15 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let control_server: Arc<dyn ControlChannelServer> = Arc::new(services::NamedPipeControlServer::new(pipe.clone()));
 
     // --- web ---
-    // UAC prompts for the hosts file belong to the app window (when shown).
+    // UAC prompts (hosts file, Defender exclusion) belong to the app window (when shown).
     let owner_handle = handle.clone();
-    let hosts_launcher = web::hosts::elevation::RunAsLauncher::default().with_owner(Arc::new(move || crate::tray::main_window_handle(&owner_handle)));
-    let hosts = Arc::new(web::ElevatedHostsFile::system(exe_dir().join("lampo-hosts-helper.exe"), Arc::new(hosts_launcher))?);
+    let elevated_launcher: Arc<dyn web::elevation::HelperLauncher> =
+        Arc::new(web::elevation::RunAsLauncher::default().with_owner(Arc::new(move || crate::tray::main_window_handle(&owner_handle))));
+    let elevated_helper = exe_dir().join("lampo-hosts-helper.exe");
+    let hosts = Arc::new(web::ElevatedHostsFile::system(elevated_helper.clone(), elevated_launcher.clone())?);
+    // Only on an explicit request from the settings page, never at install or start.
+    let scan_exclusion =
+        Arc::new(MysqlScanExclusion::new(Arc::new(web::DefenderScanExclusion::new(elevated_helper, elevated_launcher, Arc::new(web::defender::profiles::RegistryProfiles))), paths.clone()));
 
     let php_ini: Arc<dyn PhpIniWriter> = Arc::new(web::PhpIniRenderer);
 
@@ -365,6 +370,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         })),
         shims: shims.clone(),
         claude_code: claude_code.clone(),
+        scan_exclusion,
         startup: Arc::new(
             Startup::new(env, settings, shims, app_location).with_claude_code(claude_code).with_package_sweeper(Arc::new(packages::FsLeftoverSweeper::new(&paths, package_slots))),
         ),

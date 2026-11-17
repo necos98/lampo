@@ -24,8 +24,10 @@ pub fn hint_for(code: ErrorCode) -> &'static str {
         ErrorCode::NotFound => "Check the name with `lampo project list`, `lampo worktree list`, `lampo package list` or `lampo logs`.",
         ErrorCode::Conflict => "The target already exists or is in use: pick another id/port/name, or inspect it with `lampo project list` and `lampo status`.",
         ErrorCode::ProjectNotResolved => "Run inside a registered project folder, pass --project <id>, set LAMPO_PROJECT, or register the folder with `lampo project create`.",
-        ErrorCode::ElevationRequired => "Re-run with --allow-elevation to accept the UAC prompt for the hosts file, or use localhost addressing (the default of `lampo project create`).",
-        ErrorCode::ElevationDenied => "The UAC prompt was refused. Retry with --allow-elevation and accept it, or avoid hosts-file names.",
+        ErrorCode::ElevationRequired => {
+            "Re-run with --allow-elevation to accept the UAC prompt (hosts file, Defender exclusion), or, for the hosts file, use localhost addressing (the default of `lampo project create`)."
+        }
+        ErrorCode::ElevationDenied => "The UAC prompt was refused. Retry with --allow-elevation and accept it, or (hosts file) avoid hosts-file names.",
         ErrorCode::AppUnavailable => "Start the Lampo desktop app (or drop --no-start so the CLI starts it headless), then retry. `lampo doctor` shows what is wrong.",
         ErrorCode::PackageMissing => "Install the missing package with `lampo package install <kind> <version>` (see `lampo package list`).",
         ErrorCode::Network => "Check the internet connection and retry.",

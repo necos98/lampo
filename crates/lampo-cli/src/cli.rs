@@ -10,9 +10,11 @@ use crate::exit_code::ExitCode;
 mod desktop;
 mod introspection;
 mod logs;
+mod mysql;
 pub use desktop::OpenArgs;
 pub use introspection::{CompletionShell, CompletionsArgs, WhichArgs};
 pub use logs::{LogLevelArg, LogsArgs};
+pub use mysql::{DefenderExclusionCommand, MysqlCommand};
 
 const ABOUT: &str = "Lampo: local PHP environments for Windows (CLI for coding agents and terminals)";
 
@@ -70,7 +72,8 @@ pub struct GlobalArgs {
     /// Site to act on (`shop`, `shop@feature-x`); overrides `LAMPO_PROJECT` and the current folder.
     #[arg(long, short = 'p', global = true, value_name = "SITE")]
     pub project: Option<String>,
-    /// Allow a UAC prompt (hosts-file update). Without it such commands exit with code 7.
+    /// Allow a UAC prompt (hosts-file update, Defender exclusion). Without it such commands exit
+    /// with code 7.
     #[arg(long, global = true)]
     pub allow_elevation: bool,
     /// Do not start the app automatically for commands that need it (exit code 9 instead).
@@ -105,6 +108,9 @@ pub enum Command {
     /// Databases on the resolved site's MySQL instance (goes through the app).
     #[command(subcommand)]
     Db(DbCommand),
+    /// Lampo's MySQL data as a whole: its optional Microsoft Defender exclusion (UAC prompt).
+    #[command(subcommand)]
+    Mysql(MysqlCommand),
     /// Run a command with the site's toolchain (PHP, Composer, MySQL client) on PATH.
     ///
     /// Everything after `--` is the command line. The child's stdio is inherited and its exit

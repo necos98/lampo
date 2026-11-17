@@ -1,6 +1,6 @@
 ﻿[package]
 name = "lampo-infra-web"
-description = "Lampo web adapters: Apache config rendering/validation and runner (on the lampo-infra-services ServiceHost), php.ini rendering, hosts-file block and its elevated helper."
+description = "Lampo web adapters: Apache config rendering/validation and runner (on the lampo-infra-services ServiceHost), php.ini rendering, hosts-file block and the optional Defender exclusion of the MySQL data, through their elevated helper."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,7 +8,8 @@ license.workspace = true
 publish.workspace = true
 
 [[bin]]
-# Tiny elevated helper: rewrites the Lampo block of the hosts file. Started via UAC (`runas`).
+# Tiny elevated helper: rewrites the Lampo block of the hosts file, or adds/removes the Defender
+# exclusion of the MySQL data folder. Started via UAC (`runas`).
 name = "lampo-hosts-helper"
 path = "src/bin/lampo-hosts-helper.rs"
 
@@ -26,6 +27,7 @@ tempfile = { workspace = true }
 tracing = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
+winreg = { workspace = true }
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_UI_Shell",
@@ -38,5 +40,7 @@ windows-sys = { workspace = true, features = [
 ] }
 
 [dev-dependencies]
+# The folder names the Defender exclusion hard-codes must match the data layout (one test).
+lampo-infra-store = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "time", "sync", "test-util"] }

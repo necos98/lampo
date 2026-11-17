@@ -1,6 +1,7 @@
-//! Starting `lampo-hosts-helper.exe`. The production launcher goes through UAC
-//! (`ShellExecuteExW` with the `runas` verb); tests plug in a launcher that runs the helper
-//! directly against a temp file.
+//! Starting `lampo-hosts-helper.exe`, the elevated helper of both the hosts file
+//! ([`crate::hosts`]) and the Defender exclusion ([`crate::defender`]). The production launcher
+//! goes through UAC (`ShellExecuteExW` with the `runas` verb); tests plug in a launcher that runs
+//! the helper directly, or a fake.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -85,7 +86,7 @@ impl HelperLauncher for RunAsLauncher {
         use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
         if args.iter().any(|a| a.contains('"')) {
-            return Err(PortError::invalid_data("hosts helper arguments", "quotes are not allowed"));
+            return Err(PortError::invalid_data("elevated helper arguments", "quotes are not allowed"));
         }
         let wide = |s: &std::ffi::OsStr| s.encode_wide().chain(std::iter::once(0)).collect::<Vec<u16>>();
         let verb = wide("runas".as_ref());
@@ -130,7 +131,7 @@ impl HelperLauncher for RunAsLauncher {
 #[cfg(not(windows))]
 impl HelperLauncher for RunAsLauncher {
     fn run(&self, _helper: &Path, _args: &[String]) -> PortResult<LaunchOutcome> {
-        Err(PortError::Unsupported("the hosts helper needs Windows".into()))
+        Err(PortError::Unsupported("the elevated helper needs Windows".into()))
     }
 }
 

@@ -29,6 +29,7 @@ import { UpdaterStore } from './updater.svelte.js';
 import { WorktreesStore } from './worktrees.svelte.js';
 import { CreateProjectFlow } from './createProject.svelte.js';
 import { ScaffoldSession } from './scaffoldSession.js';
+import { ScanExclusionStore } from './scanExclusion.svelte.js';
 
 /** The create screen, where a scaffolded folder is confirmed as a project. */
 const CREATE_PROJECT_ROUTE = '/projects/new';
@@ -47,6 +48,7 @@ export const worktrees = new WorktreesStore(backend, runner, tasks);
 export const settings = new SettingsStore(backend, runner);
 export const diagnostics = new DiagnosticsStore(backend, runner);
 export const integrations = new IntegrationsStore(backend, runner);
+export const scanExclusion = new ScanExclusionStore(backend, runner);
 export const firstRun = new FirstRunStore(backend, runner, tasks);
 export const logSources = new LogSourcesStore(backend);
 export const logFiles = new LogFileActions(backend, runner, notifier, copyText);

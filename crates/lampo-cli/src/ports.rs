@@ -145,3 +145,11 @@ pub enum SpawnError {
 pub trait ProgramRunner: Send + Sync {
     fn run(&self, spec: &SpawnSpec) -> Result<i32, SpawnError>;
 }
+
+/// The optional Defender exclusion of the MySQL data folder (`mysql defender-exclusion`); runs
+/// in this process, so its UAC prompt belongs to the terminal.
+#[async_trait]
+pub trait ScanExclusionAdmin: Send + Sync {
+    /// `ElevationRequired` unless `context` allows a prompt.
+    async fn change(&self, change: ScanExclusionChangeDto, context: CallContext) -> AppResult<ScanExclusionResultDto>;
+}

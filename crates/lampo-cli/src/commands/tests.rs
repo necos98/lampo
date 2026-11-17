@@ -574,7 +574,7 @@ async fn agent_context_human_is_complete() {
         "## Hints",
         "lampo worktree up",
         "## Exit codes",
-        " 7  needs the hosts-file UAC",
+        " 7  needs a UAC prompt",
         "--allow-elevation",
         "## JSON errors",
     ] {

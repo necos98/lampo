@@ -1,4 +1,5 @@
-//! Logic of `lampo-hosts-helper.exe`, the only Lampo code that runs elevated.
+//! Hosts-file mode of `lampo-hosts-helper.exe`, the only Lampo code that runs elevated (its other
+//! mode is the Defender exclusion, `crate::defender::helper`).
 //!
 //! Security design — the helper is started with administrator rights, so it must not be usable
 //! as a general "write a file as admin" tool:
@@ -30,6 +31,7 @@ use lampo_domain::hosts::HostsBlock;
 use super::helper_exit;
 use super::merge::{MergeError, merge_block};
 use super::request::{HelperArgs, load_request};
+use crate::system_dir::system_directory;
 
 /// Upper bound for the hosts file we are willing to rewrite.
 const MAX_HOSTS_BYTES: u64 = 16 * 1024 * 1024;
@@ -43,22 +45,7 @@ pub fn system_hosts_path() -> Option<PathBuf> {
     system_directory().map(|dir| dir.join("drivers").join("etc").join("hosts"))
 }
 
-#[cfg(windows)]
-fn system_directory() -> Option<PathBuf> {
-    use std::os::windows::ffi::OsStringExt;
-    use windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW;
-    let mut buf = vec![0u16; 512];
-    // SAFETY: the buffer pointer and its length in u16 units are passed together.
-    let len = unsafe { GetSystemDirectoryW(buf.as_mut_ptr(), buf.len() as u32) } as usize;
-    (len > 0 && len < buf.len()).then(|| PathBuf::from(std::ffi::OsString::from_wide(&buf[..len])))
-}
-
-#[cfg(not(windows))]
-fn system_directory() -> Option<PathBuf> {
-    None
-}
-
-/// Entire helper run; returns the process exit code.
+/// Entire hosts-file run; returns the process exit code.
 pub fn run(args: &[String]) -> i32 {
     let Some(args) = HelperArgs::parse(args) else { return helper_exit::BAD_ARGUMENTS };
     let Some(block) = load_request(&args) else { return helper_exit::INVALID_REQUEST };

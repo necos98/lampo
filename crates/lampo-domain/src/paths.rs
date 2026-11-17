@@ -44,7 +44,7 @@ use std::path::{Path, PathBuf};
 use crate::php::PhpMinor;
 use crate::preset::PresetId;
 use crate::project::ProjectId;
-use crate::service::ServiceId;
+use crate::service::{ServiceId, ServiceKind};
 use crate::site::{SiteId, WorktreeSlug};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,6 +109,11 @@ impl LampoPaths {
         let mut p = self.data_root.clone();
         p.extend(service.path_segments());
         p.join("data")
+    }
+
+    /// Every instance of a service kind: `<data>\<kind>` (`mysql`, holding `8.4\data`, ...).
+    pub fn service_kind_dir(&self, kind: &ServiceKind) -> PathBuf {
+        self.data_root.join(kind.as_str())
     }
 
     pub fn generated_dir(&self) -> PathBuf {
@@ -237,6 +242,8 @@ mod tests {
         assert_eq!(p.project_file(&id), PathBuf::from("C:\\cfg").join("projects").join("shop.toml"));
         let mysql: ServiceId = "mysql-8.4".parse().unwrap();
         assert_eq!(p.service_data_dir(&mysql), PathBuf::from(r"C:\data").join("mysql").join("8.4").join("data"));
+        assert!(p.service_data_dir(&mysql).starts_with(p.service_kind_dir(&ServiceKind::MYSQL)), "every instance lives under its kind's folder");
+        assert_eq!(p.service_kind_dir(&ServiceKind::MYSQL), PathBuf::from(r"C:\data").join("mysql"));
         assert_eq!(p.service_config_dir(&mysql), PathBuf::from(r"C:\data").join("generated").join("mysql").join("8.4"));
         assert_eq!(p.service_data_dir(&"redis".parse().unwrap()), PathBuf::from(r"C:\data").join("redis").join("data"));
         assert_eq!(p.service_log_dir(&"mysql-5.7".parse().unwrap()), PathBuf::from(r"C:\data").join("logs").join("mysql-5.7"));

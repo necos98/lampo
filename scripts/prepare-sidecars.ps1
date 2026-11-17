@@ -8,7 +8,8 @@
     lampo.exe               the CLI (finds lampo-desktop.exe next to itself to start it headless;
                             its copy in the shim dir reads <data>\app-location.txt instead)
     lampo-shim.exe          copied by Lampo as php.exe, composer.exe, mysql.exe... into the shim dir
-    lampo-hosts-helper.exe  the elevated hosts-file writer
+    lampo-hosts-helper.exe  the elevated helper: hosts-file writer and, on request, the Defender
+                            exclusion of the MySQL data folder
   The app and the CLI look for these in their own folder (`composition.rs` of each).
 
   Used by `pnpm bundle` (`tauri build --config src-tauri/tauri.bundle.conf.json`). During

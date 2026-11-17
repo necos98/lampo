@@ -2,7 +2,7 @@
  * Italian UI strings. All user-facing text lives here (one module per language) so i18n can be
  * added later by adding another file with the same shape.
  */
-import type { Addressing, CheckStatus, ErrorCode, ProgressStage, ServiceState, StepOutcome } from '../api/types.js';
+import type { Addressing, CheckStatus, ErrorCode, ProgressStage, ScanExclusionChange, ScanExclusionOutcome, ServiceState, StepOutcome } from '../api/types.js';
 import type { PaletteGroup } from '../palette/commands.js';
 import type { NavId, ShortcutHelpId } from '../services/navigation.js';
 import type { SettingsSectionId, SettingsSectionKind } from '../settings/sections.js';
@@ -688,6 +688,34 @@ export const it = {
 					'remove-files': 'Eliminazione dei file generati'
 				} as Record<string, string>
 			}
+		},
+		defender: {
+			title: 'Microsoft Defender',
+			help: 'Le suite di test riscrivono di continuo i file dei database MySQL e Defender li analizza a ogni scrittura, rallentandole. Puoi escludere dall’analisi la sola cartella dei dati MySQL di Lampo: mai i pacchetti, i programmi o il resto dei dati.',
+			risk: 'Il compromesso: un file dannoso salvato in quella cartella non verrebbe analizzato lì (lo è comunque quando viene copiato o eseguito altrove). Ogni modifica chiede la conferma di amministratore (UAC).',
+			unknownState: 'Senza diritti di amministratore Lampo non può leggere le esclusioni di Defender: qui vedi solo l’esito dell’ultima richiesta fatta da questa finestra.',
+			folder: 'Cartella',
+			add: 'Aggiungi esclusione',
+			adding: 'Aggiunta…',
+			remove: 'Rimuovi esclusione',
+			removing: 'Rimozione…',
+			confirmAdd: {
+				title: 'Escludere i dati MySQL da Microsoft Defender?',
+				body: (folder: string) =>
+					`Defender smetterà di analizzare ${folder}, dove stanno i dati di tutte le istanze MySQL. Un file dannoso salvato lì non verrebbe analizzato in quella cartella. Windows chiederà la conferma di amministratore; puoi togliere l’esclusione quando vuoi.`,
+				confirm: 'Escludi'
+			},
+			done: {
+				add: 'Esclusione aggiunta: Defender non analizza più i dati MySQL.',
+				remove: 'Esclusione rimossa: Defender analizza di nuovo i dati MySQL.'
+			} satisfies Record<ScanExclusionChange, string>,
+			outcome: {
+				cancelled: 'Conferma di amministratore annullata: nessuna modifica.',
+				'defender-unavailable': 'Microsoft Defender non è installato o non è l’antivirus attivo (c’è un altro antivirus, o è disattivato): nessuna modifica. Un altro antivirus ha le sue esclusioni.',
+				refused: 'Microsoft Defender ha rifiutato la modifica: le esclusioni sono controllate da Tamper Protection o dai criteri di chi gestisce il PC (Criteri di gruppo, Intune). Nessuna modifica.',
+				'not-confirmed': 'Defender ha accettato la richiesta ma la modifica non risulta: le esclusioni sono probabilmente gestite o nascoste da criteri (Criteri di gruppo, Intune). Chiedi a chi gestisce il PC.'
+			} satisfies Record<Exclude<ScanExclusionOutcome, 'applied'>, string>,
+			last: 'Ultima richiesta'
 		},
 		doctor: {
 			title: 'Diagnostica',

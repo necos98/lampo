@@ -9,6 +9,7 @@ mod desktop;
 mod diagnostics;
 mod introspection;
 mod logs;
+mod mysql;
 mod packages;
 mod project_bulk;
 mod project_import;
@@ -24,6 +25,8 @@ mod desktop_tests;
 mod introspection_tests;
 #[cfg(test)]
 mod logs_tests;
+#[cfg(test)]
+mod mysql_tests;
 #[cfg(test)]
 mod project_bulk_tests;
 #[cfg(test)]
@@ -116,6 +119,7 @@ pub async fn run(cli: Cli, ctx: &CliContext, io: &Io) -> AppResult<i32> {
         Command::Logs(a) => logs::logs(&cmd, a).await,
         Command::Package(c) => packages::run(&cmd, c).await,
         Command::Db(c) => db::run(&cmd, c).await,
+        Command::Mysql(c) => mysql::run(&cmd, c).await,
         Command::Exec(a) => toolchain::exec(&cmd, a),
         Command::Env(a) => toolchain::env(&cmd, a),
         Command::Open(a) => desktop::open(&cmd, a),

@@ -61,8 +61,9 @@ FunctionEnd
 ; redirection), whose Get-Process has no Path for 64-bit processes such as lampo.exe: on 64-bit
 ; Windows the native PowerShell is reached through Sysnative, which only 32-bit processes see.
 ;
-; The hosts helper runs elevated: a per-user installer cannot read its path nor stop it, which is
-; harmless (it exits on its own within seconds). Errors and the exit code are ignored.
+; The hosts helper runs elevated (hosts file, Defender exclusion): a per-user installer cannot read
+; its path nor stop it, which is harmless (it exits on its own within seconds). Errors and the exit
+; code are ignored.
 
 !define LAMPO_POWERSHELL_SUBPATH "WindowsPowerShell\v1.0\powershell.exe"
 !define LAMPO_ENV_INSTALL_DIR "LAMPO_INSTALLER_INSTALL_DIR"

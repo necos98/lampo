@@ -28,7 +28,7 @@ and `redis-cli`.
 | `crates/lampo-application` | Use cases (`Arc<dyn Port>` constructors), serde DTOs, front-end event names, CLI↔app control protocol, task registry, embedded Claude Code skills (`build.rs`) | Behaviour of features |
 | `crates/lampo-infra-store` | TOML repositories (projects, worktrees, settings, presets), app paths, app location file, shim index file, shim installer (shims + CLI copy), project detectors, git metadata reader, user PATH, clock, generated agent-plugin files | Lampo's own files |
 | `crates/lampo-infra-packages` | Embedded + windows.php.net catalogs, downloader, SHA-256, zip extraction, installed registry, VC++ runtime detection, post-install hooks | Where binaries come from |
-| `crates/lampo-infra-web` | Apache config templates + `httpd -t` + runner (an httpd driver on the `ServiceHost` of `lampo-infra-services`), php.ini rendering, hosts-file block via the elevated `lampo-hosts-helper` | Apache/PHP/hosts specifics |
+| `crates/lampo-infra-web` | Apache config templates + `httpd -t` + runner (an httpd driver on the `ServiceHost` of `lampo-infra-services`), php.ini rendering, hosts-file block and the optional Defender exclusion of the MySQL data, both via the elevated `lampo-hosts-helper` | Apache/PHP/hosts specifics, elevated changes |
 | `crates/lampo-infra-services` | Job Object supervisor, `ServiceHost` (start/restart/stop sequence shared by every service runner, Apache included), MySQL/Redis/Mailpit runners, port probe, log files, `DatabaseAdmin` (plain, `.sql.gz` and single-`.sql` `.zip` dumps, (de)compressed while streaming), MySQL root and project-account passwords (DPAPI), their generator, the account statements (`MysqlAccountAdmin`) and the option files handing passwords to the clients, control named pipe, headless app launcher, `claude` CLI runner, external desktop apps (PowerShell, Explorer, VS Code) | Local processes and IPC |
 | `crates/lampo-cli` | `lampo` CLI and `lampo-shim` (copied as `php.exe` etc.): two composition roots (`src/composition.rs`, `src/bin/lampo-shim.rs`, which registers the shim tools) | CLI surface |
 | `claude-plugin` | Claude Code plugin sources: `skills/<skill-id>/SKILL.md` + reference files and `icon.png` (embedded as is), trigger evals and a dev manifest (repository only) | What agents are taught |
@@ -157,9 +157,11 @@ Lampo owns one marked block of the system hosts file (`<GetSystemDirectoryW()>\d
 on whatever drive Windows lives; the composition roots use `ElevatedHostsFile::system`, never a
 hardcoded `C:\` path). Reading needs no rights; writing goes through `lampo-hosts-helper.exe`,
 started with `ShellExecuteExW` verb `runas` (UAC prompt, owned by the app window when it is shown,
-otherwise by the foreground window, i.e. the terminal for the CLI). The helper
-(`lampo_infra_web::hosts::helper`, `hosts::request`) is the only code that runs elevated, so it
-accepts as little as possible:
+otherwise by the foreground window, i.e. the terminal for the CLI; `lampo_infra_web::elevation`).
+The helper is the only code that runs elevated. It has two modes, picked by its first argument:
+the hosts file (below, `lampo_infra_web::hosts::helper`, `hosts::request`) and the
+[Defender exclusion](#microsoft-defender-exclusion-of-the-mysql-data) (`--defender-exclusion`).
+In its hosts mode it accepts as little as possible:
 
 * **Fixed target**: release builds write only the system hosts file (`--hosts` exists in debug
   builds only, for tests).
@@ -187,6 +189,69 @@ unsigned binary, "Unknown publisher") is the remaining defence. Future mitigatio
 (the prompt then shows a verified publisher, and the app can verify the signature before
 launching it) and/or install the helper per-machine under `%ProgramFiles%`, writable only by
 administrators.
+
+### Microsoft Defender exclusion of the MySQL data
+
+Test suites recreate their databases at every run, and Defender scans each write of the `.ibd`
+and `#innodb_redo\#ib_redo*` files: with several coding agents in parallel `mysqld.exe` was ~14%
+of Defender's scan time. Those are data files, never run, so excluding their folder is a low-risk
+trade-off, offered **only on an explicit request**: Settings > CLI e integrazioni > Microsoft
+Defender, or `lampo mysql defender-exclusion add|remove --allow-elevation` (exit 7 without the
+flag, 8 when the prompt is declined, 12 when Defender does not do it). Nothing adds it at install
+or start. `MysqlScanExclusion` (application) names `LampoPaths::service_kind_dir(mysql)`, the
+folder holding every instance's data; `DefenderScanExclusion` (`lampo_infra_web::defender`,
+port `ScanExclusionEditor`) runs `lampo-hosts-helper.exe --defender-exclusion add|remove --path
+<folder>`. Both the GUI and the CLI run it in their own process (the CLI never asks the app),
+so the prompt belongs to the app window or to the terminal.
+
+The helper must not become a way to exclude any path, so in this mode
+(`defender::helper`, `defender::target`, `defender::request`):
+
+* **One folder.** The command line is exactly `--defender-exclusion add|remove --path <p>`. `<p>`
+  must be an absolute drive path of plain components (no UNC or `\\?\` prefix, no `.`/`..`, no
+  empty component, no trailing dot or space, no `*`, `?`, `%`, `:` stream or control character,
+  at most 1024 characters) and equal, ignoring case, to `<ProfileImagePath>\AppData\Local\Lampo\mysql`
+  for a user profile of `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList`
+  (local, domain or Entra accounts: SIDs `S-1-5-21-*`, `S-1-12-1-*`; that key is writable by
+  administrators only). The folder handed to Defender is **rebuilt from that profile's own
+  path**, so nothing of the request but the choice of the profile reaches Defender:
+  `...\Lampo\mysql2`, `...\Lampo`, `...\Lampo\packages` or `C:\Windows` are refused.
+* **Another administrator's credentials.** When the prompt is approved by another
+  administrator, the helper runs as that account and its own `%LOCALAPPDATA%` is not the
+  requester's. The request names the folder (from the requester's data root) and the helper
+  accepts any registered profile's folder, so the exclusion covers the user who uses Lampo. The
+  worst a caller can obtain is the same fixed folder of another local profile.
+* **Real folders.** Every component, from the drive root down, must be a folder and not a
+  reparse point (junction, symbolic link, mount point); adding needs the folder to exist (the
+  adapter creates it as the user first). The adapter applies the same checks before the prompt,
+  so a refused folder (`LAMPO_HOME`, a moved `%LOCALAPPDATA%`) never shows one. The user owns
+  that folder and could replace it with a link after the check: the exclusion is still the same
+  path string, so this gains nothing over saving a file in the folder itself, which is the
+  trade-off the user accepted.
+* **No interpolation.** Defender is reached through `<GetSystemDirectoryW()>\WindowsPowerShell\
+  v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command <constant
+  script>`: the folder travels as the environment variable `LAMPO_DEFENDER_FOLDER`, read by the
+  script as a plain string for `Add-MpPreference` / `Remove-MpPreference -ExclusionPath`. The
+  child gets a minimal environment (`SystemRoot`, `windir`, `TEMP`/`TMP` under the Windows
+  folder, `PSModulePath` = System32's modules only), so nothing the user can write is loaded
+  elevated; it is killed after 120 s.
+* **Path exclusions only**: never a process (`mysqld.exe`, `php.exe`), an extension, `packages\`
+  or the data root.
+
+Outcomes the user can act on are results, not errors (`ScanExclusionOutcome`, exit codes
+`defender::helper_exit`): `applied` (the script reads the exclusion list back), `cancelled` (UAC
+declined), `defender-unavailable` (no Defender cmdlets, or Defender not the active antivirus:
+`AMRunningMode` other than `Normal`, e.g. passive next to another product; checked when adding),
+`refused` (the cmdlet failed: Tamper Protection, group policy, Intune) and `not-confirmed` (the
+cmdlet succeeded but the list does not show the change: exclusions managed or hidden by a
+policy). The GUI shows them as warnings. A standard user cannot read Defender's exclusions, so
+Lampo shows no "active" state, only the outcome of the last request in the window.
+
+**Uninstall.** The uninstaller does not remove the exclusion: a final uninstall keeps the data
+root (MySQL data included), which the exclusion still describes, and removing it would need a
+UAC prompt in the middle of the uninstall. The README tells users to remove it first (or with
+`Remove-MpPreference` from an administrator PowerShell). The residual risk of the helper's
+location (see above) applies to this mode too.
 
 ### New projects: git clone or Laravel
 
@@ -324,7 +389,7 @@ Every step is a `lampo://service-auto-restart` event, which the GUI shows as a n
 | 4 | invalid input |
 | 5 | conflict (duplicate, port in use, in use) |
 | 6 | no project for the current directory |
-| 7 | needs the hosts-file UAC prompt: re-run with `--allow-elevation` |
+| 7 | needs a UAC prompt (hosts file, Defender exclusion): re-run with `--allow-elevation` |
 | 8 | UAC prompt refused |
 | 9 | Lampo app not running and could not be started |
 | 10 | required package not installed |
