@@ -2,7 +2,7 @@ import type { MysqlCredentials, Project, ProjectEnvironment, SiteAddress, TlsMod
 import { AddressList, type AddressRow } from '../projects/addressList.js';
 import { EnvVarList, type EnvVarRow } from '../projects/envVarList.js';
 import { DATABASE_KIND, usesService } from '../projects/services.js';
-import { Baseline } from './baseline.js';
+import { Baseline } from './baseline.svelte.js';
 
 const plain = <V>(v: V): V => JSON.parse(JSON.stringify(v)) as V;
 

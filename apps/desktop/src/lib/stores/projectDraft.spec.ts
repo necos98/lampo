@@ -1,8 +1,10 @@
+import { flushSync } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Project } from '../api/index.js';
 import { seedProjects } from '../backend/mock/seed.js';
 import { testBackend, testRunner } from '../testing/harness.js';
+import { track } from '../testing/reactivity.svelte.js';
 import { ProjectDraft } from './projectDraft.svelte.js';
 import { ProjectsStore } from './projects.svelte.js';
 
@@ -90,6 +92,34 @@ describe('ProjectDraft baseline', () => {
 		expect(draft.name).toBe('Mine');
 		expect(draft.dirty).toBe(true);
 		expect(draft.isStale(changed)).toBe(false);
+	});
+
+	it('rebase() closes the external-change notice at once', () => {
+		const draft = new ProjectDraft(shop());
+		draft.name = 'Mine';
+		const theirs = shop();
+		theirs.name = 'Theirs';
+		const changedElsewhere = track(() => draft.dirty && draft.isStale(theirs));
+		expect(changedElsewhere.current()).toBe(true);
+
+		draft.rebase(theirs);
+		flushSync();
+
+		expect(changedElsewhere.current()).toBe(false);
+	});
+
+	it('rebase() turns the draft clean when the edits match the new baseline', () => {
+		const draft = new ProjectDraft(shop());
+		draft.name = 'Same';
+		const theirs = shop();
+		theirs.name = 'Same';
+		const dirty = track(() => draft.dirty);
+		expect(dirty.current()).toBe(true);
+
+		draft.rebase(theirs);
+		flushSync();
+
+		expect(dirty.current()).toBe(false);
 	});
 
 	it('reset() discards the edits and takes the project as the new baseline', () => {

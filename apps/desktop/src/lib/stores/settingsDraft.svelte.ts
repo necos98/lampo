@@ -1,5 +1,5 @@
 import type { Settings } from '../api/index.js';
-import { Baseline } from './baseline.js';
+import { Baseline } from './baseline.svelte.js';
 
 const plain = <V>(v: V): V => JSON.parse(JSON.stringify(v)) as V;
 const validPort = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535;
