@@ -54,12 +54,20 @@ fn key(p: &Path) -> String {
 // Store
 // ---------------------------------------------------------------------------------------------
 
-/// How many times a fake repository was read (each listing or lookup is one read of the store).
+/// How long a held read ([`Reads::hold_next`]) waits for its release before failing the test.
+const HELD_READ_LIMIT: Duration = Duration::from_secs(5);
+
+/// How many times a fake repository was read (each listing or lookup is one read of the store),
+/// and the read to hold, if a test armed one.
 #[derive(Default)]
-pub struct Reads(AtomicUsize);
+pub struct Reads(AtomicUsize, Mutex<Option<HeldRead>>);
 impl Reads {
     fn count(&self) {
         self.0.fetch_add(1, Ordering::SeqCst);
+        let held = lock(&self.1).take();
+        if let Some(held) = held {
+            held.block();
+        }
     }
     pub fn get(&self) -> usize {
         self.0.load(Ordering::SeqCst)
@@ -67,6 +75,37 @@ impl Reads {
     pub fn reset(&self) {
         self.0.store(0, Ordering::SeqCst);
     }
+
+    /// The next read blocks its thread, as a store read waiting on a file Windows holds does,
+    /// until the test releases it through the returned [`ReadHold`].
+    pub fn hold_next(&self) -> ReadHold {
+        let (entered, on_entered) = tokio::sync::oneshot::channel();
+        let (release, released) = std::sync::mpsc::channel();
+        *lock(&self.1) = Some(HeldRead { entered, released });
+        ReadHold { entered: on_entered, release }
+    }
+}
+
+/// The store's side of a held read.
+struct HeldRead {
+    entered: tokio::sync::oneshot::Sender<()>,
+    released: std::sync::mpsc::Receiver<()>,
+}
+impl HeldRead {
+    /// Panics when no release comes within [`HELD_READ_LIMIT`].
+    fn block(self) {
+        // The test may have stopped waiting: the read is held all the same.
+        let _ = self.entered.send(());
+        if self.released.recv_timeout(HELD_READ_LIMIT).is_err() {
+            panic!("the held read was never released: it kept the runtime worker the release runs on");
+        }
+    }
+}
+
+/// The test's side of a held read: `entered` fires once the read blocks, `release` ends it.
+pub struct ReadHold {
+    pub entered: tokio::sync::oneshot::Receiver<()>,
+    pub release: std::sync::mpsc::Sender<()>,
 }
 
 /// The projects that load, plus the files that do not (`unreadable`, set by tests).

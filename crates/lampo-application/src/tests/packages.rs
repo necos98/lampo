@@ -11,6 +11,7 @@ use lampo_domain::vc_runtime::VcRuntime;
 use lampo_domain::tcp_port::Port;
 
 use super::allocation::after_a_locked_commit;
+use super::runtime_workers::completes_while_a_read_is_held;
 use super::{cli, gui};
 use crate::dto::*;
 use crate::error::{AppResult, ErrorCode};
@@ -661,6 +662,17 @@ async fn first_run_installs_what_is_missing_and_is_resumable() {
     k.w.installed.add(PackageKind::PHP, "5.6.40", None);
     let status = setup.status().unwrap();
     assert_eq!(status.items.last().map(|i| (i.kind.as_str(), i.series.as_deref(), i.installed)), Some(("composer", Some("2.2"), false)));
+}
+
+#[test]
+fn first_run_reads_its_items_off_the_runtime_worker() {
+    let k = Kit::new(World::with_basics());
+    let setup = k.first_run(k.w.shim_setup());
+    let hold = k.w.settings.2.hold_next();
+
+    let done = completes_while_a_read_is_held(hold, async move { setup.run(&cli(), &RecordingProgress::default(), &CancelFlag::new()).await });
+
+    assert!(done.unwrap().completed);
 }
 
 #[tokio::test]

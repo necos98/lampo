@@ -23,6 +23,7 @@ use super::service_catalog::ServiceCatalog;
 use super::service_leases::ServiceLease;
 use super::services::ServiceEnsurer;
 use super::support::{lease_mysql, load_project, sync_without_elevation, validation, worktree_dto};
+use crate::blocking::in_place;
 use crate::context::CallContext;
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -239,11 +240,11 @@ impl WorktreeUp {
     /// 7. publish `WorktreesChanged`, sync (never needs elevation).
     pub async fn execute(&self, request: WorktreeUpRequest, ctx: &CallContext, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<WorktreeUpResultDto> {
         let d = &self.deps;
-        let placement = self.place(&request)?;
+        let placement = in_place(|| self.place(&request))?;
         let mode = database_mode_from_dto(&request.database)?;
 
         // `sites`: the registry after the commit, when there was one.
-        let (env, created, sites) = match d.worktrees.find_by_root(&placement.root)? {
+        let (env, created, sites) = match in_place(|| d.worktrees.find_by_root(&placement.root))? {
             Some(existing) => (existing, false, None),
             None => {
                 let server_databases = d.databases.existing_on_instance(&placement.parent, &mode).await?;
@@ -268,7 +269,7 @@ impl WorktreeUp {
         let parent = match sites.as_ref().and_then(|s| s.projects.iter().find(|p| p.id == env.parent)) {
             Some(registered) => registered.clone(),
             None if env.parent == placement.parent.id => placement.parent,
-            None => load_project(d.projects.as_ref(), env.parent.as_str())?,
+            None => in_place(|| load_project(d.projects.as_ref(), env.parent.as_str()))?,
         };
 
         if created {
@@ -282,7 +283,7 @@ impl WorktreeUp {
         }
         let environment = match &sites {
             Some(sites) => d.queries.present_in(&env, &parent, &sites.settings),
-            None => d.queries.present(&env, &parent)?,
+            None => in_place(|| d.queries.present(&env, &parent))?,
         };
         sync_without_elevation(d.env.as_ref(), sites, ctx).await?;
         Ok(WorktreeUpResultDto { environment, created })
@@ -326,7 +327,7 @@ impl WorktreeDown {
     /// Removes the environment; drops its *own* database only if `drop_database` (first, so a
     /// failed drop leaves the environment in place for a retry).
     pub async fn execute(&self, request: WorktreeDownRequest, ctx: &CallContext) -> AppResult<WorktreeDownResultDto> {
-        let env = find_environment(self.worktrees.as_ref(), &request.target)?;
+        let env = in_place(|| find_environment(self.worktrees.as_ref(), &request.target))?;
         let dropped = if request.drop_database { self.databases.drop_owned(&env).await? } else { None };
         self.allocator.write(|| Ok(self.worktrees.delete(&env.parent, &env.slug)?)).await?;
         self.events.publish(DomainEvent::WorktreesChanged { project: env.parent.clone() });

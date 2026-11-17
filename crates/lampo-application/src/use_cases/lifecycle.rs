@@ -17,7 +17,7 @@ use super::claude_code::ClaudeCodeSetup;
 use super::settings_writer::SettingsWriter;
 use super::shims::ShimSetup;
 use super::support::{COMPOSER_LTS_SERIES, installed_php_minors, newest_of};
-use crate::blocking::unblocked;
+use crate::blocking::{in_place, unblocked};
 use crate::context::{CallContext, ElevationPolicy, Origin};
 use crate::dto::{FirstRunItemDto, FirstRunStatusDto, InstallPackageRequest};
 use crate::error::{AppError, AppResult};
@@ -238,7 +238,7 @@ impl FirstRunSetup {
     /// Installs what is missing (a task: progress per item), then syncs once: the installs
     /// themselves do not sync. Resumable: re-running skips installed items.
     pub async fn run(&self, ctx: &CallContext, progress: &dyn ProgressSink, cancel: &CancelFlag) -> AppResult<FirstRunStatusDto> {
-        let missing: Vec<Item> = self.items()?.into_iter().filter(|(_, done)| !done).map(|(i, _)| i).collect();
+        let missing: Vec<Item> = in_place(|| self.items())?.into_iter().filter(|(_, done)| !done).map(|(i, _)| i).collect();
         let total = missing.len() as u64;
         for (n, item) in missing.into_iter().enumerate() {
             cancel.check()?;
@@ -256,6 +256,6 @@ impl FirstRunSetup {
         unblocked("installing the shims", move || shims.install()).await?;
         let completed = self.settings.modify(|current| Ok(Settings { first_run_completed: true, ..current.clone() })).await?;
         self.env.sync_sites(completed.sites, ctx).await?;
-        self.status()
+        in_place(|| self.status())
     }
 }

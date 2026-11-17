@@ -280,9 +280,10 @@ impl ApplyEnvironment {
         runner_for(&self.deps.runners, id.kind()).ok_or_else(|| AppError::new(ErrorCode::Unsupported, format!("no runner is registered for {id}")))
     }
 
-    /// The launch of `id` for the current configuration.
+    /// The launch of `id` for the current configuration. The settings and the installed packages
+    /// are read off the runtime's worker ([`in_place`]): the callers hold the sync lock.
     fn current_launch(&self, id: &ServiceId) -> AppResult<ServiceLaunch> {
-        self.deps.services.launch(id, &self.deps.settings.load()?, &self.deps.installed.list()?, &self.deps.paths)
+        in_place(|| self.deps.services.launch(id, &self.deps.settings.load()?, &self.deps.installed.list()?, &self.deps.paths))
     }
 
     /// `AppUnavailable` once the shutdown gate is closed: the services are being stopped for

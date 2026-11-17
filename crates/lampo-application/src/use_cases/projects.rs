@@ -27,6 +27,7 @@ use super::presets::PresetQueries;
 use super::project_policy::require_mysql_for_database;
 use super::project_writer::{ProjectWriter, RemovedProject};
 use super::support::{load_project, newest_of, package_missing, parse_project_id, project_dto, validation};
+use crate::blocking::{in_place, unblocked};
 use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -227,11 +228,12 @@ impl CreateProject {
     /// leaves the MySQL instance in the state the active projects need.
     pub async fn execute(&self, request: CreateProjectRequest, ctx: &CallContext) -> AppResult<CreateProjectResultDto> {
         let root = existing_folder(self.fs.as_ref(), &request.root)?;
-        let detection = self.detect.execute(root.as_str())?;
+        let (detect, folder) = (self.detect.clone(), root.as_str().to_owned());
+        let detection = unblocked("detecting the project", move || detect.execute(&folder)).await?;
         let name = DisplayName::new(request.name.as_deref().map(str::trim).filter(|n| !n.is_empty()).unwrap_or(&detection.suggested_name))?;
         let requested_id = request.id.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(parse_project_id).transpose()?;
 
-        let preset = self.choose_preset(request.preset_id.as_deref(), detection.preset_id.as_deref())?;
+        let preset = in_place(|| self.choose_preset(request.preset_id.as_deref(), detection.preset_id.as_deref()))?;
         let mut environment = match &request.environment {
             Some(dto) => environment_from_dto(dto)?,
             None => preset.environment.clone(),

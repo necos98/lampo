@@ -15,6 +15,7 @@ mod packages;
 mod php_extension_names;
 mod project_saves;
 mod projects;
+mod runtime_workers;
 mod scaffold;
 mod service_lifecycle;
 mod settings;
