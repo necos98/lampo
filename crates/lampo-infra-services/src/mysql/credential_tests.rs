@@ -1,6 +1,6 @@
-//! The root password in `MysqlDriver`'s `mysqladmin shutdown` fallback, with a fake runner, and
-//! on a real MySQL whose root has a password (ignored by default; needs an extracted MySQL zip,
-//! as `tests/mysql_smoke.rs`):
+//! `MysqlDriver`'s `mysqladmin shutdown` fallback with a fake runner: sent only to the server's
+//! own listener, with the root password. Also on a real MySQL whose root has a password (ignored
+//! by default; needs an extracted MySQL zip, as `tests/mysql_smoke.rs`):
 //!
 //! ```powershell
 //! $env:LAMPO_TEST_MYSQL_DIR = "C:\path\to\mysql-8.4.x-winx64"
@@ -11,11 +11,15 @@
 //! option file and the `mysqladmin shutdown` fallback authenticate; without it they are refused.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use lampo_domain::mysql::DatabaseName;
 use lampo_domain::mysql::credentials::MysqlPassword;
-use lampo_domain::ports::{CommandOutput, DatabaseAdmin, DumpImportOptions, MysqlEndpoint, MysqlRootPasswordWriter, NoMysqlRootPasswords, NullEventPublisher, NullProgressSink};
+use lampo_domain::ports::{
+    ChildId, CommandOutput, DatabaseAdmin, DumpImportOptions, MysqlEndpoint, MysqlRootPasswordWriter, NoMysqlRootPasswords, NullEventPublisher, NullProgressSink, ProcessObserver,
+    SpawnedChild,
+};
 use lampo_domain::progress::CancelFlag;
 
 use super::tests::launch;
@@ -24,7 +28,7 @@ use crate::{DpapiMysqlPasswords, JobObjectSupervisor, MysqlCliAdmin};
 
 /// Spaces, `#`, `;`, quotes and a backslash: everything the option file must carry verbatim.
 const PASSWORD: &str = r"Lampo #1; it's \ fine";
-/// No process has this pid: no shutdown event, so the `mysqladmin` fallback runs.
+/// No process has this pid: no shutdown event, so the `mysqladmin` fallback is the only way.
 const NO_SUCH_PID: u32 = u32::MAX - 3;
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(60);
 
@@ -52,7 +56,7 @@ async fn mysqladmin_shutdown(passwords: Arc<dyn MysqlRootPasswordReader>) -> (Co
     std::fs::write(dir.path().join("bin").join("mysqladmin.exe"), b"").unwrap();
     let commands = Arc::new(RecordingRunner::default());
     let driver = MysqlDriver { commands: commands.clone(), passwords };
-    driver.request_shutdown(&ServiceLaunch { install_dir: dir.path().to_path_buf(), ..launch(MysqlSeries::DEFAULT) }, NO_SUCH_PID).await;
+    driver.request_shutdown(&ServiceLaunch { install_dir: dir.path().to_path_buf(), ..launch(MysqlSeries::DEFAULT) }).await;
     let mut calls = commands.calls.lock().unwrap();
     assert_eq!(calls.len(), 1);
     calls.pop().unwrap()
@@ -76,6 +80,61 @@ async fn mysqladmin_shutdown_reads_the_stored_password_from_a_user_only_option_f
     assert!(!spec.args.iter().any(|a| a.contains("s3cret") || a.starts_with("-p") || a.starts_with("--password")), "{:?}", spec.args);
     assert_eq!(option_file.as_deref(), Some("[client]\npassword=\"s3cret\"\n"));
     assert!(!Path::new(&path).exists(), "deleted once mysqladmin is done");
+}
+
+/// A mysqld that never answers the shutdown event (`NO_SUCH_PID`) and holds the port only if
+/// `owns_port`: otherwise another server (XAMPP, Laragon) took it while ours was recovering.
+struct NeverReadySupervisor {
+    owns_port: bool,
+    alive: AtomicBool,
+}
+
+#[async_trait]
+impl ProcessSupervisor for NeverReadySupervisor {
+    async fn spawn(&self, _spec: CommandSpec, _observer: Arc<dyn ProcessObserver>) -> PortResult<SpawnedChild> {
+        self.alive.store(true, Ordering::SeqCst);
+        Ok(SpawnedChild { id: ChildId(1), pid: NO_SUCH_PID })
+    }
+
+    async fn terminate(&self, _child: ChildId, _grace: Duration) -> PortResult<()> {
+        self.alive.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn is_alive(&self, _child: ChildId) -> bool {
+        self.alive.load(Ordering::SeqCst)
+    }
+
+    fn owns_listener(&self, child: ChildId, _port: Port) -> bool {
+        self.owns_port && self.is_alive(child)
+    }
+}
+
+/// The commands a start that gives up runs to shut its server down.
+async fn commands_of_a_start_that_gives_up(owns_port: bool) -> Vec<CommandSpec> {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("bin")).unwrap();
+    for exe in ["mysqld.exe", "mysqladmin.exe"] {
+        std::fs::write(dir.path().join("bin").join(exe), b"").unwrap();
+    }
+    let commands = Arc::new(RecordingRunner::default());
+    let supervisor = Arc::new(NeverReadySupervisor { owns_port, alive: Default::default() });
+    let runner = MysqlRunner::new(supervisor, commands.clone(), Arc::new(NoMysqlRootPasswords), Arc::new(NullEventPublisher));
+    let launch = ServiceLaunch { install_dir: dir.path().to_path_buf(), port: free_port(), log_dir: dir.path().join("logs"), ..launch(MysqlSeries::DEFAULT) };
+    runner.start(&launch).await.unwrap_err();
+    commands.calls.lock().unwrap().drain(..).map(|(spec, _)| spec).collect()
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_start_that_gives_up_never_sends_mysqladmin_shutdown_to_another_server_on_the_port() {
+    assert_eq!(commands_of_a_start_that_gives_up(false).await, []);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_start_that_gives_up_falls_back_to_mysqladmin_shutdown_on_its_own_listener() {
+    let commands = commands_of_a_start_that_gives_up(true).await;
+    assert_eq!(commands.len(), 1);
+    assert_eq!(commands[0].args.last().map(String::as_str), Some("shutdown"));
 }
 
 fn free_port() -> Port {
@@ -154,7 +213,7 @@ async fn root_password_admin_and_shutdown_authenticate_with_the_stored_password(
     drop(option_file);
 
     // The fallback the shutdown event normally makes unnecessary.
-    runner.driver.request_shutdown(&launch, NO_SUCH_PID).await;
+    runner.driver.request_shutdown(&launch).await;
     wait_until_closed(launch.port).await;
     let log = std::fs::read_to_string(error_log(&launch)).unwrap();
     assert!(log.contains("Received SHUTDOWN from user root"), "not stopped by mysqladmin:\n{log}");

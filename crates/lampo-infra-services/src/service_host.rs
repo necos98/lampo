@@ -251,12 +251,13 @@ impl ServiceHost {
         false
     }
 
-    /// The driver's shutdown request (only when it cannot reach another server), then the
-    /// supervisor's termination of the process tree after `stop_grace`.
+    /// The driver's shutdown signal to the process, else its request through the port (only
+    /// when the port's listener is the child, never another server), then the supervisor's
+    /// termination of the process tree after `stop_grace`.
     async fn shut_down(&self, driver: &dyn ServiceDriver, launch: &ServiceLaunch, child: ChildId, pid: Option<u32>) -> PortResult<()> {
         if let Some(pid) = pid.filter(|_| self.supervisor.is_alive(child)) {
-            if driver.shutdown_addresses_the_process() || self.supervisor.owns_listener(child, launch.port) {
-                driver.request_shutdown(launch, pid).await;
+            if !driver.signal_shutdown(launch, pid).await && self.supervisor.owns_listener(child, launch.port) {
+                driver.request_shutdown(launch).await;
             }
         }
         self.supervisor.terminate(child, driver.stop_grace()).await

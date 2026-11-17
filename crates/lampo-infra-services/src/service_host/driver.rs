@@ -47,14 +47,18 @@ pub trait ServiceDriver: Send + Sync {
     async fn reload(&self, _launch: &ServiceLaunch, _pid: u32) -> bool {
         false
     }
-    /// Asks the process to shut down cleanly (best effort; `terminate` follows).
-    async fn request_shutdown(&self, launch: &ServiceLaunch, pid: u32);
-    /// `request_shutdown` reaches the process by pid, not through `launch.port`: it is safe
-    /// before the service listens and can never hit another server on the port. Otherwise it is
-    /// only sent once the port's listener is the spawned process.
-    fn shutdown_addresses_the_process(&self) -> bool {
+    /// Asks the process itself, by pid, to shut down cleanly (Apache's shutdown event, MySQL's
+    /// `MYSQLShutdown<pid>`): safe before the service listens, it can never reach another server
+    /// on the port. `true`: delivered, [`Self::request_shutdown`] is skipped. Default: no such
+    /// channel.
+    async fn signal_shutdown(&self, _launch: &ServiceLaunch, _pid: u32) -> bool {
         false
     }
+    /// Asks the service to shut down cleanly through `launch.port` (Redis `SHUTDOWN`, `mysqladmin
+    /// shutdown`; best effort, `terminate` follows). Only sent when [`Self::signal_shutdown`] was
+    /// not delivered and the port's listener is the spawned process, never to another server
+    /// that took the port. Default: nothing to send.
+    async fn request_shutdown(&self, _launch: &ServiceLaunch) {}
     /// Remembered before a start (e.g. the error log size) and passed to `failure_lines`.
     fn start_marker(&self, _launch: &ServiceLaunch) -> u64 {
         0

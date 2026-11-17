@@ -6,8 +6,9 @@
 //! crash recovery and data dictionary upgrades can take minutes: the status then reads
 //! `starting` / `recovery`); `stop`, or a start that gives up, asks for a clean InnoDB shutdown
 //! (the `MYSQLShutdown<pid>` event mysqld listens for on Windows, needing no credentials, then
-//! `mysqladmin shutdown` as a fallback, with the stored root password if any) before the
-//! supervisor's forced termination.
+//! `mysqladmin shutdown` as a fallback, with the stored root password if any, only when the port's
+//! listener is our server and not another MySQL that took the port) before the supervisor's
+//! forced termination.
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -157,16 +158,14 @@ impl ServiceDriver for MysqlDriver {
         mysql_greets(launch.port).await
     }
 
-    fn shutdown_addresses_the_process(&self) -> bool {
-        true
-    }
-
-    async fn request_shutdown(&self, launch: &ServiceLaunch, pid: u32) {
+    async fn signal_shutdown(&self, _launch: &ServiceLaunch, pid: u32) -> bool {
         // mysqld 8 on Windows: `pid` may be a monitor process with the server as its child, and
         // a server still recovering does not listen yet: the event is per process, not per port.
-        if crate::win::descendants(pid).into_iter().chain([pid]).any(signal_shutdown_event) {
-            return;
-        }
+        crate::win::descendants(pid).into_iter().chain([pid]).any(signal_shutdown_event)
+    }
+
+    /// The fallback when no shutdown event could be opened.
+    async fn request_shutdown(&self, launch: &ServiceLaunch) {
         let Ok(admin) = find_executable(&launch.install_dir, "mysqladmin.exe") else { return };
         // Unreadable credentials: still worth a try, the account may have no password.
         let option_file = ClientOptionFile::for_instance(self.passwords.as_ref(), &launch.service).unwrap_or_else(|e| {

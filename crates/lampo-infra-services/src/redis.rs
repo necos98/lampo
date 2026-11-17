@@ -67,7 +67,7 @@ impl ServiceDriver for RedisDriver {
         redis_command(launch.port, b"PING\r\n", true).await.is_some_and(|r| r.starts_with("+PONG") || r.starts_with("-NOAUTH"))
     }
 
-    async fn request_shutdown(&self, launch: &ServiceLaunch, _pid: u32) {
+    async fn request_shutdown(&self, launch: &ServiceLaunch) {
         let _ = redis_command(launch.port, b"SHUTDOWN\r\n", false).await;
     }
 }

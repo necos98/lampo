@@ -9,10 +9,11 @@
 //! * The glyph is the orange bolt while at least one service is running, grey otherwise; it
 //!   follows the `service-status` events (Rust-side listener on the same channel as the webview).
 
-use std::collections::HashMap;
+mod glyph;
+
 use std::sync::Mutex;
 
-use lampo_application::dto::ServiceStateDto;
+use glyph::Glyph;
 use lampo_application::events::{names, ServiceStatusPayload};
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem};
@@ -60,43 +61,47 @@ fn tray_icon(running: bool) -> tauri::Result<Image<'static>> {
     Image::from_bytes(if running { ICON_ON } else { ICON_OFF })
 }
 
+/// The tray's [`Glyph`], shared by the status listener and [`redraw`].
+struct TrayGlyph(Mutex<Glyph>);
+
 /// Keeps the last known state of every service and swaps the glyph when "any running" flips.
 fn track_service_status(app: &AppHandle) {
-    let mut initial = HashMap::new();
+    let mut glyph = Glyph::default();
     if let Some(state) = app.try_state::<AppState>() {
         match state.service_queries.list() {
-            Ok(services) => initial.extend(services.into_iter().map(|s| (s.service, s.state))),
+            Ok(services) => services.into_iter().for_each(|s| glyph.record(s.service, s.state)),
             Err(e) => log::debug!("tray: initial service status unavailable: {e:?}"),
         }
     }
-    let running = any_running(&initial);
-    set_running(app, running);
-    let states = Mutex::new((initial, running));
+    app.manage(TrayGlyph(Mutex::new(glyph)));
+    redraw(app);
     let shutdown_gate = app.try_state::<AppState>().map(|state| state.shutdown.gate());
 
     let handle = app.clone();
     app.listen_any(names::SERVICE_STATUS, move |event| {
-        // While the app goes away the main thread may be blocked waiting for the services to
-        // stop (`orderly_exit`): an icon change, run on the main thread, would never return.
-        if shutdown_gate.as_ref().is_some_and(|gate| gate.is_closed()) {
-            return;
-        }
         let Ok(payload) = serde_json::from_str::<ServiceStatusPayload>(event.payload()) else {
             return;
         };
-        let Ok(mut guard) = states.lock() else { return };
-        let (map, shown) = &mut *guard;
-        map.insert(payload.service, payload.state);
-        let running = any_running(map);
-        if running != *shown {
-            *shown = running;
-            set_running(&handle, running);
+        let Some(tray) = handle.try_state::<TrayGlyph>() else { return };
+        tray.0.lock().unwrap_or_else(|p| p.into_inner()).record(payload.service, payload.state);
+        // While the app goes away the main thread may be blocked waiting for the services to
+        // stop (`orderly_exit`): an icon change, run on the main thread, would never return. The
+        // state is recorded anyway, for the redraw once the gate reopens (a cancelled update).
+        if !shutdown_gate.as_ref().is_some_and(|gate| gate.is_closed()) {
+            redraw(&handle);
         }
     });
 }
 
-fn any_running(states: &HashMap<String, ServiceStateDto>) -> bool {
-    states.values().any(|s| *s == ServiceStateDto::Running)
+/// Draws the glyph the recorded service states call for, unless it is on screen already. Called
+/// on every status change and after the shutdown gate reopens; never while it is closed.
+pub fn redraw(app: &AppHandle) {
+    let Some(tray) = app.try_state::<TrayGlyph>() else { return };
+    // Drawn under the lock: concurrent redraws cannot leave an older glyph on screen.
+    let mut glyph = tray.0.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(running) = glyph.redraw() {
+        set_running(app, running);
+    }
 }
 
 fn set_running(app: &AppHandle, running: bool) {

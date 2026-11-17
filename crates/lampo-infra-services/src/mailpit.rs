@@ -86,8 +86,6 @@ impl ServiceDriver for MailpitDriver {
     async fn probe(&self, launch: &ServiceLaunch) -> bool {
         smtp_greeting(launch.port).await.is_some_and(|g| g.starts_with("220")) && accepts(launch.ui_port.unwrap_or(DEFAULT_UI_PORT)).await
     }
-
-    async fn request_shutdown(&self, _launch: &ServiceLaunch, _pid: u32) {}
 }
 
 pub struct MailpitRunner {

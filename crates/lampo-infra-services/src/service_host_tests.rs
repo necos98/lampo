@@ -64,6 +64,8 @@ struct FakeDriver {
     grows_for: Option<Duration>,
     /// Whether `reload` applies a new configuration in place.
     reloads: bool,
+    /// Whether the process answers `signal_shutdown` (MySQL: its `MYSQLShutdown<pid>` event).
+    signal_delivered: bool,
     calls: Calls,
 }
 
@@ -103,13 +105,14 @@ impl ServiceDriver for FakeDriver {
         self.reloads
     }
 
-    async fn request_shutdown(&self, _launch: &ServiceLaunch, pid: u32) {
+    async fn signal_shutdown(&self, _launch: &ServiceLaunch, pid: u32) -> bool {
         assert_eq!(pid, PID);
-        self.calls.lock().unwrap().push("request_shutdown");
+        self.calls.lock().unwrap().push("signal_shutdown");
+        self.signal_delivered
     }
 
-    fn shutdown_addresses_the_process(&self) -> bool {
-        true
+    async fn request_shutdown(&self, _launch: &ServiceLaunch) {
+        self.calls.lock().unwrap().push("request_shutdown");
     }
 }
 
@@ -155,7 +158,7 @@ fn fixture(grows_for: Option<Duration>, listen_after: Option<Duration>) -> Fixtu
     let supervisor = Arc::new(FakeSupervisor { t0, listen_after, alive: AtomicBool::new(false), observer: Mutex::default(), calls: calls.clone() });
     let statuses = Arc::new(Statuses::default());
     let host = ServiceHost::new(supervisor.clone(), statuses.clone());
-    Fixture { _dir: dir, launch, host, supervisor, driver: FakeDriver { t0, grows_for, reloads: false, calls: calls.clone() }, statuses, calls, t0 }
+    Fixture { _dir: dir, launch, host, supervisor, driver: FakeDriver { t0, grows_for, reloads: false, signal_delivered: true, calls: calls.clone() }, statuses, calls, t0 }
 }
 
 impl Fixture {
@@ -191,7 +194,7 @@ async fn a_start_without_progress_gives_up_at_the_timeout_asking_for_a_clean_shu
     let err = f.host.start(&f.driver, &f.launch).await.unwrap_err();
     assert!(err.to_string().contains("within 10s"), "{err}");
     assert!(f.t0.elapsed() < TIMEOUT + Duration::from_secs(1));
-    assert_eq!(f.calls(), ["request_shutdown", "terminate"]);
+    assert_eq!(f.calls(), ["signal_shutdown", "terminate"]);
     assert_eq!(f.state(), ServiceState::Failed);
 }
 
@@ -202,7 +205,7 @@ async fn progress_that_stops_ends_the_start_one_timeout_later() {
     let elapsed = f.t0.elapsed();
     assert!(elapsed >= Duration::from_secs(40) && elapsed < Duration::from_secs(41), "{elapsed:?}");
     assert!(err.to_string().contains("within 40s"), "{err}");
-    assert_eq!(f.calls(), ["request_shutdown", "terminate"]);
+    assert_eq!(f.calls(), ["signal_shutdown", "terminate"]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -216,8 +219,26 @@ async fn a_stop_during_a_slow_start_shuts_the_server_down_cleanly() {
     assert_eq!(started, Err(PortError::Cancelled));
     stopped.unwrap();
     assert!(f.t0.elapsed() < Duration::from_secs(31), "the stop did not wait for the start to time out");
-    assert_eq!(f.calls(), ["request_shutdown", "terminate"]);
+    assert_eq!(f.calls(), ["signal_shutdown", "terminate"]);
     assert_eq!(f.state(), ServiceState::Stopped);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_undelivered_signal_never_sends_the_port_request_to_a_listener_that_is_not_ours() {
+    // Ours is still recovering, another server took the port meanwhile.
+    let mut f = fixture(None, None);
+    f.driver.signal_delivered = false;
+    f.host.start(&f.driver, &f.launch).await.unwrap_err();
+    assert_eq!(f.calls(), ["signal_shutdown", "terminate"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_undelivered_signal_falls_back_to_the_port_request_on_our_own_listener() {
+    let mut f = fixture(None, Some(Duration::ZERO));
+    f.driver.signal_delivered = false;
+    f.host.start(&f.driver, &f.launch).await.unwrap();
+    f.host.stop(&f.driver, &f.launch.service).await.unwrap();
+    assert_eq!(f.calls(), ["signal_shutdown", "request_shutdown", "terminate"]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -236,7 +257,7 @@ async fn a_restart_without_reload_stops_and_starts() {
     let f = fixture(None, Some(Duration::ZERO));
     f.host.start(&f.driver, &f.launch).await.unwrap();
     f.host.restart(&f.driver, &f.launch).await.unwrap();
-    assert_eq!(f.calls(), ["reload", "request_shutdown", "terminate"]);
+    assert_eq!(f.calls(), ["reload", "signal_shutdown", "terminate"]);
     assert_eq!(f.state(), ServiceState::Running);
 }
 

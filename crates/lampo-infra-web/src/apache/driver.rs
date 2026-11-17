@@ -85,12 +85,8 @@ impl ServiceDriver for ApacheDriver {
         self.signal(pid, HttpdSignal::Restart)
     }
 
-    async fn request_shutdown(&self, _launch: &ServiceLaunch, pid: u32) {
-        self.signal(pid, HttpdSignal::Shutdown);
-    }
-
-    fn shutdown_addresses_the_process(&self) -> bool {
-        true
+    async fn signal_shutdown(&self, _launch: &ServiceLaunch, pid: u32) -> bool {
+        self.signal(pid, HttpdSignal::Shutdown)
     }
 
     fn is_port_conflict(&self, line: &str) -> bool {

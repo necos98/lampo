@@ -23,11 +23,13 @@ pub async fn prepare_update(state: State<'_, AppState>) -> AppResult<()> {
     state.shutdown.run().await
 }
 
-/// The update could not start after [`prepare_update`]: accept requests again and bring the
-/// services back to the configured state.
+/// The update could not start after [`prepare_update`]: accept requests again, show in the tray
+/// the stops it made while the glyph could not change, and bring the services back to the
+/// configured state.
 #[tauri::command]
-pub async fn cancel_update(state: State<'_, AppState>) -> AppResult<()> {
+pub async fn cancel_update(app: AppHandle, state: State<'_, AppState>) -> AppResult<()> {
     state.shutdown.cancel();
+    crate::tray::redraw(&app);
     state.startup.run().await
 }
 
