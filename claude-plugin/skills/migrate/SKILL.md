@@ -31,6 +31,13 @@ Collect, from the project and the source environment (the reference says where t
 | Web server rules | `.htaccess` (works as is), nginx `location` blocks, Apache vhost directives |
 | Hostname | `shop.test` and the like (the source's hosts entries) |
 
+From Docker, add one explicit pass: **container hostnames in the code**. `http://<service>/`,
+`DB_HOST=mysql`, `REDIS_HOST=redis` and the like are the longest part of any Docker migration.
+Search code, config and every `.env*` file for each compose service name
+(`Select-String -Path .\* -Recurse -Pattern '<service>'`) and list every hit; they become
+`127.0.0.1` or Lampo's addresses in step 5. Also read the compose `environment:` blocks: they
+override `.env` inside the container.
+
 Then ask Lampo what it sees in the folder, without registering anything:
 
 ```powershell
@@ -42,8 +49,8 @@ Docker image), `suggestedId`, `evidence`, `services` (from a compose file: `mysq
 `mailpit` for a Mailpit or MailHog container),
 `warnings` (what Lampo cannot provide or replaces: PostgreSQL, MariaDB, MailHog, search engines) and
 `alreadyRegistered` (an id: the folder is a Lampo project already, do not create it again).
-Compare it with your inventory: where they differ, your inventory wins and you pass `--php` /
-`--preset` in step 3. `lampo project list` and `lampo status` show what Lampo already knows.
+With several PHP apps in one compose file it also returns `apps` (see docker.md). Compare it with
+your inventory: where they differ, your inventory wins and you pass `--php` / `--preset` in step 3. `lampo project list` and `lampo status` show what Lampo already knows.
 Write the inventory down for the user in a short table before changing anything.
 
 ## Step 2: compatibility check
@@ -52,6 +59,7 @@ Write the inventory down for the user in a short table before changing anything.
 |------------|----------|
 | PHP 5.6 to the newest | supported, per project (`lampo package install php <x.y>`) |
 | MySQL 5.7 / 8.x | MySQL 8.4 (default) or 5.7; 8.0 dumps import into 8.4 |
+| PHP 7.3 or older with MySQL 8.4 | Lampo moves that project's MySQL account to `mysql_native_password` and warns (`detect`, `doctor`); MySQL 5.7 is the alternative |
 | MariaDB | not available: the project gets MySQL. Dumps usually import; check the caveats below |
 | PostgreSQL | **not supported**. Stop here (see below) |
 | Redis / Valkey | Redis, optional per project |
@@ -95,7 +103,9 @@ lampo project create C:\laragon\www\shop --php 8.2 --activate
 ```
 
 Add `--preset legacy` for old PHP/MySQL 5.7 projects, `--no-database` if the database will not
-move. The JSON result gives the URL and `databaseSetup` (the new, empty database `shop`).
+move, `--addressing hosts-only` (needs `--allow-elevation`) for a hostname-only address.
+Correct the PHP of an existing project with `lampo project set shop --php 8.2`. Extension names
+are mapped to the PHP's build (`gd` is `gd2` before PHP 8.0): pass either. The JSON result gives the URL and `databaseSetup` (the new, empty database `shop`).
 
 Then reproduce what the inventory found and the preset lacks, in one call (add-ons need
 `lampo package install xdebug --php 8.2` first; nginx rules translated to Apache go in
@@ -129,7 +139,11 @@ project (Sail) copy them too.
 ## Step 5: update `.env`
 
 Copy the current `.env` to the backup folder, then change only the connection lines (database,
-Redis, mail host and port, `APP_URL`) to the values of `lampo agent context --json`. Typical changes:
+Redis, mail host and port, `APP_URL`) to the values of `lampo agent context --json`. Replace every container hostname found
+in step 1, not only in `.env`: base URLs (`http://api/`), config files, tests, front-end code.
+Then carry over the compose `environment:` values that differ from `.env` (real case:
+`DB_DATABASE=laravel` in the compose, another name in `.env`): write them in `.env`, or set them
+for the site with `lampo project set shop --env DB_DATABASE=shop`. Typical changes:
 `DB_HOST=mysql` / `DB_HOST=db` -> `127.0.0.1`, `DB_USERNAME=sail` -> `root`, empty
 `DB_PASSWORD`, `REDIS_HOST=redis` -> `127.0.0.1`, `MAIL_HOST=mailpit` / `mailhog` -> `127.0.0.1`
 with `MAIL_PORT` = `mail.smtpPort` (1025) and no `MAIL_USERNAME` / `MAIL_PASSWORD` /
@@ -157,6 +171,9 @@ project's `.env` (`DB_PORT`). Then:
 lampo up
 lampo doctor
 ```
+
+After uninstalling Laragon or Docker Desktop, run `lampo doctor` again: their uninstallers can
+stop Lampo's services (the `services` check reports them; `lampo up` starts them again).
 
 Also check that the old PHP is not first on PATH (`where.exe php`, doctor `path-shadowing`):
 report it; do not edit PATH yourself.

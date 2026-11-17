@@ -100,6 +100,11 @@ Docker and point `.env` at their published port (`127.0.0.1:<host port>`).
   folder (`lampo project new --git <url> --in C:\sites`) or copy it (with the user's agreement,
   for uncommitted work), then run `composer install` and `npm ci` again on Windows (`vendor`
   and `node_modules` built in Linux contain Linux binaries).
+- Copying from WSL: `robocopy \\wsl.localhost\<distro>\home\<user>\shop C:\sites\shop /E /MT:32`
+  was about 50 times faster than `rsync` inside WSL (`/XD node_modules vendor` skips what is
+  rebuilt). Linux symlinks arrive on Windows as junctions: check them (see laragon.md) and
+  recreate the ones the app needs; Composer `path` packages in `vendor/` come back with
+  `composer install`.
 - `./vendor/bin/sail` commands are not needed afterwards: `php artisan ...` with Lampo's shims.
 
 ## Export the database
@@ -136,6 +141,10 @@ needs them: `docker compose stop laravel.test mysql redis mailpit` stops only th
 (the Mailpit container must stop too: it holds ports 1025/8025).
 
 ## `.env` changes (after a backup)
+
+Container hostnames are also in code and config, not only in `.env`: replace every hit of the
+inventory pass. The compose `environment:` overrides `.env` in the container, so carry those
+values over too (`.env`, or `lampo project set shop --env KEY=VALUE`).
 
 `DB_HOST=127.0.0.1`, `DB_PORT` from Lampo, `DB_USERNAME=root`, `DB_PASSWORD=` (empty),
 `DB_DATABASE` = the Lampo database, `REDIS_HOST=127.0.0.1`, `APP_URL` = the Lampo URL,

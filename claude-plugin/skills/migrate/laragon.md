@@ -54,6 +54,14 @@ Laragon's `shop.test` keeps pointing at Laragon; Lampo serves `http://shop.local
 own port. Do not reuse the `.test` name in Lampo (`--hosts-name`) while Laragon's hosts entries
 exist: they would clash.
 
+Junctions: Laragon's junctions with an absolute path keep pointing at the old folder after the
+project moves (also the Linux symlinks that reached Windows as junctions). List them and recreate
+each with its new target:
+
+```powershell
+Get-ChildItem C:\sites\shop -Recurse -Attributes ReparsePoint -ErrorAction SilentlyContinue | Select-Object FullName, Target
+```
+
 ## Export the database
 
 With Laragon's MySQL running (Laragon "Start All", or ask the user to start it), using its own
