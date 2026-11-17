@@ -81,8 +81,8 @@ AccessFileName .htaccess
 FcgidMaxProcesses {{ main.fcgid.max_processes }}
 FcgidMaxProcessesPerClass {{ main.fcgid.max_processes_per_class }}
 FcgidMinProcessesPerClass {{ main.fcgid.min_processes_per_class }}
-FcgidIdleTimeout {{ main.fcgid.idle_timeout_secs }}
-FcgidIdleScanInterval {{ main.fcgid.idle_scan_interval_secs }}
+FcgidIdleTimeout {{ main.idle.timeout_secs }}
+FcgidIdleScanInterval {{ main.idle.scan_interval_secs }}
 FcgidProcessLifeTime {{ main.fcgid.process_lifetime_secs }}
 FcgidMaxRequestsPerProcess {{ main.fcgid.max_requests_per_process }}
 # Long Xdebug step-debugging sessions and slow scripts must not be cut off.

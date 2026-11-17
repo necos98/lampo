@@ -9,7 +9,7 @@
 	import { messages as m } from '#lib/messages/index.js';
 	import { ADDRESSING_MODES } from '#lib/projects/addressing.js';
 	import { packages } from '#lib/stores/index.js';
-	import type { SettingsDraft } from '#lib/stores/settingsDraft.svelte.js';
+	import { PHP_IDLE_TIMEOUT_SECS, type SettingsDraft } from '#lib/stores/settingsDraft.svelte.js';
 
 	let { draft }: { draft: SettingsDraft } = $props();
 	const t = m.settings;
@@ -54,5 +54,25 @@
 <FormRow label={t.autoRestart} help={t.autoRestartHelp}>
 	{#snippet children(field)}
 		<Switch {...field} bind:checked={draft.value.autoRestartServices} />
+	{/snippet}
+</FormRow>
+
+<h2 class="mt-5 mb-1 text-sm font-medium">{t.phpProcesses}</h2>
+<FormRow label={t.phpIdleTimeout} help={draft.phpIdleTimeoutValid ? t.phpIdleTimeoutHelp : t.phpIdleTimeoutInvalid(PHP_IDLE_TIMEOUT_SECS.min, PHP_IDLE_TIMEOUT_SECS.max)}>
+	{#snippet children(field)}
+		<div class="flex items-center gap-2">
+			<Input
+				{...field}
+				type="number"
+				min={PHP_IDLE_TIMEOUT_SECS.min}
+				max={PHP_IDLE_TIMEOUT_SECS.max}
+				step="1"
+				class="h-8 w-24 font-mono text-xs"
+				value={draft.value.phpIdleTimeoutSecs}
+				oninput={(e) => (draft.value.phpIdleTimeoutSecs = e.currentTarget.valueAsNumber)}
+				aria-invalid={!draft.phpIdleTimeoutValid}
+			/>
+			<span class="text-xs text-muted-foreground">{t.phpIdleTimeoutUnit}</span>
+		</div>
 	{/snippet}
 </FormRow>

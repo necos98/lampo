@@ -75,6 +75,7 @@ pub(crate) mod tests_support {
 
     use lampo_domain::hostname::Hostname;
     use lampo_domain::project::{ApacheDirectives, ProjectEnvVars, TlsMode};
+    use lampo_domain::php_idle_timeout::PhpIdleTimeout;
     use lampo_domain::site::SiteId;
     use lampo_domain::tcp_port::Port;
     use lampo_domain::web::{VirtualHost, WebServerConfig};
@@ -115,6 +116,7 @@ pub(crate) mod tests_support {
             config_dir: PathBuf::from(r"C:\Lampo Data\generated\apache"),
             log_dir: PathBuf::from(r"C:\Lampo Data\logs\apache"),
             vhosts: vec![legacy, shop, worktree],
+            php_idle_timeout: PhpIdleTimeout::DEFAULT,
         }
     }
 

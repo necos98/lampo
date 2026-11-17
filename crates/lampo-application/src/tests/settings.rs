@@ -112,6 +112,21 @@ async fn the_automatic_restart_is_switched_off_without_a_sync() {
 }
 
 #[tokio::test]
+async fn the_php_idle_timeout_regenerates_apache_and_restarts_it() {
+    let w = served().await;
+    assert_eq!(w.web.last().unwrap().php_idle_timeout.secs(), 120, "the default");
+
+    let request = SettingsPatchRequest { php_idle_timeout_secs: Some(900), ..Default::default() };
+    let result = w.patch_settings().execute(request, &cli()).await.unwrap();
+    assert_eq!(result.settings.php_idle_timeout_secs, 900);
+    let changes: Vec<(&str, &str, &str)> = result.changes.iter().map(|c| (c.setting.as_str(), c.from.as_str(), c.to.as_str())).collect();
+    assert_eq!(changes, [("php-idle-timeout", "120s", "900s")]);
+    assert_eq!(w.settings.load().unwrap().php_idle_timeout.secs(), 900);
+    assert_eq!(w.web.last().unwrap().php_idle_timeout.secs(), 900, "the Apache configuration is regenerated");
+    assert_eq!(result.sync.restarted, ["apache"], "Apache restarts to read it");
+}
+
+#[tokio::test]
 async fn unchanged_values_are_a_no_op_without_a_sync() {
     let w = served().await;
     let before = w.events.all().len();
@@ -138,6 +153,8 @@ async fn invalid_patches_are_rejected_and_nothing_is_saved() {
         (SettingsPatchRequest { service_ports: ports(&[("my_sql", 1)]), ..Default::default() }, ErrorCode::Validation, "invalid service id"),
         (SettingsPatchRequest { apache_port: Some(0), ..Default::default() }, ErrorCode::Validation, "invalid port 0"),
         (SettingsPatchRequest { service_ports: ports(&[("redis", 8101)]), ..Default::default() }, ErrorCode::Conflict, "site `shop`"),
+        (SettingsPatchRequest { php_idle_timeout_secs: Some(29), ..Default::default() }, ErrorCode::Validation, "30-3600 seconds"),
+        (SettingsPatchRequest { php_idle_timeout_secs: Some(3601), ..Default::default() }, ErrorCode::Validation, "30-3600 seconds"),
     ];
     for (request, code, needle) in cases {
         let e = patch.execute(request.clone(), &cli()).await.unwrap_err();
@@ -243,6 +260,19 @@ async fn gui_save_sets_the_automatic_restart() {
     dto.auto_restart_services = false;
     assert!(!w.settings_service().update(dto, &gui()).await.unwrap().auto_restart_services);
     assert!(!w.settings.load().unwrap().auto_restart_services);
+}
+
+#[tokio::test]
+async fn gui_save_sets_the_php_idle_timeout_within_its_range() {
+    let w = World::with_basics();
+    let mut dto = w.settings_service().get().unwrap();
+    assert_eq!(dto.php_idle_timeout_secs, 120, "the default");
+    dto.php_idle_timeout_secs = 0;
+    assert_gui_save_refused(&w, dto.clone(), ErrorCode::Validation, "30-3600 seconds").await;
+
+    dto.php_idle_timeout_secs = 1800;
+    assert_eq!(w.settings_service().update(dto, &gui()).await.unwrap().php_idle_timeout_secs, 1800);
+    assert_eq!(w.settings.load().unwrap().php_idle_timeout.secs(), 1800);
 }
 
 #[tokio::test]

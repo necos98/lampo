@@ -869,7 +869,12 @@ defaultAddressing: Addressing,
  * New projects get a dedicated MySQL account (`lampo_<id>`, granted only their databases)
  * instead of root. Existing projects keep theirs until switched one by one.
  */
-mysqlProjectCredentials: boolean, };
+mysqlProjectCredentials: boolean, 
+/**
+ * Seconds a site's idle php-cgi.exe stays alive (30-3600, default 120): longer keeps RAM
+ * busy, shorter means more cold starts.
+ */
+phpIdleTimeoutSecs: number, };
 
 // --- Diagnostics and shims ---
 

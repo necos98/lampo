@@ -837,7 +837,7 @@ pub enum SettingsCommand {
 }
 
 #[derive(Debug, Args)]
-#[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args(["apache_port", "mysql_port", "redis_port", "port", "ui_port", "default_php", "loopback_range", "default_addressing", "auto_restart", "project_credentials"])))]
+#[command(group(clap::ArgGroup::new("change").required(true).multiple(true).args(["apache_port", "mysql_port", "redis_port", "port", "ui_port", "default_php", "loopback_range", "default_addressing", "auto_restart", "project_credentials", "php_idle_timeout"])))]
 pub struct SettingsSetArgs {
     /// Apache's shared port (host-name URLs use it; loopback-port URLs keep their own port).
     #[arg(long, value_name = "PORT", value_parser = clap::value_parser!(u16).range(1..))]
@@ -877,6 +877,11 @@ pub struct SettingsSetArgs {
     /// `lampo project set --mysql-credentials`.
     #[arg(long, value_name = "ON|OFF", value_parser = clap::builder::BoolishValueParser::new())]
     pub project_credentials: Option<bool>,
+    /// Seconds a site's PHP process stays alive without requests (30-3600, default 120). Longer
+    /// keeps its RAM busy but avoids the cold start (about a second) of the next visit. Apache
+    /// restarts to apply it.
+    #[arg(long, value_name = "SECONDS")]
+    pub php_idle_timeout: Option<u32>,
 }
 
 #[cfg(test)]

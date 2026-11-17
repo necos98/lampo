@@ -97,6 +97,7 @@ lampo package uninstall php 8.2 --yes # rimuove un pacchetto non più usato
 lampo settings                        # impostazioni globali: porte, PHP predefinito
 lampo settings set --apache-port 8080 --mysql-port 8.4=3310   # cambia le porte (riavvia i servizi)
 lampo settings set --project-credentials off   # i nuovi progetti usano root invece di un utente proprio
+lampo settings set --php-idle-timeout 600      # PHP di un sito resta vivo 10 minuti senza visite (30-3600, predefinito 120)
 lampo worktree up --db clone:shop     # ambiente per il git worktree corrente
 lampo exec -- composer install        # comando con il PHP e il Composer del progetto
 lampo which php                       # quale PHP (o composer, mysql...) userebbe lo shim qui, e perché

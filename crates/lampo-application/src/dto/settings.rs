@@ -52,6 +52,9 @@ pub struct SettingsDto {
     /// New projects get a dedicated MySQL account (`lampo_<id>`, granted only their databases)
     /// instead of root. Existing projects keep theirs until switched one by one.
     pub mysql_project_credentials: bool,
+    /// Seconds a site's idle php-cgi.exe stays alive (30-3600, default 120): longer keeps RAM
+    /// busy, shorter means more cold starts.
+    pub php_idle_timeout_secs: u32,
 }
 
 /// A registered kind of service, so front-ends offer what the backend knows (no hard-coded
@@ -93,6 +96,8 @@ pub struct SettingsPatchRequest {
     pub auto_restart_services: Option<bool>,
     /// Whether new projects get a dedicated MySQL account.
     pub mysql_project_credentials: Option<bool>,
+    /// Seconds a site's idle php-cgi.exe stays alive (30-3600).
+    pub php_idle_timeout_secs: Option<u32>,
 }
 
 impl SettingsPatchRequest {
@@ -102,7 +107,8 @@ impl SettingsPatchRequest {
 }
 
 /// One changed setting: `setting` is `apache.port`, `<service>.port` (`mysql-8.4.port`), `<service>.ui-port` (`mailpit.ui-port`),
-/// `default-php`, `loopback-port-range`, `default-addressing`, `auto-restart` or `project-credentials`; `from`/`to` are display values.
+/// `default-php`, `loopback-port-range`, `default-addressing`, `auto-restart`, `project-credentials` or `php-idle-timeout`; `from`/`to` are
+/// display values.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingChangeDto {

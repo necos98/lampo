@@ -4,6 +4,9 @@ import { Baseline } from './baseline.svelte.js';
 const plain = <V>(v: V): V => JSON.parse(JSON.stringify(v)) as V;
 const validPort = (p: number) => Number.isInteger(p) && p >= 1 && p <= 65535;
 
+/** Seconds an idle PHP process may live: the backend's `PhpIdleTimeout` range and default. */
+export const PHP_IDLE_TIMEOUT_SECS = { min: 30, max: 3600, default: 120 } as const;
+
 /** Editable copy of the global settings. */
 export class SettingsDraft {
 	value = $state<Settings>({
@@ -16,7 +19,8 @@ export class SettingsDraft {
 		autoRestartServices: true,
 		mysqlProjectCredentials: true,
 		firstRunCompleted: false,
-		defaultAddressing: 'no-elevation'
+		defaultAddressing: 'no-elevation',
+		phpIdleTimeoutSecs: PHP_IDLE_TIMEOUT_SECS.default
 	});
 
 	#baseline = new Baseline();
@@ -49,9 +53,14 @@ export class SettingsDraft {
 		return Number.isInteger(start) && Number.isInteger(end) && start >= 1024 && end <= 65535 && start < end;
 	}
 
+	get phpIdleTimeoutValid(): boolean {
+		const secs = this.value.phpIdleTimeoutSecs;
+		return Number.isInteger(secs) && secs >= PHP_IDLE_TIMEOUT_SECS.min && secs <= PHP_IDLE_TIMEOUT_SECS.max;
+	}
+
 	get valid(): boolean {
 		const v = this.value;
-		return this.rangeValid && v.tld.trim().length > 0 && validPort(v.apachePort) && v.services.every((i) => validPort(i.port) && (i.uiPort == null || validPort(i.uiPort)));
+		return this.rangeValid && this.phpIdleTimeoutValid && v.tld.trim().length > 0 && validPort(v.apachePort) && v.services.every((i) => validPort(i.port) && (i.uiPort == null || validPort(i.uiPort)));
 	}
 
 	toSettings(): Settings {

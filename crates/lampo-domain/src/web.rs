@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::address::SiteAddress;
 use crate::hostname::Hostname;
 use crate::php::{ExtensionName, PhpIniOverrides, PhpMinor};
+use crate::php_idle_timeout::PhpIdleTimeout;
 use crate::project::{ApacheDirectives, ProjectEnvVars, TlsMode};
 use crate::site::SiteId;
 use crate::tcp_port::Port;
@@ -49,6 +50,8 @@ pub struct WebServerConfig {
     pub log_dir: PathBuf,
     /// Active projects and every worktree environment, sorted by site id.
     pub vhosts: Vec<VirtualHost>,
+    /// How long a site's idle php-cgi.exe stays alive (`Settings::php_idle_timeout`).
+    pub php_idle_timeout: PhpIdleTimeout,
 }
 
 impl WebServerConfig {

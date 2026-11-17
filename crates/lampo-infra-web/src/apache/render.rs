@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+use lampo_domain::php_idle_timeout::PhpIdleTimeout;
 use lampo_domain::project::{ApacheDirectives, TlsMode};
 use lampo_domain::tcp_port::Port;
 use lampo_domain::web::{VirtualHost, WebServerConfig};
@@ -21,13 +22,15 @@ pub const VHOSTS_DIR: &str = "vhosts";
 
 /// mod_fcgid process management and limits. Defaults favour low idle RAM (no process kept
 /// alive without traffic) and development workloads (long debugging pauses, large uploads).
+/// The idle timeout is a user setting: it comes with the config
+/// (`WebServerConfig::php_idle_timeout`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FcgidTuning {
     pub max_processes: u32,
     pub max_processes_per_class: u32,
     /// 0: a site with no traffic keeps no php-cgi.exe alive.
     pub min_processes_per_class: u32,
-    pub idle_timeout_secs: u32,
+    /// How often idle processes are looked for; never more than the idle timeout.
     pub idle_scan_interval_secs: u32,
     pub process_lifetime_secs: u32,
     /// Also passed to PHP as `PHP_FCGI_MAX_REQUESTS` (must be ≥ this value, see mod_fcgid docs).
@@ -45,7 +48,6 @@ impl Default for FcgidTuning {
             max_processes: 64,
             max_processes_per_class: 8,
             min_processes_per_class: 0,
-            idle_timeout_secs: 120,
             idle_scan_interval_secs: 30,
             process_lifetime_secs: 3600,
             max_requests_per_process: 1000,
@@ -165,6 +167,22 @@ struct MainView {
     error_log: String,
     threads_per_child: u32,
     fcgid: FcgidTuning,
+    idle: FcgidIdle,
+}
+
+/// `FcgidIdleTimeout` and `FcgidIdleScanInterval`: the configured timeout, scanned for at least
+/// that often (a scan interval longer than the timeout would keep processes alive past it).
+#[derive(Debug, PartialEq, Eq, Serialize)]
+struct FcgidIdle {
+    timeout_secs: u32,
+    scan_interval_secs: u32,
+}
+
+impl FcgidIdle {
+    fn new(timeout: PhpIdleTimeout, preferred_scan_interval_secs: u32) -> Self {
+        let timeout_secs = timeout.secs();
+        Self { timeout_secs, scan_interval_secs: preferred_scan_interval_secs.min(timeout_secs) }
+    }
 }
 
 #[derive(Serialize)]
@@ -269,6 +287,7 @@ impl ApacheConfigRenderer {
             error_log: quoted(&format!("{log_dir}/error.log")),
             threads_per_child: self.options.threads_per_child,
             fcgid: self.options.fcgid.clone(),
+            idle: FcgidIdle::new(config.php_idle_timeout, self.options.fcgid.idle_scan_interval_secs),
             server_root,
         };
         self.env.get_template("httpd.conf").and_then(|t| t.render(minijinja::context! { main => view })).map_err(render_error)
@@ -446,6 +465,34 @@ mod tests {
         opts.ipv6_loopback = false;
         let main = ApacheConfigRenderer::new(opts).render_main(&sample_config()).unwrap();
         assert!(!main.contains("[::1]"));
+    }
+
+    fn fcgid_idle_lines(main: &str) -> Vec<&str> {
+        main.lines().filter(|l| l.starts_with("FcgidIdle")).collect()
+    }
+
+    #[test]
+    fn php_processes_idle_for_two_minutes_by_default() {
+        let main = &render(&sample_config())[0].1;
+        assert_eq!(fcgid_idle_lines(main), ["FcgidIdleTimeout 120", "FcgidIdleScanInterval 30"]);
+    }
+
+    #[test]
+    fn php_idle_timeout_comes_from_the_config() {
+        let mut config = sample_config();
+        config.php_idle_timeout = PhpIdleTimeout::new(900).unwrap();
+        let main = &render(&config)[0].1;
+        assert_eq!(fcgid_idle_lines(main), ["FcgidIdleTimeout 900", "FcgidIdleScanInterval 30"]);
+    }
+
+    #[test]
+    fn idle_scan_interval_never_exceeds_the_timeout() {
+        let mut opts = sample_options();
+        opts.fcgid.idle_scan_interval_secs = 600;
+        let mut config = sample_config();
+        config.php_idle_timeout = PhpIdleTimeout::new(PhpIdleTimeout::MIN_SECS).unwrap();
+        let main = ApacheConfigRenderer::new(opts).render_main(&config).unwrap();
+        assert_eq!(fcgid_idle_lines(&main), ["FcgidIdleTimeout 30", "FcgidIdleScanInterval 30"]);
     }
 
     #[test]

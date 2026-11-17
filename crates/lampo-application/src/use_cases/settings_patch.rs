@@ -1,17 +1,20 @@
 //! Partial edits of the global settings (`lampo settings set`): Apache's port, service instance
 //! ports and web UI ports (Mailpit), the default PHP, the loopback port range, the default
-//! addressing of new projects and the automatic restart of crashed services.
+//! addressing of new projects, the automatic restart of crashed services and the idle timeout of
+//! PHP processes.
 //!
 //! The patch is applied to the *stored* settings through [`SettingsWriter::modify`] (under the
 //! allocator lock, with its port and default-PHP checks), so it never reverts a concurrent edit
 //! the way a read-modify-write of the whole [`SettingsDto`] from another process would. Then it
-//! syncs like a GUI save: running services whose port changed are restarted.
+//! syncs like a GUI save: running services whose port changed are restarted, and so is Apache
+//! when its configuration changed (PHP idle timeout).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lampo_domain::address::Addressing;
 use lampo_domain::php::PhpMinor;
+use lampo_domain::php_idle_timeout::PhpIdleTimeout;
 use lampo_domain::project::Project;
 use lampo_domain::service::{ServiceId, ServiceKind};
 use lampo_domain::settings::Settings;
@@ -73,6 +76,7 @@ struct Patch {
     default_addressing: Option<Addressing>,
     auto_restart_services: Option<bool>,
     mysql_project_credentials: Option<bool>,
+    php_idle_timeout: Option<PhpIdleTimeout>,
 }
 
 /// `(id, port)` pairs of a request map, validated: well-formed ids, no Apache, no duplicates,
@@ -109,6 +113,7 @@ impl Patch {
             default_addressing: r.default_addressing.map(addressing_from_dto),
             auto_restart_services: r.auto_restart_services,
             mysql_project_credentials: r.mysql_project_credentials,
+            php_idle_timeout: r.php_idle_timeout_secs.map(PhpIdleTimeout::new).transpose()?,
         })
     }
 
@@ -144,6 +149,9 @@ impl Patch {
         }
         if let Some(on) = self.mysql_project_credentials {
             next.mysql_project_credentials = on;
+        }
+        if let Some(timeout) = self.php_idle_timeout {
+            next.php_idle_timeout = timeout;
         }
         next.validate()?;
         Ok(next)
@@ -182,6 +190,9 @@ fn describe_changes(before: &Settings, after: &Settings, catalog: &ServiceCatalo
     }
     if before.mysql_project_credentials != after.mysql_project_credentials {
         out.push(change("project-credentials".into(), on_off(before.mysql_project_credentials).into(), on_off(after.mysql_project_credentials).into()));
+    }
+    if before.php_idle_timeout != after.php_idle_timeout {
+        out.push(change("php-idle-timeout".into(), before.php_idle_timeout.to_string(), after.php_idle_timeout.to_string()));
     }
     out
 }

@@ -214,6 +214,7 @@ pub(crate) fn web_config(snap: &ConfigSnapshot, paths: &LampoPaths, warnings: &m
         config_dir: paths.apache_config_dir(),
         log_dir: paths.service_log_dir(&ServiceId::apache()),
         vhosts,
+        php_idle_timeout: snap.settings.php_idle_timeout,
     })
 }
 

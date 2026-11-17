@@ -85,7 +85,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 		autoRestartServices: true,
 		mysqlProjectCredentials: true,
 		firstRunCompleted: !fresh,
-		defaultAddressing: 'no-elevation'
+		defaultAddressing: 'no-elevation',
+		phpIdleTimeoutSecs: 120
 	};
 	let shims: T.ShimStatus = { shimDir: 'C:\\Users\\dev\\AppData\\Local\\Lampo\\shims', installed: true, onPath: false, shadowed: [{ tool: 'php', shim: 'C:\\Users\\dev\\AppData\\Local\\Lampo\\shims\\php.exe', shadowedBy: 'C:\\xampp\\php\\php.exe' }] };
 	const mysqlDataFolder = 'C:\\Users\\dev\\AppData\\Local\\Lampo\\mysql';

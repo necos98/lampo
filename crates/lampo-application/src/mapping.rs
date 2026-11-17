@@ -10,6 +10,7 @@ use lampo_domain::mysql::accounts::MysqlCredentials;
 use lampo_domain::mysql::auth::legacy_php_auth_warning;
 use lampo_domain::package::{PackageId, PackageKind};
 use lampo_domain::php::{ExtensionName, PhpMinor, php_ini_overrides};
+use lampo_domain::php_idle_timeout::PhpIdleTimeout;
 use lampo_domain::ports::UnreadableProject;
 use lampo_domain::project::{ApacheDirectives, ProjectEnvVars, ProjectEnvironment, PublicDir, TlsMode};
 use lampo_domain::service::{ServiceId, ServiceKind};
@@ -172,6 +173,7 @@ pub fn settings_to_dto(s: &Settings, catalog: &ServiceCatalog) -> SettingsDto {
         first_run_completed: s.first_run_completed,
         default_addressing: addressing_to_dto(s.default_addressing),
         mysql_project_credentials: s.mysql_project_credentials,
+        php_idle_timeout_secs: s.php_idle_timeout.secs(),
     }
 }
 
@@ -189,6 +191,7 @@ pub fn settings_from_dto(dto: &SettingsDto, current: &Settings) -> Result<Settin
         first_run_completed: current.first_run_completed,
         default_addressing: addressing_from_dto(dto.default_addressing),
         mysql_project_credentials: dto.mysql_project_credentials,
+        php_idle_timeout: PhpIdleTimeout::new(dto.php_idle_timeout_secs)?,
     };
     s.validate()?;
     Ok(s)

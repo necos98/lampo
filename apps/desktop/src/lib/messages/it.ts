@@ -610,6 +610,12 @@ export const it = {
 		closeToTrayHelp: 'Chiudendo la finestra Lampo resta attivo e i servizi continuano a funzionare.',
 		autoRestart: 'Riavvia i servizi che si chiudono da soli',
 		autoRestartHelp: 'Un servizio che si chiude inaspettatamente viene riavviato fino a 3 volte, dopo 2, 4 e 8 secondi. I servizi che fermi tu restano fermi.',
+		phpProcesses: 'Processi PHP',
+		phpIdleTimeout: 'Chiudi i processi PHP inattivi dopo',
+		phpIdleTimeoutUnit: 'secondi',
+		phpIdleTimeoutHelp:
+			'Ogni sito avvia il suo processo PHP alla prima visita e lo chiude dopo questo tempo senza richieste. Un tempo più lungo tiene occupata la RAM dei processi inattivi, ma evita l’avvio a freddo (circa un secondo) quando torni su un sito. Predefinito: 120 secondi. Al salvataggio Apache si riavvia.',
+		phpIdleTimeoutInvalid: (min: number, max: number) => `Inserisci un numero intero di secondi tra ${min} e ${max}.`,
 		presets: {
 			title: 'Preset personalizzati',
 			help: 'Le configurazioni salvate dai progetti con «Salva come preset». I preset predefiniti non si possono eliminare.',

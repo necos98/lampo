@@ -1268,3 +1268,22 @@ async fn settings_get_shows_the_automatic_restart() {
     assert_eq!(code, 0);
     assert!(out.lines().any(|l| l.starts_with("auto-restart") && l.trim_end().ends_with("no")), "{out}");
 }
+
+#[tokio::test]
+async fn settings_set_sends_the_php_idle_timeout_for_the_app_to_validate() {
+    let fake = Fake::new();
+    fake.reply(Ok(settings_patch_json()));
+    let (code, out, _) = run_cli(&fake, &["settings", "set", "--php-idle-timeout", "900"]).await;
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(sent_settings_patch(&fake), SettingsPatchRequest { php_idle_timeout_secs: Some(900), ..Default::default() }, "only the timeout is sent");
+    use clap::Parser;
+    assert!(crate::cli::Cli::try_parse_from(["lampo", "settings", "set", "--php-idle-timeout", "2m"]).is_err());
+}
+
+#[tokio::test]
+async fn settings_get_shows_the_php_idle_timeout() {
+    let fake = Fake::new();
+    let (code, out, _) = run_cli(&fake, &["settings"]).await;
+    assert_eq!(code, 0);
+    assert!(out.contains("php idle timeout     120s"), "{out}");
+}

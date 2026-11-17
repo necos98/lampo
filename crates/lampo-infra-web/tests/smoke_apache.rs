@@ -26,6 +26,7 @@ use async_trait::async_trait;
 use lampo_domain::events::DomainEvent;
 use lampo_domain::hostname::Hostname;
 use lampo_domain::php::{ExtensionName, PhpMinor, php_ini_overrides};
+use lampo_domain::php_idle_timeout::PhpIdleTimeout;
 use lampo_domain::ports::{
     ChildId, CommandOutput, CommandRunner, CommandSpec, EventPublisher, PhpIniWriter, ProcessObserver, ProcessSupervisor, ServiceRunner, SpawnedChild, WebServerConfigurator,
 };
@@ -357,8 +358,9 @@ async fn real_apache_serves_php_sites() {
         PhpIniRenderer.write(&s.ini).unwrap();
     }
 
+    // The shortest idle timeout the settings allow, scanned every second, so step 6 is quick.
+    let idle_timeout = PhpIdleTimeout::new(PhpIdleTimeout::MIN_SECS).unwrap();
     let mut options = RenderOptions::from_process_environment();
-    options.fcgid.idle_timeout_secs = 3;
     options.fcgid.idle_scan_interval_secs = 1;
     let configurator = ApacheConfigurator::with_options(Arc::new(TokioCommands), options);
     let shop_access_log = shop.vhost.access_log.clone();
@@ -369,6 +371,7 @@ async fn real_apache_serves_php_sites() {
         config_dir: data.join("generated").join("apache"),
         log_dir: data.join("logs").join("apache"),
         vhosts: [&shop, &wt].into_iter().chain(regrants.iter().map(|(_, s)| s)).map(|s| s.vhost.clone()).collect(),
+        php_idle_timeout: idle_timeout,
     };
 
     // 1. Validation with the real `httpd -t`: a broken site is rejected, nothing changes.
@@ -454,7 +457,8 @@ async fn real_apache_serves_php_sites() {
         // 6. Idle php-cgi processes are reaped.
         assert!(php_cgi_count(&php) >= 1);
         let mut reaped = false;
-        for _ in 0..30 {
+        // The timeout, plus margin for the scan and the processes' exit.
+        for _ in 0..idle_timeout.secs() + 15 {
             tokio::time::sleep(Duration::from_secs(1)).await;
             if php_cgi_count(&php) == 0 && php_cgi_count(&old_dir) == 0 {
                 reaped = true;

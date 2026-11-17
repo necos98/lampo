@@ -645,6 +645,7 @@ pub fn settings(s: &SettingsDto) -> String {
     rows.push(vec!["auto-restart".into(), yes_no(s.auto_restart_services).into()]);
     rows.push(vec!["project credentials".into(), yes_no(s.mysql_project_credentials).into()]);
     rows.push(vec!["default addressing".into(), addressing(s.default_addressing).into()]);
+    rows.push(vec!["php idle timeout".into(), format!("{}s", s.php_idle_timeout_secs)]);
     table(&rows)
 }
 

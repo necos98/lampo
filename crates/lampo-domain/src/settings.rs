@@ -9,7 +9,8 @@
 //! Mailpit web UI): absent in older files, it falls back to the kind's default.
 //!
 //! `default_addressing` (added later) reads as `no-elevation` when a file lacks it;
-//! `auto_restart_services` and `mysql_project_credentials` (added later) read as on.
+//! `auto_restart_services` and `mysql_project_credentials` (added later) read as on;
+//! `php_idle_timeout` (added later) reads as [`PhpIdleTimeout::DEFAULT`].
 
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +19,7 @@ use crate::error::DomainError;
 use crate::hostname::Tld;
 use crate::mysql::MysqlSeries;
 use crate::php::PhpMinor;
+use crate::php_idle_timeout::PhpIdleTimeout;
 use crate::service::{ServiceDescriptor, ServiceId, ServiceKind};
 use crate::tcp_port::{Port, PortRange};
 
@@ -83,6 +85,8 @@ pub struct Settings {
     /// New projects get a dedicated MySQL account instead of root (see
     /// [`crate::mysql::accounts`]). Absent in older files: on.
     pub mysql_project_credentials: bool,
+    /// How long a site's idle php-cgi.exe stays alive (mod_fcgid `FcgidIdleTimeout`).
+    pub php_idle_timeout: PhpIdleTimeout,
 }
 
 fn mysql_id(series: MysqlSeries) -> ServiceId {
@@ -107,6 +111,7 @@ impl Default for Settings {
             first_run_completed: false,
             default_addressing: Addressing::default(),
             mysql_project_credentials: true,
+            php_idle_timeout: PhpIdleTimeout::DEFAULT,
         }
     }
 }
@@ -126,6 +131,7 @@ struct SettingsFile {
     first_run_completed: bool,
     default_addressing: Addressing,
     mysql_project_credentials: bool,
+    php_idle_timeout: PhpIdleTimeout,
     mysql_instances: Option<Vec<LegacyMysqlInstance>>,
     redis_port: Option<Port>,
 }
@@ -151,6 +157,7 @@ impl Default for SettingsFile {
             first_run_completed: d.first_run_completed,
             default_addressing: d.default_addressing,
             mysql_project_credentials: d.mysql_project_credentials,
+            php_idle_timeout: d.php_idle_timeout,
             mysql_instances: None,
             redis_port: None,
         }
@@ -188,6 +195,7 @@ impl TryFrom<SettingsFile> for Settings {
             first_run_completed: f.first_run_completed,
             default_addressing: f.default_addressing,
             mysql_project_credentials: f.mysql_project_credentials,
+            php_idle_timeout: f.php_idle_timeout,
         };
         settings.validate()?;
         Ok(settings)
@@ -363,6 +371,19 @@ mod tests {
         let off: Settings = serde_json::from_str(r#"{"mysql_project_credentials": false}"#).unwrap();
         assert!(!off.mysql_project_credentials);
         assert_eq!(serde_json::from_value::<Settings>(serde_json::to_value(&off).unwrap()).unwrap(), off);
+    }
+
+    #[test]
+    fn php_idle_timeout_is_two_minutes_unless_the_file_says_otherwise() {
+        let before: Settings = serde_json::from_str(r#"{"apache_port": 80}"#).unwrap();
+        assert_eq!(before.php_idle_timeout.secs(), 120, "files written before the setting keep the old timeout");
+        let longer: Settings = serde_json::from_str(r#"{"php_idle_timeout": 900}"#).unwrap();
+        assert_eq!(longer.php_idle_timeout.secs(), 900);
+        let json = serde_json::to_value(&longer).unwrap();
+        assert_eq!(json["php_idle_timeout"], 900);
+        assert_eq!(serde_json::from_value::<Settings>(json).unwrap(), longer);
+        let err = serde_json::from_str::<Settings>(r#"{"php_idle_timeout": 10}"#).unwrap_err();
+        assert!(err.to_string().contains("30-3600"), "{err}");
     }
 
     #[test]

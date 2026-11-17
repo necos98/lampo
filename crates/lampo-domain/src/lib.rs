@@ -30,6 +30,7 @@ pub mod mysql;
 pub mod package;
 pub mod paths;
 pub mod php;
+pub mod php_idle_timeout;
 pub mod ports;
 pub mod preset;
 pub mod progress;

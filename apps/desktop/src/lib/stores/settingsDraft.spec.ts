@@ -16,9 +16,25 @@ function settings(): Settings {
 		autoRestartServices: true,
 		mysqlProjectCredentials: true,
 		firstRunCompleted: true,
-		defaultAddressing: 'no-elevation'
+		defaultAddressing: 'no-elevation',
+		phpIdleTimeoutSecs: 120
 	};
 }
+
+describe('SettingsDraft validation', () => {
+	it('accepts a PHP idle timeout of 30 to 3600 whole seconds only', () => {
+		const draft = new SettingsDraft(settings());
+		for (const secs of [30, 120, 3600]) {
+			draft.value.phpIdleTimeoutSecs = secs;
+			expect(draft.valid, `${secs}`).toBe(true);
+		}
+		for (const secs of [29, 3601, 90.5, Number.NaN]) {
+			draft.value.phpIdleTimeoutSecs = secs;
+			expect(draft.phpIdleTimeoutValid, `${secs}`).toBe(false);
+			expect(draft.valid, `${secs}`).toBe(false);
+		}
+	});
+});
 
 describe('SettingsDraft baseline', () => {
 	it('isStale() is false for the settings it was loaded from and true once the backend changed them', () => {

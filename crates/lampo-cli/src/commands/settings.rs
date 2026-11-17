@@ -69,6 +69,7 @@ fn patch_request(args: SettingsSetArgs) -> AppResult<SettingsPatchRequest> {
         default_addressing: args.default_addressing.map(addressing::to_dto),
         auto_restart_services: args.auto_restart,
         mysql_project_credentials: args.project_credentials,
+        php_idle_timeout_secs: args.php_idle_timeout,
     })
 }
 
