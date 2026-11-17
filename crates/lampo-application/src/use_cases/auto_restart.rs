@@ -62,7 +62,7 @@ pub enum Revival {
     Restarted,
     /// Up again already (a sync or the user started it meanwhile).
     AlreadyUp,
-    /// Stopped since the crash, by the user or a sync: it stays down.
+    /// Stopped since the crash, by the user, a sync or the shutdown: it stays down.
     NoLongerWanted,
 }
 
@@ -70,7 +70,8 @@ pub enum Revival {
 #[async_trait]
 pub trait CrashRecovery: Send + Sync {
     /// Starts `service` with its current configuration unless it was stopped since it last
-    /// started (`NoLongerWanted`) or is up (`AlreadyUp`). A start that fails is an error.
+    /// started or the app is going away (`NoLongerWanted`), or it is up (`AlreadyUp`). A start
+    /// that fails is an error.
     async fn revive(&self, service: &ServiceId) -> AppResult<Revival>;
 }
 
@@ -94,7 +95,8 @@ struct Tracked {
 }
 
 /// Restarts crashed services: up to [`AutoRestartPolicy::max_attempts`] attempts in a row with
-/// a doubling wait, the count starting over once a service ran stably. Each step is published as
+/// a doubling wait, the count starting over once a service ran stably or the sequence ended
+/// without restarting it (someone else started it, it was stopped, …). Each step is published as
 /// `ServiceAutoRestart`; when every attempt failed the service stays `Failed` (`GaveUp`).
 pub struct ServiceAutoRestart {
     deps: ServiceAutoRestartDeps,
@@ -125,10 +127,9 @@ impl ServiceAutoRestart {
         if !self.enabled() || !self.claim(&service) {
             return;
         }
-        let _released = Recovering { owner: self, service: &service };
+        let mut recovering = Recovering { owner: self, service: &service, restarted: false };
         loop {
             let Some(attempt) = self.next_attempt(&service) else {
-                self.tracked(|services| services.remove(&service));
                 tracing::warn!("{service} exited unexpectedly {} times in a row: not restarted again", self.policy.max_attempts);
                 self.publish(&service, AutoRestartStep::GaveUp { attempts: self.policy.max_attempts, message });
                 return;
@@ -143,15 +144,12 @@ impl ServiceAutoRestart {
                 Ok(Revival::Restarted) => {
                     let now = self.deps.clock.now_unix_ms();
                     self.tracked(|services| services.entry(service.clone()).or_default().budget.restarted(now));
+                    recovering.restarted = true;
                     tracing::info!("{service} restarted after exiting unexpectedly (attempt {attempt})");
                     self.publish(&service, AutoRestartStep::Restarted { attempt });
                     return;
                 }
-                Ok(Revival::AlreadyUp) => return,
-                Ok(Revival::NoLongerWanted) => {
-                    self.tracked(|services| services.remove(&service));
-                    return;
-                }
+                Ok(Revival::AlreadyUp | Revival::NoLongerWanted) => return,
                 Err(e) => {
                     tracing::warn!("restarting {service} (attempt {attempt}) failed: {}", e.message);
                     message = e.message;
@@ -193,16 +191,23 @@ impl ServiceAutoRestart {
     }
 }
 
-/// Ends the recovery of `service` however [`ServiceAutoRestart::recover`] returns.
+/// Ends the recovery of `service` however [`ServiceAutoRestart::recover`] returns. Only a
+/// restart of its own keeps the attempts (until the service runs stably); any other end (given
+/// up, started by someone else, stopped, the setting turned off, the app going away) forgets
+/// them, so whatever starts the service next starts afresh. Released and forgotten under one
+/// lock: a crash reported meanwhile finds either this sequence or none.
 struct Recovering<'a> {
     owner: &'a ServiceAutoRestart,
     service: &'a ServiceId,
+    restarted: bool,
 }
 
 impl Drop for Recovering<'_> {
     fn drop(&mut self) {
         self.owner.tracked(|services| {
-            if let Some(tracked) = services.get_mut(self.service) {
+            if !self.restarted {
+                services.remove(self.service);
+            } else if let Some(tracked) = services.get_mut(self.service) {
                 tracked.recovering = false;
             }
         });

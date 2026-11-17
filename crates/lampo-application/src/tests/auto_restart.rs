@@ -11,15 +11,15 @@ use async_trait::async_trait;
 use lampo_domain::auto_restart::AutoRestartStep;
 use lampo_domain::events::DomainEvent;
 use lampo_domain::mysql::MysqlSeries;
-use lampo_domain::ports::{EventPublisher, SettingsRepository};
+use lampo_domain::ports::{EventPublisher, SettingsRepository, Timer};
 use lampo_domain::service::{ServiceId, ServiceState};
 use tokio::sync::Notify;
 
 use super::{cli, gui};
 use crate::dto::ServicesRequest;
 use crate::error::{AppError, AppResult};
-use crate::testing::{ManualClock, RecordingEvents, World};
-use crate::use_cases::{Crash, CrashRecovery, CrashRelay, EnvironmentSync, Revival, ServiceAutoRestart, ServiceAutoRestartDeps, ShutdownGate};
+use crate::testing::{ManualClock, MemSettings, RecordingEvents, World};
+use crate::use_cases::{Crash, CrashRecovery, CrashRelay, EnvironmentSync, Revival, ServiceAutoRestart, ServiceAutoRestartDeps, ServiceLifecycle, ShutdownGate};
 
 const STABLE_MS: u64 = 60_000;
 
@@ -92,10 +92,34 @@ impl Watchdog {
 
 fn watchdog(w: &World, recovery: Arc<dyn CrashRecovery>, gate: Arc<ShutdownGate>) -> Watchdog {
     let clock = Arc::new(ManualClock::default());
+    watchdog_waiting_on(w, recovery, gate, clock.clone(), clock)
+}
+
+/// A watchdog whose waits go through `timer`; `clock` is the one it reads the time from.
+fn watchdog_waiting_on(w: &World, recovery: Arc<dyn CrashRecovery>, gate: Arc<ShutdownGate>, timer: Arc<dyn Timer>, clock: Arc<ManualClock>) -> Watchdog {
     let events = Arc::new(RecordingEvents::default());
-    let restart =
-        Arc::new(ServiceAutoRestart::new(ServiceAutoRestartDeps { recovery, settings: w.settings.clone(), events: events.clone(), timer: clock.clone(), clock: clock.clone(), gate }));
+    let restart = Arc::new(ServiceAutoRestart::new(ServiceAutoRestartDeps { recovery, settings: w.settings.clone(), events: events.clone(), timer, clock: clock.clone(), gate }));
     Watchdog { restart, clock, events }
+}
+
+/// The [`ManualClock`]'s wait, during which the user turns `auto_restart_services` off.
+struct TurnedOffWhileWaiting {
+    clock: Arc<ManualClock>,
+    settings: Arc<MemSettings>,
+}
+
+#[async_trait]
+impl Timer for TurnedOffWhileWaiting {
+    async fn sleep(&self, duration: Duration) {
+        self.clock.sleep(duration).await;
+        set_auto_restart(self.settings.as_ref(), false);
+    }
+}
+
+fn set_auto_restart(settings: &dyn SettingsRepository, on: bool) {
+    let mut current = settings.load().unwrap();
+    current.auto_restart_services = on;
+    settings.save(&current).unwrap();
 }
 
 fn scheduled(attempt: u32, secs: u64) -> AutoRestartStep {
@@ -148,11 +172,35 @@ async fn crashes_in_a_row_use_up_the_attempts_and_a_stable_run_starts_over() {
 }
 
 #[tokio::test]
+async fn a_service_someone_else_started_meanwhile_starts_over_at_its_next_crash() {
+    let w = World::with_basics();
+    let recovery = ScriptedRecovery::answering([Ok(Revival::AlreadyUp)]);
+    let dog = watchdog(&w, recovery.clone(), Arc::default());
+    dog.restart.recover(crash_of(&mysql())).await;
+    dog.restart.recover(crash_of(&mysql())).await;
+    assert_eq!(dog.steps(), [scheduled(1, 2), scheduled(1, 2), AutoRestartStep::Restarted { attempt: 1 }], "the user's start was a fresh one");
+    assert_eq!(recovery.calls(), 2);
+}
+
+#[tokio::test]
+async fn a_service_left_down_because_the_setting_was_turned_off_starts_over_at_its_next_crash() {
+    let w = World::with_basics();
+    let clock = Arc::new(ManualClock::default());
+    let timer = Arc::new(TurnedOffWhileWaiting { clock: clock.clone(), settings: w.settings.clone() });
+    let recovery = ScriptedRecovery::answering([]);
+    let dog = watchdog_waiting_on(&w, recovery.clone(), Arc::default(), timer, clock);
+    dog.restart.recover(crash_of(&mysql())).await;
+    assert_eq!(recovery.calls(), 0, "turned off during the wait");
+
+    set_auto_restart(w.settings.as_ref(), true);
+    dog.restart.recover(crash_of(&mysql())).await;
+    assert_eq!(dog.delays(), [2, 2], "the attempt that never ran is not counted");
+}
+
+#[tokio::test]
 async fn nothing_restarts_when_the_setting_is_off() {
     let w = World::with_basics();
-    let mut settings = w.settings.load().unwrap();
-    settings.auto_restart_services = false;
-    w.settings.save(&settings).unwrap();
+    set_auto_restart(w.settings.as_ref(), false);
     let recovery = ScriptedRecovery::answering([]);
     let dog = watchdog(&w, recovery.clone(), Arc::default());
     dog.restart.recover(crash_of(&mysql())).await;
@@ -252,6 +300,44 @@ async fn the_environment_starts_a_crashed_service_again() {
     assert_eq!(w.mysql.calls(), ["prepare:mysql-8.4", "start:mysql-8.4"]);
     assert_eq!(w.mysql.state(&mysql()), ServiceState::Running);
     assert_eq!(dog.steps().last(), Some(&AutoRestartStep::Restarted { attempt: 1 }));
+}
+
+#[tokio::test]
+async fn a_restart_waiting_for_the_lock_when_the_app_goes_away_starts_nothing() {
+    let w = crashed_mysql().await;
+    let redis: ServiceId = "redis".parse().unwrap();
+    w.redis.hold_starts.store(true, Ordering::SeqCst);
+    let shutdown = w.shutdown();
+    let dog = watchdog(&w, w.env.clone(), shutdown.gate());
+    // A slow start of Redis holds the lifecycle lock: the restart of MySQL waits for it.
+    let crash_then_quit = async {
+        w.redis.until_starting(&redis).await;
+        let quit = async {
+            // Published right before the (instant) wait and the lock.
+            while dog.steps().is_empty() {
+                tokio::task::yield_now().await;
+            }
+            shutdown.run().await
+        };
+        tokio::join!(dog.restart.recover(crash_of(&mysql())), quit).1
+    };
+    let both = async { tokio::join!(w.env.ensure(&redis), crash_then_quit) };
+    let (held, quitted) = tokio::time::timeout(Duration::from_secs(5), both).await.expect("the shutdown or the restart got stuck");
+
+    quitted.unwrap();
+    assert!(held.is_err(), "the shutdown gave up the slow start");
+    assert!(w.mysql.calls().iter().all(|c| c.starts_with("stop:")), "{:?}", w.mysql.calls());
+    assert_eq!(w.mysql.state(&mysql()), ServiceState::Stopped);
+    assert_eq!(dog.steps(), [scheduled(1, 2)], "no failure, no further attempt");
+}
+
+#[tokio::test]
+async fn the_environment_revives_nothing_once_the_app_goes_away() {
+    let w = crashed_mysql().await;
+    w.shutdown().run().await.unwrap();
+    w.clear_calls();
+    assert_eq!(w.env.revive(&mysql()).await.unwrap(), Revival::NoLongerWanted);
+    assert!(w.mysql.calls().is_empty(), "{:?}", w.mysql.calls());
 }
 
 #[tokio::test]
