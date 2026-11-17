@@ -1,5 +1,5 @@
 //! [`FsPackageSlotLock`]: one lock per package slot, held for a whole install (download,
-//! extraction, hook, record).
+//! extraction, hook, record) and a whole uninstall.
 //!
 //! Two layers, both taken without waiting and retried every [`POLL_INTERVAL`] (so a waiter
 //! notices cancellation): a `tokio::sync::Mutex` per slot within the process, then the file lock
@@ -34,8 +34,8 @@ pub(crate) struct HeldSlot {
     _local: OwnedMutexGuard<()>,
 }
 
-/// Slot locks of one packages directory. Share one instance per process (the install use case
-/// and the leftover sweep), so its in-process layer sees every holder.
+/// Slot locks of one packages directory. Share one instance per process (the install and
+/// uninstall use cases and the leftover sweep), so its in-process layer sees every holder.
 pub struct FsPackageSlotLock {
     packages_dir: PathBuf,
     local: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,

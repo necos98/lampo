@@ -6,8 +6,11 @@
 //! alone. Of a process that is gone:
 //! * a **previous** copy (`old`) is the slot's old contents, moved aside for a replacement. If
 //!   the slot itself is missing, the crash hit between the two renames: the newest previous copy
-//!   is the only complete package and is put back. Otherwise the replacement completed and the
-//!   copy is deleted;
+//!   is the only complete package and is put back. If the slot still has its **pending marker**
+//!   ([`PENDING_MARKER`], written into the new contents before they replace the slot and removed
+//!   once the install is committed), its contents were never recorded (a crash during the hook
+//!   or the record, a rollback that could not move them out): they are set aside and the newest
+//!   previous copy is put back. Otherwise the replacement completed and the copy is deleted;
 //! * a **staging** copy (an unfinished extraction) and a **removed** copy (`trash`, files of an
 //!   uninstall or a rollback) are deleted.
 
@@ -17,6 +20,32 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::pid;
+
+/// The file in a slot whose contents are not committed yet. It holds the pid of the process
+/// that placed them.
+pub(crate) const PENDING_MARKER: &str = ".lampo-pending";
+
+/// Marks the new contents in `staging` as not committed yet, by this process.
+pub(crate) fn mark_pending(staging: &Path) -> std::io::Result<()> {
+    fs::write(staging.join(PENDING_MARKER), std::process::id().to_string())
+}
+
+/// Marks the contents of `slot` as committed (they are recorded).
+pub(crate) fn clear_pending(slot: &Path) -> std::io::Result<()> {
+    match fs::remove_file(slot.join(PENDING_MARKER)) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        other => other,
+    }
+}
+
+/// `true` if `slot` holds contents that a process that is gone placed and never committed. A
+/// marker that does not name a pid counts as abandoned.
+fn is_abandoned_pending(slot: &Path) -> bool {
+    match fs::read_to_string(slot.join(PENDING_MARKER)) {
+        Ok(owner) => !owner.trim().parse::<u32>().is_ok_and(pid::is_alive),
+        Err(_) => false,
+    }
+}
 
 /// What a leftover directory held.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,45 +125,83 @@ pub(crate) fn slots_with_leftovers(dir: &Path) -> std::io::Result<BTreeSet<PathB
     Ok(entries.flatten().filter_map(|entry| entry.file_name().into_string().ok().and_then(|name| parse(&name).map(|(slot, ..)| dir.join(slot)))).collect())
 }
 
-/// What to do with a missing slot.
+/// Why a slot is cleaned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MissingSlot {
-    /// Put the newest previous copy back: the slot went missing in the middle of a replacement.
-    Restore,
-    /// Leave it missing: it was emptied on purpose (an uninstall).
-    Leave,
+enum Purpose {
+    /// Put the newest previous copy back where a replacement was interrupted (the slot is
+    /// missing, or holds contents never committed).
+    Repair,
+    /// The slot was emptied on purpose (an uninstall): previous copies go too.
+    Discard,
 }
 
-/// Before using a slot (and at app start): restores `slot` from the newest previous copy of a
-/// process that is gone if the slot is missing, then deletes the other leftovers of processes
-/// that are gone (see the module docs). Best effort: a failure is logged and retried next time.
+/// Before using a slot (and at app start): puts the newest previous copy of a process that is
+/// gone back into `slot` if the slot is missing or its contents were never committed, then
+/// deletes the other leftovers of processes that are gone (see the module docs). Best effort: a
+/// failure is logged and retried next time.
 pub(crate) fn repair(slot: &Path) {
-    clean(slot, MissingSlot::Restore);
+    clean(slot, Purpose::Repair);
 }
 
 /// After an uninstall emptied `slot`: deletes the leftovers of processes that are gone, previous
 /// copies included (the package is meant to be gone).
 pub(crate) fn discard(slot: &Path) {
-    clean(slot, MissingSlot::Leave);
+    clean(slot, Purpose::Discard);
 }
 
-fn clean(slot: &Path, missing: MissingSlot) {
+fn clean(slot: &Path, purpose: Purpose) {
     let mut abandoned: Vec<Found> = leftovers_of(slot).into_iter().filter(|f| !pid::is_alive(f.pid)).collect();
-    if missing == MissingSlot::Restore && !slot.exists() {
-        let newest = abandoned.iter().enumerate().filter(|(_, f)| f.kind == Leftover::Previous).max_by_key(|(_, f)| f.nanos).map(|(i, _)| i);
-        if let Some(previous) = newest.map(|i| abandoned.swap_remove(i)) {
-            match fs::rename(&previous.path, slot) {
-                Ok(()) => tracing::warn!(slot = %slot.display(), "an interrupted package update left the previous version aside; restored it"),
-                Err(e) => tracing::warn!(slot = %slot.display(), from = %previous.path.display(), error = %e, "cannot restore the previous version of a package; will retry"),
-            }
+    if purpose == Purpose::Repair {
+        if !slot.exists() {
+            restore_newest_previous(slot, &mut abandoned);
+        } else if is_abandoned_pending(slot) {
+            undo_uncommitted(slot, &mut abandoned);
         }
     }
     for leftover in abandoned {
-        match fs::remove_dir_all(&leftover.path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => tracing::warn!(dir = %leftover.path.display(), error = %e, "cannot delete what an interrupted package operation left; will retry"),
-        }
+        remove_leftover(&leftover.path);
+    }
+}
+
+/// Takes the newest previous copy out of `abandoned` (so it is not deleted).
+fn take_newest_previous(abandoned: &mut Vec<Found>) -> Option<Found> {
+    let newest = abandoned.iter().enumerate().filter(|(_, f)| f.kind == Leftover::Previous).max_by_key(|(_, f)| f.nanos).map(|(i, _)| i)?;
+    Some(abandoned.swap_remove(newest))
+}
+
+/// Puts the newest previous copy of `abandoned` into the missing `slot`.
+fn restore_newest_previous(slot: &Path, abandoned: &mut Vec<Found>) {
+    let Some(previous) = take_newest_previous(abandoned) else { return };
+    match fs::rename(&previous.path, slot) {
+        Ok(()) => tracing::warn!(slot = %slot.display(), "an interrupted package update left the previous version aside; restored it"),
+        Err(e) => tracing::warn!(slot = %slot.display(), from = %previous.path.display(), error = %e, "cannot restore the previous version of a package; will retry"),
+    }
+}
+
+/// `slot` holds contents an interrupted install never committed: sets them aside and puts the
+/// newest previous copy of `abandoned` back. Without one (an interrupted first install) the slot
+/// is left as is: its files are not recorded, and the next install replaces them.
+fn undo_uncommitted(slot: &Path, abandoned: &mut Vec<Found>) {
+    let Some(previous) = take_newest_previous(abandoned) else { return };
+    let uncommitted = sibling(slot, Leftover::Removed);
+    if let Err(e) = fs::rename(slot, &uncommitted) {
+        // The previous copy stays aside (it is no longer in `abandoned`) for the next attempt.
+        return tracing::warn!(slot = %slot.display(), error = %e, "cannot set aside the files of an interrupted package install; will retry");
+    }
+    match fs::rename(&previous.path, slot) {
+        Ok(()) => tracing::warn!(slot = %slot.display(), "an interrupted package install left files that were never recorded; restored the previous version"),
+        // The slot is now missing: the next repair puts the previous copy back.
+        Err(e) => tracing::warn!(slot = %slot.display(), from = %previous.path.display(), error = %e, "cannot restore the previous version of a package; will retry"),
+    }
+    remove_leftover(&uncommitted);
+}
+
+/// Deletes the leftover directory `dir`; a failure is logged and retried at the next cleaning.
+fn remove_leftover(dir: &Path) {
+    match fs::remove_dir_all(dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => tracing::warn!(dir = %dir.display(), error = %e, "cannot delete what an interrupted package operation left; will retry"),
     }
 }
 
@@ -203,6 +270,49 @@ mod tests {
             repair(&slot);
             assert_eq!(fs::read(slot.join("php.exe")).unwrap(), b"8.3.15");
             assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+        }
+
+        fn pending(slot: &Path, owner: &str, content: &[u8]) {
+            fs::create_dir_all(slot).unwrap();
+            fs::write(slot.join("php.exe"), content).unwrap();
+            fs::write(slot.join(PENDING_MARKER), owner).unwrap();
+        }
+
+        #[test]
+        fn files_never_committed_give_way_to_the_newest_previous_version() {
+            let dir = tempfile::tempdir().unwrap();
+            let slot = dir.path().join("php-8.3");
+            let gone = exited_process_id();
+            pending(&slot, &gone.to_string(), b"8.3.15 never recorded");
+            leftover(&slot, Leftover::Previous, gone, 1, b"8.3.13");
+            leftover(&slot, Leftover::Previous, gone, 2, b"8.3.14");
+            repair(&slot);
+            assert_eq!(fs::read(slot.join("php.exe")).unwrap(), b"8.3.14");
+            assert!(!slot.join(PENDING_MARKER).exists());
+            assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1, "the uncommitted files and the older copy are deleted");
+        }
+
+        #[test]
+        fn an_interrupted_first_install_is_left_for_the_next_install() {
+            let dir = tempfile::tempdir().unwrap();
+            let slot = dir.path().join("php-8.3");
+            let gone = exited_process_id();
+            pending(&slot, &gone.to_string(), b"8.3.15 never recorded");
+            leftover(&slot, Leftover::Staging, gone, 1, b"half extracted");
+            repair(&slot);
+            assert_eq!(fs::read(slot.join("php.exe")).unwrap(), b"8.3.15 never recorded", "nothing to go back to");
+            assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+        }
+
+        #[test]
+        fn an_install_still_running_is_not_undone() {
+            let dir = tempfile::tempdir().unwrap();
+            let slot = dir.path().join("php-8.3");
+            pending(&slot, &std::process::id().to_string(), b"8.3.15 being configured");
+            leftover(&slot, Leftover::Previous, exited_process_id(), 1, b"8.3.14");
+            repair(&slot);
+            assert_eq!(fs::read(slot.join("php.exe")).unwrap(), b"8.3.15 being configured", "its owner may still commit it");
+            assert!(slot.join(PENDING_MARKER).exists());
         }
 
         #[test]

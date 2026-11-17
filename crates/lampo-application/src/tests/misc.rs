@@ -186,7 +186,7 @@ async fn agent_context_inside_worktrees_with_and_without_environment() {
     assert_eq!(db.database, "shop_wt_fix_1");
     assert_eq!((db.user.as_str(), db.password.as_str()), ("lampo_shop", "generated-1"), "the parent's own account");
     assert!(with_env.worktree.as_ref().unwrap().environment_up);
-    assert_eq!(with_env.php.binary, "C:\\lampo\\packages\\php-8.3.14\\php.exe");
+    assert_eq!(with_env.php.binary, "C:\\lampo\\packages\\php-8.3\\php.exe");
     assert_eq!(with_env.php.composer_channel, "stable");
     assert_eq!(with_env.logs.len(), 4);
     assert!(with_env.hints.is_empty(), "{:?}", with_env.hints);

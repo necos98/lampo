@@ -158,18 +158,18 @@ async fn laravel_installs_the_installer_when_missing_then_runs_it() {
 
     let lines = s.runner.command_lines();
     assert_eq!(lines.len(), 2, "{lines:?}");
-    assert!(lines[0].starts_with("C:\\lampo\\packages\\php-8.4.1\\php.exe C:\\lampo\\packages\\composer-2.8.4\\composer.phar require laravel/installer --no-interaction"), "{}", lines[0]);
-    assert_eq!(lines[1], format!("C:\\lampo\\packages\\php-8.4.1\\php.exe {SCRIPT_84} new shop --no-interaction --vue --pest --no-node --no-boost"));
+    assert!(lines[0].starts_with("C:\\lampo\\packages\\php-8.4\\php.exe C:\\lampo\\packages\\composer-2.8\\composer.phar require laravel/installer --no-interaction"), "{}", lines[0]);
+    assert_eq!(lines[1], format!("C:\\lampo\\packages\\php-8.4\\php.exe {SCRIPT_84} new shop --no-interaction --vue --pest --no-node --no-boost"));
 
     let calls = s.runner.calls.lock().unwrap().clone();
     assert_eq!(calls[0].working_dir.as_deref(), Some(std::path::Path::new("C:\\data\\tools\\laravel-installer\\8.4")));
     assert_eq!(calls[1].working_dir.as_deref(), Some(std::path::Path::new("C:\\sites")));
-    assert_eq!(calls[1].path_prepend[..2], [PathBuf::from("C:\\data\\tools\\composer\\8.4"), PathBuf::from("C:\\lampo\\packages\\php-8.4.1")]);
+    assert_eq!(calls[1].path_prepend[..2], [PathBuf::from("C:\\data\\tools\\composer\\8.4"), PathBuf::from("C:\\lampo\\packages\\php-8.4")]);
     assert!(calls[1].path_prepend.contains(&PathBuf::from("C:\\Program Files\\Git\\cmd")), "git on PATH when found");
     assert!(calls[1].env.contains(&("PHPRC".into(), "C:\\data\\generated\\php\\_tools-8.4".into())));
 
     let bat = s.files.contents("C:\\data\\tools\\composer\\8.4\\composer.bat").expect("composer.bat written");
-    assert!(bat.contains("\"C:\\lampo\\packages\\php-8.4.1\\php.exe\" \"C:\\lampo\\packages\\composer-2.8.4\\composer.phar\" %*"), "{bat}");
+    assert!(bat.contains("\"C:\\lampo\\packages\\php-8.4\\php.exe\" \"C:\\lampo\\packages\\composer-2.8\\composer.phar\" %*"), "{bat}");
     let ini = s.world.ini.0.lock().unwrap().iter().find(|i| i.output_dir.as_path() == std::path::Path::new("C:\\data\\generated\\php\\_tools-8.4")).cloned().expect("tool php.ini");
     assert!(ini.extensions.iter().any(|e| e.name.as_str() == "zip") && ini.extensions.iter().any(|e| e.name.as_str() == "openssl"));
     assert!(s.messages().contains(&"   INFO  Application ready".to_string()));

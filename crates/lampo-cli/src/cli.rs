@@ -632,11 +632,13 @@ pub enum PackageCommand {
     /// add-on build for that PHP minor. Exactly one installed build must match (several: exit 4
     /// with `details.candidates`; none: exit 3). Refused while it is the last build something
     /// uses: a project or worktree environment (PHP minor, add-on, MySQL series), the default
-    /// PHP or an always-on MySQL (exit 5, `details.usedBy`). Before the files are deleted, the
-    /// sites and services using the build move to the one that remains (e.g. 8.3.14 when 8.3.15
-    /// goes), restarting Apache and those services; the command waits until the files are gone.
-    /// Files still locked by another program fail it and keep the package installed. Projects
-    /// and databases are never touched. Prints the removed package (`--json`: its id).
+    /// PHP or an always-on MySQL (exit 5, `details.usedBy`). Waits for an install or update of
+    /// the same series to finish first. Before the files are deleted, the sites and services
+    /// using the build move to one that remains (e.g. a Redis no project pins to a series moves
+    /// to 8.2 when 8.10 goes), restarting Apache and those services; the command waits until the
+    /// files are gone. Files still locked by another program fail it and keep the package
+    /// installed. Projects and databases are never touched. Prints the removed package
+    /// (`--json`: its id).
     ///
     /// Examples:
     ///   lampo package uninstall php 8.2 --yes

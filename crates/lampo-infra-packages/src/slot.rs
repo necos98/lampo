@@ -6,8 +6,10 @@
 //! renamed into place (restoring the old slot if that fails). The old contents stay aside until
 //! the install is complete: [`commit`] deletes them, [`roll_back`] puts them back. The slot is
 //! therefore either the complete old package or the complete new one, and a failed post-install
-//! step never costs the previous version. What a crash leaves is handled by
-//! `leftovers` the next time the slot is replaced, and at app start.
+//! step never costs the previous version. The new contents carry a pending marker until the
+//! commit, so new files that were never recorded are told apart from a completed replacement.
+//! What a crash leaves is handled by `leftovers` the next time the slot is replaced, and at app
+//! start.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -48,8 +50,10 @@ pub(crate) fn prepare_staging(destination: &Path) -> PortResult<PathBuf> {
 }
 
 /// Atomically (per rename) replaces `destination` with `staging`, keeping the previous contents
-/// aside until [`commit`] or [`roll_back`].
+/// aside until [`commit`] or [`roll_back`]. The new contents carry the pending marker until
+/// committed, so a crash before that is undone at the next start (see `leftovers`).
 pub(crate) fn replace_dir(staging: &Path, destination: &Path) -> PortResult<SlotReplacement> {
+    leftovers::mark_pending(staging).map_err(|e| PortError::io(format!("preparing {}", staging.display()), e))?;
     let previous = if destination.exists() {
         let previous = leftovers::sibling(destination, Leftover::Previous);
         fs::rename(destination, &previous).map_err(|e| PortError::io(format!("replacing {} (is a service using it? stop it and retry)", destination.display()), e))?;
@@ -68,8 +72,12 @@ pub(crate) fn replace_dir(staging: &Path, destination: &Path) -> PortResult<Slot
     Ok(SlotReplacement { destination: destination.to_path_buf(), previous })
 }
 
-/// Deletes the previous contents of a completed replacement.
+/// Marks the new contents of a completed replacement as committed, then deletes the previous
+/// ones (in this order: a previous copy left half deleted is never put back).
 pub(crate) fn commit(replacement: &SlotReplacement) {
+    if let Err(e) = leftovers::clear_pending(&replacement.destination) {
+        tracing::warn!(slot = %replacement.destination.display(), error = %e, "could not mark a package install as complete");
+    }
     if let Some(previous) = &replacement.previous {
         remove_or_defer(previous, "could not delete the previous version; it will be removed later");
     }
@@ -147,12 +155,34 @@ mod tests {
         let slot = slot_with(dir.path(), b"2.8.4");
         fs::write(slot.join("composer.bat"), b"old wrapper").unwrap();
         let replacement = place_file_blocking(&download(dir.path(), b"2.8.5"), &slot, "composer.phar", &CancelFlag::new()).unwrap();
-        assert_eq!(names(&slot), ["composer.phar"], "the slot holds exactly the new package");
+        assert_eq!(names(&slot), [leftovers::PENDING_MARKER, "composer.phar"], "the new package, not committed yet");
         assert_eq!(fs::read(slot.join("composer.phar")).unwrap(), b"2.8.5");
         let previous = replacement.previous.clone().unwrap();
         assert_eq!(fs::read(previous.join("composer.phar")).unwrap(), b"2.8.4", "kept until committed");
         commit(&replacement);
         assert_eq!(names(dir.path()), ["composer-2.8"]);
+        assert_eq!(names(&slot), ["composer.phar"], "the slot holds exactly the new package");
+    }
+
+    /// A crash after the swap but before the commit (during the hook or the record), or a
+    /// rollback that could not move the new files out: the new files were never recorded, so the
+    /// next start puts the previous version back instead of deleting it.
+    #[cfg(windows)]
+    #[test]
+    fn a_replacement_never_committed_is_undone_at_the_next_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let slot = slot_with(dir.path(), b"2.8.4");
+        let replacement = place_file_blocking(&download(dir.path(), b"2.8.5"), &slot, "composer.phar", &CancelFlag::new()).unwrap();
+        // The process that placed the files is gone.
+        let gone = crate::pid::exited_process_id();
+        fs::rename(replacement.previous.unwrap(), dir.path().join(format!("composer-2.8.old-{gone}-1"))).unwrap();
+        fs::write(slot.join(leftovers::PENDING_MARKER), gone.to_string()).unwrap();
+
+        leftovers::repair(&slot);
+
+        assert_eq!(fs::read(slot.join("composer.phar")).unwrap(), b"2.8.4");
+        assert_eq!(names(dir.path()), ["composer-2.8"], "the unrecorded files are deleted");
+        assert_eq!(names(&slot), ["composer.phar"]);
     }
 
     #[test]

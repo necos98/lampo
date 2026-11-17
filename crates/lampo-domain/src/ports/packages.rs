@@ -89,7 +89,8 @@ impl std::fmt::Debug for SlotGuard {
 
 /// Mutual exclusion per package slot (kind + series + PHP minor), within the process and
 /// across Lampo processes (GUI, CLI): two installs into one slot never download into the same
-/// partial file or extract into the same directory at the same time.
+/// partial file or extract into the same directory at the same time, and an uninstall never
+/// removes a slot an install is replacing.
 #[async_trait]
 pub trait PackageSlotLock: Send + Sync {
     /// Waits until nobody else holds the slot of `id`, then reserves it until the guard is

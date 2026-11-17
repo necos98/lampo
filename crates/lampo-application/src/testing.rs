@@ -188,6 +188,8 @@ impl ShimIndexReader for MemShimIndex {
     }
 }
 
+/// Like the real registry: one directory and one record per slot (kind, series, PHP minor), so a
+/// patch update replaces the record of the patch it updates.
 #[derive(Default)]
 pub struct MemInstalled {
     pub packages: Mutex<Vec<InstalledPackage>>,
@@ -210,16 +212,22 @@ impl InstalledPackageRegistry for MemInstalled {
         Ok(lock(&self.packages).clone())
     }
     fn install_dir(&self, id: &PackageId) -> PathBuf {
-        PathBuf::from("C:\\lampo\\packages").join(id.key())
+        PathBuf::from("C:\\lampo\\packages").join(slot_dir_name(id))
     }
     fn record(&self, package: &InstalledPackage) -> PortResult<()> {
         let mut all = lock(&self.packages);
-        all.retain(|p| p.id != package.id);
+        all.retain(|p| slot_of(&p.id) != slot_of(&package.id));
         all.push(fake_layout(package.clone()));
         Ok(())
     }
+    /// `NotFound` unless exactly `id` is recorded (its slot may hold another patch by now).
     async fn remove(&self, id: &PackageId) -> PortResult<()> {
-        lock(&self.packages).retain(|p| &p.id != id);
+        let mut all = lock(&self.packages);
+        let before = all.len();
+        all.retain(|p| &p.id != id);
+        if all.len() == before {
+            return Err(PortError::not_found("package", id.to_string()));
+        }
         lock(&self.removed).push(id.clone());
         Ok(())
     }
@@ -784,6 +792,19 @@ impl ArchiveExtractor for FakeExtractor {
 /// A package slot: kind, series, PHP minor.
 type SlotKey = (PackageKind, VersionSeries, Option<PhpMinor>);
 
+fn slot_of(id: &PackageId) -> SlotKey {
+    (id.kind.clone(), id.series(), id.php)
+}
+
+/// The directory of the slot of `id`, named as the real registry names it (`php-8.3`,
+/// `xdebug-3.3-php8.3`).
+fn slot_dir_name(id: &PackageId) -> String {
+    match id.php {
+        Some(php) => format!("{}-{}-php{php}", id.kind, id.series()),
+        None => format!("{}-{}", id.kind, id.series()),
+    }
+}
+
 /// One async mutex per slot, like the real lock within a process.
 #[derive(Default)]
 pub struct MemSlotLock(Mutex<BTreeMap<SlotKey, Arc<tokio::sync::Mutex<()>>>>);
@@ -791,7 +812,7 @@ pub struct MemSlotLock(Mutex<BTreeMap<SlotKey, Arc<tokio::sync::Mutex<()>>>>);
 impl PackageSlotLock for MemSlotLock {
     async fn acquire(&self, id: &PackageId, cancel: &CancelFlag) -> PortResult<SlotGuard> {
         cancel.check()?;
-        let slot = lock(&self.0).entry((id.kind.clone(), id.series(), id.php)).or_default().clone();
+        let slot = lock(&self.0).entry(slot_of(id)).or_default().clone();
         Ok(SlotGuard::new(slot.lock_owned().await))
     }
 }
@@ -1078,6 +1099,9 @@ pub struct World {
     pub presets: Arc<MemPresets>,
     pub shim_index: Arc<MemShimIndex>,
     pub installed: Arc<MemInstalled>,
+    /// The package slot locks installs and uninstalls share (one per process, as in the
+    /// composition roots).
+    pub package_slots: Arc<MemSlotLock>,
     pub web: Arc<FakeWeb>,
     pub ini: Arc<FakeIni>,
     pub hosts: Arc<FakeHosts>,
@@ -1171,6 +1195,7 @@ impl World {
             presets: Arc::new(MemPresets::default()),
             shim_index,
             installed,
+            package_slots: Arc::new(MemSlotLock::default()),
             web,
             ini,
             hosts,
@@ -1401,18 +1426,20 @@ impl World {
 impl World {
     /// `UninstallPackage` syncing through this world's `ApplyEnvironment`.
     pub fn uninstall_package(&self) -> UninstallPackage {
-        self.uninstall_package_with(self.installed.clone())
+        self.uninstall_package_with(self.installed.clone(), self.env.clone())
     }
 
-    /// [`Self::uninstall_package`] removing through `installed` (a wrapper of this world's registry).
-    pub fn uninstall_package_with(&self, installed: Arc<dyn InstalledPackageRegistry>) -> UninstallPackage {
+    /// [`Self::uninstall_package`] removing through `installed` and syncing through `env`
+    /// (wrappers of this world's registry and environment).
+    pub fn uninstall_package_with(&self, installed: Arc<dyn InstalledPackageRegistry>, env: Arc<dyn EnvironmentSync>) -> UninstallPackage {
         UninstallPackage::new(UninstallPackageDeps {
             installed,
+            slots: self.package_slots.clone(),
             projects: self.projects.clone(),
             worktrees: self.worktrees.clone(),
             settings: self.settings.clone(),
             events: self.events.clone(),
-            env: self.env.clone(),
+            env,
             services: self.services.clone(),
         })
     }

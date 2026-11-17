@@ -202,7 +202,8 @@ impl InstalledPackageRegistry for FsInstalledPackageRegistry {
 
 impl FsInstalledPackageRegistry {
     /// Moves the slot of exactly `id` aside and drops its record. Returns the slot and where its
-    /// files now are (deleted by the caller).
+    /// files now are (deleted by the caller). If the record cannot be dropped, the files are put
+    /// back: the package stays installed (a trash copy would be deleted at the next start).
     fn unrecord(&self, id: &PackageId) -> PortResult<(PathBuf, PathBuf)> {
         let _guard = self.lock.lock().unwrap_or_else(|p| p.into_inner());
         let records = self.load()?;
@@ -219,11 +220,24 @@ impl FsInstalledPackageRegistry {
         let dir = self.paths.packages_dir().join(&record.dir);
         // Move aside first: if a running service holds files, this fails and nothing changes.
         let trash = leftovers::sibling(&dir, Leftover::Removed);
-        if dir.exists() {
+        let moved = dir.exists();
+        if moved {
             std::fs::rename(&dir, &trash).map_err(|e| PortError::io(format!("removing {} (is a service using it? stop it and retry)", dir.display()), e))?;
         }
-        self.save(keep)?;
+        if let Err(e) = self.save(keep) {
+            if moved {
+                put_back(&trash, &dir);
+            }
+            return Err(e);
+        }
         Ok((dir, trash))
+    }
+}
+
+/// Renames the files of a removal that did not happen from `trash` back into the slot `dir`.
+fn put_back(trash: &Path, dir: &Path) {
+    if let Err(e) = std::fs::rename(trash, dir) {
+        tracing::error!(dir = %dir.display(), from = %trash.display(), error = %e, "cannot put the files of a package that stays installed back; move the folder back by hand before restarting Lampo");
     }
 }
 
@@ -356,6 +370,27 @@ mod tests {
         std::fs::create_dir_all(&stale).unwrap();
         reg.remove(&p.id).await.unwrap();
         assert!(!p.install_dir.exists() && !stale.exists());
+    }
+
+    /// `installed.toml` cannot be replaced (another program holds it): the record stays, so the
+    /// files must stay too, or the next start would delete them as an uninstall's trash.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn a_record_that_cannot_be_dropped_keeps_the_files() {
+        use std::os::windows::fs::OpenOptionsExt;
+        /// Others may read the file, never replace or delete it.
+        const FILE_SHARE_READ: u32 = 0x1;
+
+        let (_d, reg) = registry();
+        let p = install(&reg, &id(PackageKind::MYSQL, "8.4.13", None));
+        let held = std::fs::OpenOptions::new().read(true).share_mode(FILE_SHARE_READ).open(reg.file()).unwrap();
+
+        assert!(matches!(reg.remove(&p.id).await, Err(PortError::Io { .. })));
+
+        drop(held);
+        assert_eq!(std::fs::read_to_string(p.install_dir.join("version.txt")).unwrap(), "8.4.13", "the files are back in the slot");
+        assert_eq!(reg.list().unwrap().iter().map(|p| p.id.clone()).collect::<Vec<_>>(), std::slice::from_ref(&p.id));
+        assert!(crate::leftovers::slots_with_leftovers(&reg.paths.packages_dir()).unwrap().is_empty(), "no trash copy for the next start to delete");
     }
 
     #[test]

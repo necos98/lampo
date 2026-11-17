@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use lampo_domain::events::DomainEvent;
 use lampo_domain::package::{PackageKind, PackagePayload};
-use lampo_domain::ports::{InstalledPackageRegistry, PackageCatalogSource, ProjectRepository, SettingsRepository};
+use lampo_domain::ports::{InstalledPackageRegistry, NullProgressSink, PackageCatalogSource, PackageInstallHook, ProjectRepository, SettingsRepository};
 use lampo_domain::progress::{CancelFlag, ProgressStage};
 use lampo_domain::vc_runtime::VcRuntime;
 use lampo_domain::tcp_port::Port;
@@ -14,7 +14,6 @@ use super::allocation::after_a_locked_commit;
 use super::{cli, gui};
 use crate::dto::*;
 use crate::error::{AppResult, ErrorCode};
-use crate::mapping::package_id_to_dto;
 use crate::testing::*;
 use crate::use_cases::*;
 
@@ -54,13 +53,13 @@ impl Kit {
         );
         let live = FakeSource::new("windows.php.net", vec![catalog_entry(PackageKind::PHP, "8.4.3", None)]);
         Self {
+            slots: w.package_slots.clone(),
             w,
             source,
             live,
             downloader: Arc::new(FakeDownloader::default()),
             extractor: Arc::new(FakeExtractor::default()),
             hook: Arc::new(FakeHook::new(PackageKind::PHP)),
-            slots: Arc::new(MemSlotLock::default()),
             vc: Arc::new(FakeVc::modern()),
             sync: Arc::new(CountingSync::default()),
         }
@@ -71,13 +70,17 @@ impl Kit {
     }
 
     fn install(&self) -> Arc<InstallPackage> {
+        self.install_with_hooks(vec![self.hook.clone()])
+    }
+
+    fn install_with_hooks(&self, hooks: Vec<Arc<dyn PackageInstallHook>>) -> Arc<InstallPackage> {
         Arc::new(InstallPackage::new(InstallPackageDeps {
             sources: self.sources(),
             downloader: self.downloader.clone(),
             extractor: self.extractor.clone(),
             installed: self.w.installed.clone(),
             slots: self.slots.clone(),
-            hooks: vec![self.hook.clone()],
+            hooks,
             vc: self.vc.clone(),
             settings: self.w.settings_writer(),
             paths: self.w.paths.clone(),
@@ -120,18 +123,18 @@ async fn install_runs_the_whole_pipeline_and_adopts_the_first_php_as_default() {
     let progress = RecordingProgress::default();
     let dto = k.install().execute(request("php", None, Some("8.3")), &gui(), &progress, &CancelFlag::new()).await.unwrap();
     assert_eq!(dto.id, PackageIdDto { kind: "php".into(), version: "8.3.15".into(), php_version: None });
-    assert_eq!(dto.path, "C:\\lampo\\packages\\php-8.3.15");
+    assert_eq!(dto.path, "C:\\lampo\\packages\\php-8.3");
     assert_eq!(progress.stages(), [ProgressStage::Resolving, ProgressStage::Downloading, ProgressStage::Verifying, ProgressStage::Extracting, ProgressStage::Configuring]);
     let subjects: Vec<Option<String>> = progress.0.lock().unwrap().iter().map(|p| p.subject.clone()).collect();
     assert!(subjects.iter().all(|s| s.as_deref() == Some("php")), "every stage names the requested kind, so the UI can follow it: {subjects:?}");
     let downloads = k.downloader.downloads.lock().unwrap().clone();
     assert_eq!(downloads, [k.w.paths.downloads_dir().join("php-8.3.15-php-8.3.15.zip")]);
     assert_eq!(*k.downloader.discarded.lock().unwrap(), downloads, "the archive is deleted once extracted");
-    assert_eq!(k.extractor.extracted.lock().unwrap()[0].1, std::path::PathBuf::from("C:\\lampo\\packages\\php-8.3.15"));
+    assert_eq!(k.extractor.extracted.lock().unwrap()[0].1, std::path::PathBuf::from("C:\\lampo\\packages\\php-8.3"));
     assert_eq!(k.hook.calls.lock().unwrap().len(), 1, "the PHP hook ran");
     assert!(k.w.installed.has(&PackageKind::PHP, "8.3.15"));
     let committed: Vec<_> = k.extractor.committed.lock().unwrap().iter().map(|r| r.destination.clone()).collect();
-    assert_eq!(committed, [std::path::PathBuf::from("C:\\lampo\\packages\\php-8.3.15")], "the previous version is deleted once installed");
+    assert_eq!(committed, [std::path::PathBuf::from("C:\\lampo\\packages\\php-8.3")], "the previous version is deleted once installed");
     assert!(k.extractor.rolled_back.lock().unwrap().is_empty());
     assert_eq!(k.w.settings.load().unwrap().default_php, Some(php("8.3")));
     assert!(k.w.events.all().contains(&DomainEvent::PackagesChanged));
@@ -262,7 +265,7 @@ async fn a_failing_hook_restores_the_previous_version() {
     let err = k.install().execute(request("php", Some("8.3.15"), None), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap_err();
     assert_eq!(err.code, ErrorCode::Io, "{err:?}");
     let rolled_back = k.extractor.rolled_back.lock().unwrap().clone();
-    assert_eq!(rolled_back.iter().map(|r| r.destination.clone()).collect::<Vec<_>>(), [std::path::PathBuf::from("C:\\lampo\\packages\\php-8.3.15")]);
+    assert_eq!(rolled_back.iter().map(|r| r.destination.clone()).collect::<Vec<_>>(), [std::path::PathBuf::from("C:\\lampo\\packages\\php-8.3")]);
     assert!(k.extractor.committed.lock().unwrap().is_empty(), "the previous version is kept");
     assert_eq!(k.w.installed.list().unwrap().iter().map(|p| p.id.clone()).collect::<Vec<_>>(), [previous.id], "only the previous version is recorded");
     assert!(k.w.installed.removed.lock().unwrap().is_empty(), "no record is removed: the failed one was never written");
@@ -280,6 +283,54 @@ async fn a_retry_after_a_failed_install_proceeds() {
     install.execute(request("php", Some("8.3.15"), None), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap();
     assert!(k.w.installed.has(&PackageKind::PHP, "8.3.15"));
     assert_eq!(k.extractor.committed.lock().unwrap().len(), 1);
+}
+
+/// A PHP hook holding the install between placing the new files and recording them.
+#[derive(Default)]
+struct HeldHook {
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl PackageInstallHook for HeldHook {
+    fn kind(&self) -> PackageKind {
+        PackageKind::PHP
+    }
+    async fn after_install(&self, _package: &lampo_domain::package::InstalledPackage) -> lampo_domain::PortResult<()> {
+        self.entered.notify_one();
+        self.release.notified().await;
+        Ok(())
+    }
+}
+
+/// `lampo package install php 8.3` (8.3.14 → 8.3.15 in `php-8.3`) and the GUI uninstalling 8.3.14
+/// meanwhile: the uninstall waits for the update, then finds 8.3.14 gone instead of deleting the
+/// slot that now holds 8.3.15.
+#[tokio::test]
+async fn an_uninstall_waits_for_the_update_of_its_slot() {
+    let k = Kit::new(World::with_basics());
+    let hook = Arc::new(HeldHook::default());
+    let install = k.install_with_hooks(vec![hook.clone()]);
+    let uninstall = k.w.uninstall_package();
+    let cancel = CancelFlag::new();
+    let (cli, gui) = (cli(), gui());
+
+    let update = install.execute(request("php", None, Some("8.3")), &cli, &NullProgressSink, &cancel);
+    let removal = async {
+        hook.entered.notified().await;
+        let removal = uninstall.execute(PackageIdDto { kind: "php".into(), version: "8.3.14".into(), php_version: None }, &gui);
+        tokio::pin!(removal);
+        assert!(futures_util::poll!(&mut removal).is_pending(), "the uninstall waits while the update holds the slot");
+        hook.release.notify_one();
+        removal.await
+    };
+    let (updated, removed) = tokio::join!(update, removal);
+
+    assert_eq!(updated.unwrap().id.version, "8.3.15");
+    assert_eq!(removed.unwrap_err().code, ErrorCode::NotFound, "8.3.14 was replaced by the update");
+    assert!(k.w.installed.has(&PackageKind::PHP, "8.3.15"));
+    assert!(k.w.installed.removed.lock().unwrap().is_empty(), "the slot was never removed");
 }
 
 #[tokio::test]
@@ -315,7 +366,7 @@ async fn single_file_packages_are_downloaded_aside_verified_then_placed() {
     k.install().execute(request("composer", None, None), &gui(), &RecordingProgress::default(), &CancelFlag::new()).await.unwrap();
     let download = k.w.paths.downloads_dir().join("composer-2.8.4-composer-2.8.4.zip");
     assert_eq!(*k.downloader.downloads.lock().unwrap(), std::slice::from_ref(&download), "never straight into the install dir");
-    assert_eq!(*k.extractor.placed.lock().unwrap(), [(download, std::path::PathBuf::from("C:\\lampo\\packages\\composer-2.8.4"), "composer.phar".to_string())]);
+    assert_eq!(*k.extractor.placed.lock().unwrap(), [(download, std::path::PathBuf::from("C:\\lampo\\packages\\composer-2.8"), "composer.phar".to_string())]);
     assert!(k.extractor.extracted.lock().unwrap().is_empty());
 }
 
@@ -559,12 +610,14 @@ async fn uninstall_refuses_the_last_build_in_use() {
     let err = uninstall.execute(php83.clone(), &gui()).await.unwrap_err();
     assert_eq!((err.code, err.details.unwrap()["usedBy"].clone()), (ErrorCode::Conflict, serde_json::json!(["shop"])));
 
-    // Another 8.3 build satisfies the project: the old one can go.
-    let newer = w.installed.add(PackageKind::PHP, "8.3.15", None);
+    // Once the project moved to another series (one build per series), 8.3 can go.
+    w.update_project("shop", |p| p.environment.php = php("8.4"));
     uninstall.execute(php83, &gui()).await.unwrap();
     assert!(!w.installed.has(&PackageKind::PHP, "8.3.14"));
     assert!(w.events.all().contains(&DomainEvent::PackagesChanged));
-    assert_eq!(uninstall.execute(package_id_to_dto(&newer.id), &gui()).await.unwrap_err().code, ErrorCode::Conflict);
+    let php84 = PackageIdDto { kind: "php".into(), version: "8.4.1".into(), php_version: None };
+    let err = uninstall.execute(php84, &gui()).await.unwrap_err();
+    assert_eq!((err.code, err.details.unwrap()["usedBy"].clone()), (ErrorCode::Conflict, serde_json::json!(["shop", "system"])));
 
     // The always-on MySQL and the default PHP are protected too; unused packages are not.
     assert_eq!(uninstall.execute(PackageIdDto { kind: "mysql".into(), version: "8.4.3".into(), php_version: None }, &gui()).await.unwrap_err().code, ErrorCode::Conflict);

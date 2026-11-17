@@ -75,7 +75,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     // Live sources first (on duplicate ids the first source wins), the embedded catalog last.
     let sources: Vec<Arc<dyn PackageCatalogSource>> = packages::catalog::default_sources(http.clone(), &paths);
     let installed: Arc<dyn InstalledPackageRegistry> = Arc::new(packages::FsInstalledPackageRegistry::new(paths.clone()));
-    // One slot lock for the whole app: installs and the startup leftover sweep share it.
+    // One slot lock for the whole app: installs, uninstalls and the startup leftover sweep share it.
     let package_slots = Arc::new(packages::FsPackageSlotLock::new(&paths));
     let vc: Arc<dyn VcRuntimeDetector> = Arc::new(packages::RegistryVcRuntimeDetector);
 
@@ -190,6 +190,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     // The GUI "Pacchetti" page and `lampo package uninstall` (via the control pipe).
     let uninstall_package = Arc::new(UninstallPackage::new(UninstallPackageDeps {
         installed: installed.clone(),
+        slots: package_slots.clone(),
         projects: projects.clone(),
         worktrees: worktrees.clone(),
         settings: settings.clone(),

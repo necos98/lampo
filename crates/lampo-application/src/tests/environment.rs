@@ -71,7 +71,7 @@ async fn running_services_are_the_union_of_active_projects_plus_default_mysql() 
     assert_eq!(report.started.last().unwrap(), "apache", "Apache starts after its databases");
     let config = w.web.last().unwrap();
     assert_eq!(config.vhosts.iter().map(|v| v.site.to_string()).collect::<Vec<_>>(), ["legacy", "shop"]);
-    assert_eq!(config.vhosts[1].php_cgi, PathBuf::from("C:\\lampo\\packages\\php-8.3.14\\php-cgi.exe"));
+    assert_eq!(config.vhosts[1].php_cgi, PathBuf::from("C:\\lampo\\packages\\php-8.3\\php-cgi.exe"));
 
     // Deactivating `legacy` stops MySQL 5.7 (nobody needs it) and reloads Apache.
     w.update_project("legacy", |p| p.active = false);
@@ -115,7 +115,7 @@ async fn worktree_environments_are_served_while_they_exist_and_inherit_the_paren
     let report = w.env.sync(&gui()).await.unwrap();
     assert_eq!(report.restarted, ["apache"]);
     let vhost = w.web.last().unwrap().vhosts.into_iter().next().unwrap();
-    assert_eq!(vhost.php_cgi, PathBuf::from("C:\\lampo\\packages\\php-8.4.1\\php-cgi.exe"));
+    assert_eq!(vhost.php_cgi, PathBuf::from("C:\\lampo\\packages\\php-8.4\\php-cgi.exe"));
     assert_eq!(vhost.document_root, PathBuf::from("D:\\wt\\fix").join("public"));
     let ini = w.ini.0.lock().unwrap().iter().find(|s| s.site.to_string() == "shop@fix-1").cloned().unwrap();
     assert_eq!(ini.php, php("8.4"));
@@ -308,7 +308,7 @@ async fn php_ini_covers_every_site_with_addons_and_the_default_cli_ini() {
     assert_eq!(shop.output_dir, w.paths.php_ini_dir(&"shop".parse().unwrap()));
     let xdebug = shop.extensions.iter().find(|e| e.name.as_str() == "xdebug").unwrap();
     assert!(xdebug.zend);
-    assert_eq!(xdebug.dll.as_ref().unwrap(), &PathBuf::from("C:\\lampo\\packages\\xdebug-3.3.2-php8.3\\php_xdebug.dll"));
+    assert_eq!(xdebug.dll.as_ref().unwrap(), &PathBuf::from("C:\\lampo\\packages\\xdebug-3.3-php8.3\\php_xdebug.dll"));
     assert!(shop.extensions.iter().any(|e| e.name.as_str() == "intl" && e.dll.is_none()));
     assert_eq!(shop.values.iter().find(|(k, _)| k.as_str() == "display_errors").unwrap().1.as_str(), "On");
     let default = specs.iter().find(|s| s.output_dir == w.paths.default_php_ini_dir()).unwrap();
@@ -334,11 +334,11 @@ async fn shim_index_lists_projects_worktrees_and_the_default_with_the_right_comp
     let sites: Vec<String> = index.projects.iter().map(|e| e.site.to_string()).collect();
     assert_eq!(sites, ["old", "shop", "shop@fix-1"]);
     let old = index.by_site(&"old".parse().unwrap()).unwrap();
-    assert_eq!(old.target.composer_phar.as_ref().unwrap(), &PathBuf::from("C:\\lampo\\packages\\composer-2.2.25\\composer.phar"));
+    assert_eq!(old.target.composer_phar.as_ref().unwrap(), &PathBuf::from("C:\\lampo\\packages\\composer-2.2\\composer.phar"));
     let old_mysql = &old.target.services[&ServiceKind::MYSQL];
     assert_eq!((old_mysql.port, old_mysql.database.is_none()), (Port::of(3306), true), "no MySQL → default instance, no database");
     let shop = index.by_site(&"shop".parse().unwrap()).unwrap();
-    assert_eq!(shop.target.composer_phar.as_ref().unwrap(), &PathBuf::from("C:\\lampo\\packages\\composer-2.8.4\\composer.phar"));
+    assert_eq!(shop.target.composer_phar.as_ref().unwrap(), &PathBuf::from("C:\\lampo\\packages\\composer-2.8\\composer.phar"));
     assert_eq!(shop.target.phprc_dir.as_ref().unwrap(), &w.paths.php_ini_dir(&"shop".parse().unwrap()));
     let wt = index.by_site(&"shop@fix-1".parse::<SiteId>().unwrap()).unwrap();
     assert_eq!(wt.root.as_str(), "D:\\wt\\fix");
@@ -471,7 +471,7 @@ async fn mailpit_runs_for_its_sites_and_feeds_php_mail() {
     let env = tc.env(&shop_dir()).unwrap();
     assert_eq!(env.site.as_deref(), Some("shop"));
     assert_eq!((env.vars["LAMPO_MAIL_HOST"].as_str(), env.vars["LAMPO_MAIL_PORT"].as_str()), ("127.0.0.1", "1025"));
-    assert!(env.path_prepend.iter().any(|p| p.ends_with("mailpit-1.33.1")), "{:?}", env.path_prepend);
+    assert!(env.path_prepend.iter().any(|p| p.ends_with("mailpit-1.33")), "{:?}", env.path_prepend);
     assert!(!env.vars.contains_key("MAIL_PORT"));
     let agent = crate::use_cases::AgentContextQuery::new(crate::use_cases::AgentContextDeps {
         resolver: w.resolver(),
