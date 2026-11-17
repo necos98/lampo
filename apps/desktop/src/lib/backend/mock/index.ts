@@ -250,7 +250,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 			appRunning: true,
 			services: [...services.values()].map(clone),
 			projects: projects.map((p) => ({ id: p.id, name: p.name, root: p.root, active: p.active, url: p.url, phpVersion: p.environment.phpVersion, mysqlVersion: mysqlOf(p.environment), worktreeCount: worktrees.filter((w) => w.projectId === p.id).length })),
-			worktreeCount: worktrees.length
+			worktreeCount: worktrees.length,
+			unreadableProjects: []
 		}),
 		quitApp: async () => {},
 		prepareUpdate: async () => {
@@ -668,6 +669,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 			const servicesStatus: T.CheckStatus = down.some((s) => s.state === 'failed') ? 'error' : down.length ? 'warning' : 'ok';
 			// Same ids, order and fix hints as the real `standard_checks`, so every fix action can show up.
 			const checks: T.DoctorCheck[] = [
+				{ id: 'settings', status: 'ok', message: 'Impostazioni leggibili', fix: null },
+				{ id: 'project-files', status: 'ok', message: 'File dei progetti leggibili', fix: null },
 				{ id: 'vc-runtime', status: missingVc.length ? 'error' : 'ok', message: missingVc.length ? 'Runtime Visual C++ 2012 mancante (php-5.6.40)' : 'Runtime Visual C++ presenti', fix: missingVc.length ? 'Install the Visual C++ 2012 redistributable' : null },
 				{ id: 'ports', status: failed ? 'error' : 'ok', message: failed ? 'La porta 3307 è occupata da mysqld.exe (PID 4412)' : 'Nessun conflitto di porte', fix: failed ? 'Stop mysqld.exe or change the MySQL 5.7 port in settings' : null },
 				{ id: 'shims-on-path', status: shims.onPath ? 'ok' : 'warning', message: shims.onPath ? 'Le shim sono nel PATH' : 'Le shim non sono nel PATH', fix: shims.onPath ? null : 'Run install shims' },
@@ -688,7 +691,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 				staleWorktrees: stale,
 				missingPackages,
 				servicesDown,
-				hostsFileInSync: hostsInSync
+				hostsFileInSync: hostsInSync,
+				unreadableProjects: []
 			};
 		},
 		hostsInSync: async () => {

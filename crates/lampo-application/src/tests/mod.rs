@@ -20,6 +20,7 @@ mod service_lifecycle;
 mod settings;
 mod store_reads;
 mod uninstall;
+mod unreadable_config;
 mod untrusted_config;
 mod web_isolation;
 mod which;

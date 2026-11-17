@@ -10,6 +10,8 @@ mod desktop;
 pub use desktop::opened;
 mod detection;
 pub use detection::detection;
+mod unreadable;
+pub use unreadable::{unreadable_projects, unreadable_projects_warning};
 mod which;
 pub use which::which;
 
@@ -65,7 +67,13 @@ pub fn status(status: &StatusDto) -> String {
     out.push_str(&table(&rows));
     out.push_str(&format!("\n\nProjects ({}), worktree environments: {}\n", status.projects.len(), status.worktree_count));
     out.push_str(&project_summaries(&status.projects));
+    out.push_str(&unreadable_projects(&status.unreadable_projects));
     out
+}
+
+/// `project list`: the table, then the project files that do not load.
+pub fn project_list(list: &ProjectSummaryListDto) -> String {
+    project_summaries(&list.projects) + &unreadable_projects(&list.unreadable)
 }
 
 pub fn project_summaries(projects: &[ProjectSummaryDto]) -> String {

@@ -10,6 +10,7 @@ use lampo_domain::mysql::accounts::MysqlCredentials;
 use lampo_domain::mysql::auth::legacy_php_auth_warning;
 use lampo_domain::package::{PackageId, PackageKind};
 use lampo_domain::php::{ExtensionName, PhpMinor, php_ini_overrides};
+use lampo_domain::ports::UnreadableProject;
 use lampo_domain::project::{ApacheDirectives, ProjectEnvVars, ProjectEnvironment, PublicDir, TlsMode};
 use lampo_domain::service::{ServiceId, ServiceKind};
 use lampo_domain::settings::{MailConnection, ServiceInstanceSettings, Settings};
@@ -123,6 +124,10 @@ pub fn connection_to_dto(c: &DatabaseConnection) -> DatabaseConnectionDto {
         password: c.password.clone(),
         database: c.database.to_string(),
     }
+}
+
+pub fn unreadable_project_to_dto(u: &UnreadableProject) -> UnreadableProjectDto {
+    UnreadableProjectDto { file: u.file.display().to_string(), reason: u.reason.clone() }
 }
 
 pub fn mail_to_dto(m: &MailConnection) -> MailConnectionDto {

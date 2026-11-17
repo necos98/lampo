@@ -92,6 +92,7 @@ impl From<DomainError> for AppError {
         let code = match &e {
             DomainError::DuplicatePort { .. }
             | DomainError::DuplicateProjectId(_)
+            | DomainError::UnreadableProjectId(_)
             | DomainError::DuplicateProjectRoot { .. }
             | DomainError::DuplicateHostname { .. }
             | DomainError::DuplicateLoopbackPort { .. }

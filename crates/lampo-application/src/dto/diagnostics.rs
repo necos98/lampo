@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use super::project::UnreadableProjectDto;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
@@ -9,8 +11,9 @@ pub enum CheckStatus {
     Error,
 }
 
-/// One `doctor` check. `id` is stable (`vc-runtime`, `ports`, `path-shadowing`, `shims-on-path`,
-/// `hosts-block`, `packages`, `services`, `mysql-auth`, `stale-worktrees`, `folders`, `app`).
+/// One `doctor` check. `id` is stable (`settings`, `project-files`, `vc-runtime`, `ports`,
+/// `path-shadowing`, `shims-on-path`, `hosts-block`, `packages`, `services`, `mysql-auth`,
+/// `stale-worktrees`, `folders`, `app`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DoctorCheck"))]
 #[serde(rename_all = "camelCase")]
@@ -70,6 +73,9 @@ pub struct DoctorReportDto {
     /// Services the plan needs that are `failed` or `stopped` (`apache`, `mysql-8.4`).
     pub services_down: Vec<String>,
     pub hosts_file_in_sync: bool,
+    /// Project files that do not load, with the reason (`project-files`).
+    #[serde(default)]
+    pub unreadable_projects: Vec<UnreadableProjectDto>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

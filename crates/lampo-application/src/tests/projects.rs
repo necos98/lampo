@@ -344,7 +344,7 @@ async fn project_views_report_missing_folders_and_summaries() {
     assert!(list.unreadable.is_empty());
     let shop = q.get("shop").unwrap();
     assert_eq!(shop.database.as_ref().unwrap().port, 3306);
-    let summaries = q.summaries().unwrap();
+    let summaries = q.summaries().unwrap().projects;
     assert_eq!(summaries[1].php_version, "8.3");
     assert_eq!(q.get("Bad Id").unwrap_err().code, ErrorCode::Validation);
     let _ = PackageKind::PHP;

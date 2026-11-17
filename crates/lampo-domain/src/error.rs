@@ -71,6 +71,8 @@ pub enum DomainError {
     DuplicatePort { port: u16, first: String, second: String },
     #[error("a project with id `{0}` already exists")]
     DuplicateProjectId(String),
+    #[error("the id `{0}` belongs to a project file that does not load: repair or delete that file first")]
+    UnreadableProjectId(String),
     #[error("project `{other}` already uses the folder `{root}`")]
     DuplicateProjectRoot { root: String, other: String },
     #[error("project `{other}` already uses the hostname `{hostname}`")]

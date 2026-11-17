@@ -145,7 +145,7 @@ async fn the_cli_reads_the_states_from_the_running_app() {
     let w = world_with_shop();
     w.apache.set(&apache_id(), ServiceState::Failed);
     let services = ServiceQueries::new(w.runners(), w.services.clone(), w.projects.clone(), w.worktrees.clone(), w.settings.clone()).list().unwrap();
-    let status = StatusDto { app_running: true, services: services.clone(), projects: Vec::new(), worktree_count: 0 };
+    let status = StatusDto { app_running: true, services: services.clone(), projects: Vec::new(), worktree_count: 0, unreadable_projects: Vec::new() };
     let app = Arc::new(AnsweringApp { reply: ControlReply::Ok { payload: serde_json::to_value(status).unwrap() }, seen: Mutex::default() });
     let (source, _) = app_service_status(app.clone());
 

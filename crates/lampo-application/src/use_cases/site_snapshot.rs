@@ -13,7 +13,8 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use lampo_domain::project::{Project, ProjectId};
+use lampo_domain::ports::ProjectListing;
+use lampo_domain::project::{Project, ProjectId, unique_project_id};
 use lampo_domain::settings::Settings;
 use lampo_domain::tcp_port::Port;
 use lampo_domain::worktree::WorktreeEnvironment;
@@ -52,6 +53,9 @@ pub struct SiteSnapshot {
     /// Loopback ports named by project files that do not load: never handed out, so a repaired
     /// project does not find its listener taken.
     pub reserved_ports: BTreeSet<Port>,
+    /// Ids of the project files that do not load: never given to a new project, whose save would
+    /// replace the file and inherit its worktree environments.
+    pub reserved_ids: BTreeSet<ProjectId>,
     /// Sorted by parent and slug, as the repository lists them.
     pub worktrees: Vec<WorktreeEnvironment>,
     pub settings: Settings,
@@ -60,15 +64,16 @@ pub struct SiteSnapshot {
 
 impl SiteSnapshot {
     /// Loaded during `commit` of `revision`, before anything was written.
-    pub(crate) fn loaded(
-        projects: Vec<Project>,
-        reserved_ports: BTreeSet<Port>,
-        worktrees: Vec<WorktreeEnvironment>,
-        settings: Settings,
-        revision: Arc<RegistryRevision>,
-        commit: u64,
-    ) -> Self {
-        Self { projects, reserved_ports, worktrees, settings, stamp: Stamp { revision, commit, describes_commit: false } }
+    pub(crate) fn loaded(listing: ProjectListing, worktrees: Vec<WorktreeEnvironment>, settings: Settings, revision: Arc<RegistryRevision>, commit: u64) -> Self {
+        let reserved_ports = listing.unreadable.iter().flat_map(|u| u.loopback_ports.iter().copied()).collect();
+        let reserved_ids = listing.unreadable_ids();
+        Self { projects: listing.projects, reserved_ports, reserved_ids, worktrees, settings, stamp: Stamp { revision, commit, describes_commit: false } }
+    }
+
+    /// The first free id derived from `base`, for a new project: neither a project's nor a
+    /// [`Self::reserved_ids`] one.
+    pub(crate) fn unique_project_id(&self, base: &ProjectId) -> ProjectId {
+        unique_project_id(&self.projects, &self.reserved_ids, base)
     }
 
     /// The registry after a commit that wrote nothing.
@@ -136,7 +141,7 @@ mod tests {
 
     fn loaded(revision: &Arc<RegistryRevision>, projects: Vec<Project>) -> SiteSnapshot {
         let commit = revision.begin_commit();
-        SiteSnapshot::loaded(projects, BTreeSet::new(), Vec::new(), Settings::default(), revision.clone(), commit)
+        SiteSnapshot::loaded(ProjectListing { projects, unreadable: Vec::new() }, Vec::new(), Settings::default(), revision.clone(), commit)
     }
 
     #[test]

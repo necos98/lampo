@@ -1,6 +1,8 @@
 //! Worktree environments: idempotent `up`, port allocation, database modes, `down`, prune.
 
+use std::future::Future;
 use std::sync::atomic::Ordering;
+use std::task::{Context, Waker};
 
 use lampo_domain::events::DomainEvent;
 use lampo_domain::mysql::MysqlSeries;
@@ -316,4 +318,32 @@ async fn up_creates_its_database_on_the_port_mysql_runs_on_while_its_restart_wai
     let creates: Vec<String> = w.db.calls().into_iter().filter(|c| c.starts_with("create:")).collect();
     assert!(creates.len() == 1 && creates[0].starts_with("create:3306:"), "the restart onto 3316 is still postponed: {creates:?}");
     drop(lease);
+}
+
+/// `up` finds its parent before it takes the allocator lock: a delete of that parent committed
+/// in between must make it fail, not register an environment (and create a database) for a
+/// project that is gone.
+#[tokio::test]
+async fn an_up_racing_the_deletion_of_its_parent_fails_and_leaves_nothing() {
+    let w = setup();
+    let (up_case, delete) = (w.worktree_up(), w.delete_project_with(w.env.clone()));
+    let (ctx, progress, cancel) = (gui(), RecordingProgress::default(), CancelFlag::new());
+    let mut deletion = Box::pin(delete.execute("shop", &ctx));
+    let mut environment = Box::pin(up_case.execute(up_request(r"D:\wt\login", DatabaseModeDto::Fresh), &ctx, &progress, &cancel));
+
+    w.project_writer()
+        .modify("shop", |_, _| {
+            // Under the lock: the delete queues first, then `up` resolves the parent and queues.
+            let mut cx = Context::from_waker(Waker::noop());
+            assert!(deletion.as_mut().poll(&mut cx).is_pending() && environment.as_mut().poll(&mut cx).is_pending());
+            Ok(false)
+        })
+        .await
+        .unwrap();
+    deletion.await.unwrap();
+    let err = environment.await.unwrap_err();
+
+    assert_eq!(err.code, ErrorCode::NotFound, "{err:?}");
+    assert!(w.worktrees.list_all().unwrap().is_empty(), "no environment for the deleted project");
+    assert!(!w.db.has("shop_wt_feature_login"), "no database either");
 }

@@ -172,10 +172,12 @@ impl WorktreeEnvironment {
     }
 
     /// Stale: its folder is gone (`folder_exists` answers for [`Self::root`]) or its parent
-    /// project no longer exists. A stale environment cannot be used; `prune` removes it. The one
-    /// definition shared by `prune`, `doctor` and the listings.
-    pub fn is_stale(&self, projects: &[Project], folder_exists: impl FnOnce(&ProjectRoot) -> bool) -> bool {
-        !projects.iter().any(|p| p.id == self.parent) || !folder_exists(&self.root)
+    /// project no longer exists (`parent_registered` answers for [`Self::parent`]: a project file
+    /// that does not load still exists, its project is hidden, not gone). A stale environment
+    /// cannot be used; `prune` removes it. The one definition shared by `prune`, `doctor` and the
+    /// listings.
+    pub fn is_stale(&self, parent_registered: impl FnOnce(&ProjectId) -> bool, folder_exists: impl FnOnce(&ProjectRoot) -> bool) -> bool {
+        !parent_registered(&self.parent) || !folder_exists(&self.root)
     }
 
     /// The database to drop when the environment is removed with `drop_database`.
@@ -373,10 +375,10 @@ mod tests {
     fn stale_means_folder_gone_or_parent_gone() {
         let parent = project("shop", "C:\\sites\\shop");
         let w = WorktreeEnvironment::derive(&parent, &Occupancy::default(), root("D:\\wt\\a"), None, Port::of(8100), &DatabaseMode::Shared, 1).unwrap();
-        let projects = std::slice::from_ref(&parent);
-        assert!(!w.is_stale(projects, |_| true));
-        assert!(w.is_stale(projects, |r| r.as_str() != "D:\\wt\\a"));
-        assert!(w.is_stale(&[], |_| true), "orphans are stale");
+        let registered = |id: &ProjectId| *id == parent.id;
+        assert!(!w.is_stale(registered, |_| true));
+        assert!(w.is_stale(registered, |r| r.as_str() != "D:\\wt\\a"));
+        assert!(w.is_stale(|_| false, |_| true), "orphans are stale");
     }
 
     #[test]

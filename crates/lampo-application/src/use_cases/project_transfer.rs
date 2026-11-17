@@ -7,7 +7,7 @@ use std::sync::Arc;
 use lampo_domain::address::SiteAddress;
 use lampo_domain::mysql::DatabaseName;
 use lampo_domain::ports::{FileSystemInspector, ProjectRepository, ProjectTransfer};
-use lampo_domain::project::{TlsMode, unique_project_id};
+use lampo_domain::project::TlsMode;
 use lampo_domain::project_import::ImportedProject;
 
 use super::project_writer::ProjectWriter;
@@ -71,7 +71,7 @@ impl ImportProject {
         let saved = self
             .writer
             .insert(|snap| {
-                let id = unique_project_id(&snap.projects, &project.id);
+                let id = snap.unique_project_id(&project.id);
                 if id != project.id {
                     project.set_addresses(SiteAddress::defaults_for(id.as_str(), &snap.settings.tld)?)?;
                     if project.database().is_some() {

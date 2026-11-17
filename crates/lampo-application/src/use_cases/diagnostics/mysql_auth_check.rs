@@ -14,8 +14,12 @@ pub struct MysqlAuthCheck;
 
 impl DoctorCheck for MysqlAuthCheck {
     fn run(&self, facts: &DoctorFacts, _report: &mut DoctorReportDto) -> DoctorCheckDto {
-        let affected: Vec<String> =
-            facts.projects.iter().filter_map(|p| legacy_php_auth_series(&p.environment).map(|series| format!("{} (PHP {}, MySQL {series})", p.id, p.environment.php))).collect();
+        let affected: Vec<String> = facts
+            .project_files
+            .projects
+            .iter()
+            .filter_map(|p| legacy_php_auth_series(&p.environment).map(|series| format!("{} (PHP {}, MySQL {series})", p.id, p.environment.php)))
+            .collect();
         if affected.is_empty() {
             return check(ID, CheckStatus::Ok, "every project's PHP can authenticate to its MySQL", None);
         }

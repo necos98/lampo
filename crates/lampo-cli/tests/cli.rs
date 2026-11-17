@@ -201,3 +201,47 @@ fn package_extensions_and_uninstall_guard_without_the_app() {
     assert_eq!(run(&["package", "uninstall", "php", "8.3"]), (4, Some("validation".into())));
     assert_eq!(std::fs::read_dir(home.path()).unwrap().count(), 0, "read-only commands must not write to the data root");
 }
+
+/// Configuration files that do not load are reported by the read-only commands, run in-process
+/// on a real data root (no app, `--no-start`): `project list` and `status` name a project file
+/// that does not load, and `doctor` reports it and an invalid `settings.toml` (exit 14) instead
+/// of failing.
+#[test]
+fn read_only_commands_report_the_configuration_files_that_do_not_load() {
+    let home = tempfile::tempdir().unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+    let config = home.path().join("config");
+    std::fs::create_dir_all(config.join("projects")).unwrap();
+    std::fs::write(config.join("projects").join("shop.toml"), "id = [[[\n").unwrap();
+    let run = |args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_lampo"))
+            .args(args)
+            .args(["--json", "--no-start"])
+            .env("LAMPO_HOME", home.path())
+            .env_remove("LAMPO_PROJECT")
+            .current_dir(cwd.path())
+            .output()
+            .unwrap();
+        let doc: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stdout)));
+        (out.status.code().unwrap(), doc, String::from_utf8_lossy(&out.stderr).into_owned())
+    };
+
+    let (code, doc, err) = run(&["project", "list"]);
+    assert_eq!((code, doc), (0, serde_json::json!([])));
+    assert!(err.contains("1 project file(s) do not load") && err.contains("shop.toml"), "{err}");
+
+    let (code, doc, _) = run(&["status"]);
+    assert_eq!(code, 0, "{doc}");
+    let unreadable = doc["unreadableProjects"].as_array().unwrap();
+    assert!(unreadable.len() == 1 && unreadable[0]["file"].as_str().unwrap().ends_with("shop.toml"), "{doc}");
+
+    std::fs::write(config.join("settings.toml"), "apache_port = 3306\n").unwrap();
+    let (code, doc, _) = run(&["doctor"]);
+    assert_eq!(code, 14, "{doc}");
+    let check = |id: &str| doc["checks"].as_array().unwrap().iter().find(|c| c["id"] == id).unwrap_or_else(|| panic!("no `{id}` check: {doc}")).clone();
+    let settings = check("settings");
+    assert_eq!(settings["status"], "error");
+    assert!(settings["message"].as_str().unwrap().contains("settings.toml"), "{settings}");
+    assert_eq!(check("project-files")["status"], "warning");
+    assert!(doc["unreadableProjects"][0]["reason"].as_str().unwrap().contains("shop.toml"), "{doc}");
+}

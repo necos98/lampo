@@ -253,8 +253,10 @@ impl WorktreeUp {
                         if let Some(existing) = snap.worktrees.iter().find(|w| w.root == placement.root) {
                             return Ok((existing.clone(), false, Some(snap.unchanged())));
                         }
+                        // Read again under the lock: a concurrent delete may have removed it since `place`.
+                        let parent = snap.projects.iter().find(|p| p.id == placement.parent.id).ok_or_else(|| AppError::not_found("project", &placement.parent.id))?;
                         let taken = Occupancy { projects: &snap.projects, worktrees: &snap.worktrees, server_databases: &server_databases };
-                        let env = WorktreeEnvironment::derive(&placement.parent, &taken, placement.root.clone(), placement.branch.clone(), port, &mode, d.clock.now_unix_ms())?;
+                        let env = WorktreeEnvironment::derive(parent, &taken, placement.root.clone(), placement.branch.clone(), port, &mode, d.clock.now_unix_ms())?;
                         d.worktrees.save(&env)?;
                         let sites = snap.with_worktree(&env);
                         Ok((env, true, Some(sites)))
@@ -262,7 +264,12 @@ impl WorktreeUp {
                     .await?
             }
         };
-        let parent = if env.parent == placement.parent.id { placement.parent } else { load_project(d.projects.as_ref(), env.parent.as_str())? };
+        // The parent as the commit saw it, when there was one.
+        let parent = match sites.as_ref().and_then(|s| s.projects.iter().find(|p| p.id == env.parent)) {
+            Some(registered) => registered.clone(),
+            None if env.parent == placement.parent.id => placement.parent,
+            None => load_project(d.projects.as_ref(), env.parent.as_str())?,
+        };
 
         if created {
             if let Err(e) = d.databases.provision(&env, &parent, progress, cancel).await {
@@ -354,14 +361,15 @@ impl PruneWorktrees {
         Self { projects, worktrees, allocator, fs, databases, env, events }
     }
 
-    /// Environments that `prune` would remove.
+    /// Environments that `prune` would remove. Those of a project file that does not load are
+    /// kept: the project is hidden, not gone.
     fn stale(&self, project_id: Option<&str>) -> AppResult<Vec<WorktreeEnvironment>> {
-        let projects = self.projects.list()?;
+        let listing = self.projects.scan()?;
         let envs = match project_id.map(str::trim).filter(|s| !s.is_empty()) {
             Some(raw) => self.worktrees.list_for(&load_project(self.projects.as_ref(), raw)?.id)?,
             None => self.worktrees.list_all()?,
         };
-        Ok(envs.into_iter().filter(|w| w.is_stale(&projects, |root| self.fs.is_dir(root.as_path()))).collect())
+        Ok(envs.into_iter().filter(|w| w.is_stale(|id| listing.is_registered(id), |root| self.fs.is_dir(root.as_path()))).collect())
     }
 
     /// Removes every stale environment it can; one that fails (its database cannot be dropped,

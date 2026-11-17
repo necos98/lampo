@@ -233,7 +233,7 @@ pub(crate) fn worktree_dto(
         document_root: w.document_root(parent).display().to_string(),
         database_mode: mode,
         database: shown_connection(w.database_connection(parent, settings).ok().flatten(), passwords),
-        stale: fs.is_some_and(|fs| w.is_stale(std::slice::from_ref(parent), |root| fs.is_dir(root.as_path()))),
+        stale: fs.is_some_and(|fs| w.is_stale(|id| *id == parent.id, |root| fs.is_dir(root.as_path()))),
         created_at_unix_ms: w.created_at_unix_ms,
     }
 }

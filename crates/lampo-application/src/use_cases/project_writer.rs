@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use lampo_domain::events::DomainEvent;
 use lampo_domain::ports::{EventPublisher, ProjectRepository};
-use lampo_domain::project::{Project, ProjectId, check_conflicts};
+use lampo_domain::project::{Project, ProjectId, check_conflicts, check_unreadable_id};
 use lampo_domain::tcp_port::Port;
 
 use super::allocation::{LoopbackPortAllocator, SiteSnapshot};
@@ -160,6 +160,9 @@ impl ProjectWriter {
         let stored = snap.projects.iter().filter(|_| !is_new).find(|p| p.id == candidate.id);
         self.policy.check(stored.map(|p| &p.environment), &candidate.environment, &snap.settings)?;
         check_conflicts(&snap.projects, &snap.worktrees, candidate, is_new, &snap.settings)?;
+        if is_new {
+            check_unreadable_id(&snap.reserved_ids, &candidate.id)?;
+        }
         self.projects.save(candidate)?;
         Ok(())
     }

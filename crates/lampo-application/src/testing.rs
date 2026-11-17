@@ -126,17 +126,26 @@ impl WorktreeRepository for MemWorktrees {
     }
 }
 
-/// The stored settings; saves fail (a locked or read-only file) while the flag is set.
+/// The stored settings; saves fail (a locked or read-only file) while the flag is set, loads
+/// fail with the reason in `.3` (a file edited into invalid settings) while it is set.
 #[derive(Default)]
-pub struct MemSettings(pub Mutex<Settings>, pub AtomicBool, pub Reads);
+pub struct MemSettings(pub Mutex<Settings>, pub AtomicBool, pub Reads, pub Mutex<Option<String>>);
 impl MemSettings {
     pub fn fail_saves(&self, fail: bool) {
         self.1.store(fail, Ordering::SeqCst);
+    }
+
+    /// Loads fail as a `settings.toml` with invalid data does, naming the file and `reason`.
+    pub fn fail_loads(&self, reason: &str) {
+        *lock(&self.3) = Some(reason.into());
     }
 }
 impl SettingsRepository for MemSettings {
     fn load(&self) -> PortResult<Settings> {
         self.2.count();
+        if let Some(reason) = lock(&self.3).clone() {
+            return Err(PortError::invalid_data("settings.toml", reason));
+        }
         Ok(lock(&self.0).clone())
     }
     fn save(&self, settings: &Settings) -> PortResult<()> {

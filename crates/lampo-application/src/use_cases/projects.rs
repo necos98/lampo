@@ -30,7 +30,7 @@ use super::support::{load_project, newest_of, package_missing, parse_project_id,
 use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::mapping::{address_from_dto, address_to_dto, addressing_from_dto, addressing_to_dto, credentials_from_dto, environment_from_dto};
+use crate::mapping::{address_from_dto, address_to_dto, addressing_from_dto, addressing_to_dto, credentials_from_dto, environment_from_dto, unreadable_project_to_dto};
 
 /// Preset used when neither the request nor detection names one.
 pub const FALLBACK_PRESET: &str = "generic-php";
@@ -77,16 +77,17 @@ impl ProjectQueries {
         let listing = self.projects.scan()?;
         Ok(ProjectListDto {
             projects: listing.projects.iter().map(|p| project_dto(p, &worktrees, &settings, Some(self.fs.as_ref()), self.passwords.as_ref())).collect(),
-            unreadable: listing.unreadable.into_iter().map(|u| UnreadableProjectDto { file: u.file.display().to_string(), reason: u.reason }).collect(),
+            unreadable: listing.unreadable.iter().map(unreadable_project_to_dto).collect(),
         })
     }
 
-    pub fn summaries(&self) -> AppResult<Vec<ProjectSummaryDto>> {
+    /// The compact rows, plus the files that do not load (like [`Self::list`]).
+    pub fn summaries(&self) -> AppResult<ProjectSummaryListDto> {
         let settings = self.settings.load()?;
         let worktrees = self.worktrees.list_all()?;
-        Ok(self
+        let listing = self.projects.scan()?;
+        let projects = listing
             .projects
-            .list()?
             .iter()
             .map(|p| ProjectSummaryDto {
                 id: p.id.to_string(),
@@ -98,7 +99,8 @@ impl ProjectQueries {
                 mysql_version: p.environment.mysql().map(|m| m.to_string()),
                 worktree_count: worktrees.iter().filter(|w| w.parent == p.id).count(),
             })
-            .collect())
+            .collect();
+        Ok(ProjectSummaryListDto { projects, unreadable: listing.unreadable.iter().map(unreadable_project_to_dto).collect() })
     }
 
     /// `NotFound` if unknown.
@@ -141,20 +143,20 @@ impl DetectProject {
             })
             .collect();
         let best = combine_hints(hints);
-        let existing = self.projects.list()?;
+        let listing = self.projects.scan()?;
         let name = folder_name(&root);
         Ok(DetectionDto {
             folder: root.to_string(),
             project_type: best.as_ref().map(|h| h.project_type.clone()),
             preset_id: best.as_ref().map(|h| h.preset.to_string()),
             php_version: best.as_ref().and_then(|h| h.php).map(|p| p.to_string()),
-            suggested_id: unique_project_id(&existing, &ProjectId::from_name(&name)).to_string(),
+            suggested_id: unique_project_id(&listing.projects, &listing.unreadable_ids(), &ProjectId::from_name(&name)).to_string(),
             suggested_name: name,
             services: best.as_ref().map(|h| h.services.iter().map(ToString::to_string).collect()).unwrap_or_default(),
             warnings: best.as_ref().map(|h| h.warnings.clone()).unwrap_or_default(),
             apps: best.as_ref().map(|h| h.apps.iter().map(detected_app_dto).collect()).unwrap_or_default(),
             evidence: best.map(|h| h.evidence).unwrap_or_default(),
-            already_registered: existing.iter().find(|p| p.root == root).map(|p| p.id.to_string()),
+            already_registered: listing.projects.iter().find(|p| p.root == root).map(|p| p.id.to_string()),
         })
     }
 }
@@ -254,7 +256,7 @@ impl CreateProject {
         let addressing = addressing_from_dto(request.addressing);
 
         let build = |snap: &SiteSnapshot, port: Option<Port>| -> AppResult<Project> {
-            let id = requested_id.clone().unwrap_or_else(|| unique_project_id(&snap.projects, &ProjectId::from_name(name.as_str())));
+            let id = requested_id.clone().unwrap_or_else(|| snap.unique_project_id(&ProjectId::from_name(name.as_str())));
             let addresses = match &explicit {
                 Some(list) => list.clone(),
                 None => addressing.addresses_for(id.as_str(), &snap.settings.tld, port)?,

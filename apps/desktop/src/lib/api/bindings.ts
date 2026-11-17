@@ -675,7 +675,11 @@ export type SyncReport = { started: Array<string>, stopped: Array<string>, resta
 /**
  * `lampo status`.
  */
-export type Status = { appRunning: boolean, services: Array<ServiceStatus>, projects: Array<ProjectSummary>, worktreeCount: number, };
+export type Status = { appRunning: boolean, services: Array<ServiceStatus>, projects: Array<ProjectSummary>, worktreeCount: number, 
+/**
+ * Project files that do not load (absent from `projects`). Absent (older apps) = none.
+ */
+unreadableProjects: Array<UnreadableProject>, };
 
 // --- Worktree environments ---
 
@@ -872,8 +876,9 @@ mysqlProjectCredentials: boolean, };
 export type CheckStatus = "ok" | "warning" | "error";
 
 /**
- * One `doctor` check. `id` is stable (`vc-runtime`, `ports`, `path-shadowing`, `shims-on-path`,
- * `hosts-block`, `packages`, `services`, `mysql-auth`, `stale-worktrees`, `folders`, `app`).
+ * One `doctor` check. `id` is stable (`settings`, `project-files`, `vc-runtime`, `ports`,
+ * `path-shadowing`, `shims-on-path`, `hosts-block`, `packages`, `services`, `mysql-auth`,
+ * `stale-worktrees`, `folders`, `app`).
  */
 export type DoctorCheck = { id: string, status: CheckStatus, message: string, 
 /**
@@ -918,7 +923,11 @@ missingPackages: Array<string>,
 /**
  * Services the plan needs that are `failed` or `stopped` (`apache`, `mysql-8.4`).
  */
-servicesDown: Array<string>, hostsFileInSync: boolean, };
+servicesDown: Array<string>, hostsFileInSync: boolean, 
+/**
+ * Project files that do not load, with the reason (`project-files`).
+ */
+unreadableProjects: Array<UnreadableProject>, };
 
 export type ShimStatus = { shimDir: string, installed: boolean, onPath: boolean, shadowed: Array<ShadowedTool>, };
 

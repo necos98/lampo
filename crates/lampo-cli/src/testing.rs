@@ -121,6 +121,8 @@ pub struct Fake {
     pub opened: Mutex<Vec<(String, ExternalApp)>>,
     /// Replaces the canned `open` answer (`None`: [`opened_json`], served).
     pub open_result: Mutex<Option<AppResult<Value>>>,
+    /// The project files that do not load, in the listings (default: none).
+    pub unreadable_projects: Mutex<Vec<UnreadableProjectDto>>,
 }
 
 impl Fake {
@@ -156,6 +158,7 @@ impl Fake {
             which_requests: Mutex::new(Vec::new()),
             opened: Mutex::new(Vec::new()),
             open_result: Mutex::new(None),
+            unreadable_projects: Mutex::new(Vec::new()),
         })
     }
 
@@ -210,8 +213,8 @@ impl SiteLookup for Fake {
 }
 
 impl ProjectReader for Fake {
-    fn summaries(&self) -> AppResult<Vec<ProjectSummaryDto>> {
-        Ok(vec![dto(summary_json())])
+    fn summaries(&self) -> AppResult<ProjectSummaryListDto> {
+        Ok(ProjectSummaryListDto { projects: vec![dto(summary_json())], unreadable: self.unreadable_projects.lock().unwrap().clone() })
     }
     fn get(&self, id: &str) -> AppResult<ProjectDto> {
         if id == "shop" { Ok(dto(project_json())) } else { Err(AppError::not_found("project", id)) }
@@ -362,7 +365,7 @@ impl OfflineStatus for Fake {
     async fn status(&self) -> AppResult<StatusDto> {
         Ok(dto(
             json!({"appRunning": false, "services": [{"service": "apache", "kind": "apache", "label": "Apache", "state": "unknown", "pid": null, "port": 80, "message": null, "required": false, "requiredBy": []}],
-                      "projects": [summary_json()], "worktreeCount": 0}),
+                      "projects": [summary_json()], "worktreeCount": 0, "unreadableProjects": *self.unreadable_projects.lock().unwrap()}),
         ))
     }
 }

@@ -5,6 +5,7 @@
 //! [`standard_checks`] is the one list both composition roots register (open-closed: a new
 //! check is a new type added there).
 
+mod config_files_check;
 mod mysql_auth_check;
 mod services_check;
 
@@ -15,10 +16,9 @@ use std::sync::Arc;
 use lampo_domain::address::SiteAddress;
 use lampo_domain::package::InstalledPackage;
 use lampo_domain::ports::{
-    ControlChannelClient, ExecutableLocator, FileSystemInspector, HostsFileReader, InstalledPackageRegistry, PortAvailability, PortProbe, ProjectRepository, SettingsRepository,
-    ShimInstaller, UserPathEditor, VcRuntimeDetector, WorktreeRepository,
+    ControlChannelClient, ExecutableLocator, FileSystemInspector, HostsFileReader, InstalledPackageRegistry, PortAvailability, PortProbe, ProjectListing, ProjectRepository,
+    SettingsRepository, ShimInstaller, UserPathEditor, VcRuntimeDetector, WorktreeRepository,
 };
-use lampo_domain::project::Project;
 use lampo_domain::settings::Settings;
 use lampo_domain::shim::ShimTool;
 use lampo_domain::tcp_port::Port;
@@ -34,14 +34,20 @@ use super::support::all_sites;
 use crate::dto::{CheckStatus, DoctorCheckDto, DoctorReportDto, PortConflictDto, ServiceStatusDto, VcRuntimeIssueDto};
 use crate::error::AppResult;
 
+pub use config_files_check::{ProjectFilesCheck, SettingsFileCheck};
 pub use mysql_auth_check::MysqlAuthCheck;
 pub use services_check::ServicesCheck;
 
 /// What every check may look at, loaded once per run.
 pub struct DoctorFacts {
-    pub projects: Vec<Project>,
+    /// The projects that load, and the files that do not.
+    pub project_files: ProjectListing,
     pub worktrees: Vec<WorktreeEnvironment>,
+    /// The defaults when `settings.toml` does not load ([`Self::settings_problem`]), so the
+    /// other checks still run.
     pub settings: Settings,
+    /// Why `settings.toml` does not load (names the file).
+    pub settings_problem: Option<String>,
     pub installed: Vec<InstalledPackage>,
     /// The app answers on the control pipe (its services then hold their own ports).
     pub app_running: bool,
@@ -81,12 +87,19 @@ impl Doctor {
         Self { deps }
     }
 
+    /// A configuration file that does not load is a finding (`settings`, `project-files`), not a
+    /// failure of the run.
     pub async fn run(&self) -> AppResult<DoctorReportDto> {
         let d = &self.deps;
+        let (settings, settings_problem) = match d.settings.load() {
+            Ok(settings) => (settings, None),
+            Err(e) => (Settings::default(), Some(e.to_string())),
+        };
         let facts = DoctorFacts {
-            projects: d.projects.list()?,
+            project_files: d.projects.scan()?,
             worktrees: d.worktrees.list_all()?,
-            settings: d.settings.load()?,
+            settings,
+            settings_problem,
             installed: d.installed.list()?,
             app_running: d.control.is_server_running(),
             services: d.service_states.statuses().await,
@@ -119,6 +132,8 @@ pub struct StandardChecksDeps {
 /// both composition roots register, so CLI and GUI always run the same diagnostics.
 pub fn standard_checks(deps: StandardChecksDeps) -> Vec<Arc<dyn DoctorCheck>> {
     vec![
+        Arc::new(SettingsFileCheck),
+        Arc::new(ProjectFilesCheck),
         Arc::new(VcRuntimeCheck { vc: deps.vc }),
         Arc::new(PortsCheck { probe: deps.port_probe, services: deps.services.clone() }),
         Arc::new(ShimsOnPathCheck { installer: deps.shim_installer, user_path: deps.user_path, shim_dir: deps.shim_dir.clone() }),
@@ -180,10 +195,10 @@ impl DoctorCheck for PortsCheck {
     fn run(&self, facts: &DoctorFacts, report: &mut DoctorReportDto) -> DoctorCheckDto {
         if !facts.app_running {
             let mut wanted: BTreeMap<Port, String> = BTreeMap::new();
-            for (id, port) in self.services.planned_ports(&facts.projects, &facts.worktrees, &facts.settings) {
+            for (id, port) in self.services.planned_ports(&facts.project_files.projects, &facts.worktrees, &facts.settings) {
                 wanted.entry(port).or_insert(id);
             }
-            for site in all_sites(&facts.projects, &facts.worktrees).iter().filter(|s| s.served()) {
+            for site in all_sites(&facts.project_files.projects, &facts.worktrees).iter().filter(|s| s.served()) {
                 for port in site.addresses().iter().filter_map(SiteAddress::loopback) {
                     wanted.entry(port).or_insert_with(|| site.id.to_string());
                 }
@@ -270,7 +285,7 @@ pub struct HostsBlockCheck {
 
 impl DoctorCheck for HostsBlockCheck {
     fn run(&self, facts: &DoctorFacts, report: &mut DoctorReportDto) -> DoctorCheckDto {
-        report.hosts_file_in_sync = match hosts_block_in_sync(&facts.projects, self.hosts.as_ref()) {
+        report.hosts_file_in_sync = match hosts_block_in_sync(&facts.project_files.projects, self.hosts.as_ref()) {
             Ok(in_sync) => in_sync,
             Err(e) => {
                 tracing::warn!("hosts file unreadable: {e}");
@@ -291,7 +306,7 @@ pub struct PackagesCheck {
 
 impl DoctorCheck for PackagesCheck {
     fn run(&self, facts: &DoctorFacts, report: &mut DoctorReportDto) -> DoctorCheckDto {
-        report.missing_packages = missing(&requirements(&facts.projects, &facts.worktrees, &facts.settings, &self.services), &facts.installed);
+        report.missing_packages = missing(&requirements(&facts.project_files.projects, &facts.worktrees, &facts.settings, &self.services), &facts.installed);
         match report.missing_packages.is_empty() {
             true => check("packages", CheckStatus::Ok, "every package the projects need is installed", None),
             false => check("packages", CheckStatus::Error, format!("missing packages: {}", report.missing_packages.join(", ")), Some("lampo package install <kind> <series>".into())),
@@ -306,7 +321,7 @@ pub struct FoldersCheck {
 
 impl DoctorCheck for FoldersCheck {
     fn run(&self, facts: &DoctorFacts, _report: &mut DoctorReportDto) -> DoctorCheckDto {
-        let missing: Vec<String> = facts.projects.iter().filter(|p| !self.fs.is_dir(p.root.as_path())).map(|p| format!("{} ({})", p.id, p.root)).collect();
+        let missing: Vec<String> = facts.project_files.projects.iter().filter(|p| !self.fs.is_dir(p.root.as_path())).map(|p| format!("{} ({})", p.id, p.root)).collect();
         match missing.is_empty() {
             true => check("folders", CheckStatus::Ok, "every project folder exists", None),
             false => check("folders", CheckStatus::Warning, format!("project folders not found: {}", missing.join(", ")), Some("relink the project to its new folder, or delete it".into())),
@@ -321,7 +336,8 @@ pub struct StaleWorktreesCheck {
 
 impl DoctorCheck for StaleWorktreesCheck {
     fn run(&self, facts: &DoctorFacts, report: &mut DoctorReportDto) -> DoctorCheckDto {
-        report.stale_worktrees = facts.worktrees.iter().filter(|w| w.is_stale(&facts.projects, |root| self.fs.is_dir(root.as_path()))).map(|w| w.site_id().to_string()).collect();
+        report.stale_worktrees =
+            facts.worktrees.iter().filter(|w| w.is_stale(|id| facts.project_files.is_registered(id), |root| self.fs.is_dir(root.as_path()))).map(|w| w.site_id().to_string()).collect();
         match report.stale_worktrees.is_empty() {
             true => check("stale-worktrees", CheckStatus::Ok, "no stale worktree environment", None),
             false => check(

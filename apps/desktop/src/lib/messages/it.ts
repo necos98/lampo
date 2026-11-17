@@ -697,6 +697,8 @@ export const it = {
 			notRun: 'Non ancora eseguita.',
 			fix: 'Suggerimento',
 			checks: {
+				settings: 'Impostazioni',
+				'project-files': 'File dei progetti',
 				app: 'App Lampo',
 				'vc-runtime': 'Runtime Visual C++',
 				ports: 'Porte dei servizi',
@@ -711,6 +713,8 @@ export const it = {
 			} as Record<string, string>,
 			/** Italian summary per check and outcome; the backend's (English) text is shown as detail. */
 			outcomes: {
+				settings: { ok: 'Le impostazioni si leggono correttamente.', error: 'Il file delle impostazioni non si legge: gli altri controlli usano le impostazioni predefinite.' },
+				'project-files': { ok: 'Tutti i file dei progetti si leggono correttamente.', warning: 'Alcuni file di progetto non si leggono: quei progetti restano nascosti finché non li ripari.' },
 				app: { ok: 'L’app è in esecuzione.', warning: 'L’app non è in esecuzione: i comandi della CLI la avviano da soli.' },
 				'vc-runtime': { ok: 'I runtime Visual C++ richiesti sono installati.', error: 'Manca un runtime Visual C++ richiesto da un pacchetto installato.' },
 				ports: { ok: 'Le porte che servono a Lampo sono libere.', error: 'Una porta che serve a Lampo è occupata da un altro programma.' },

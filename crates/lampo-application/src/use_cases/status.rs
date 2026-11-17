@@ -19,8 +19,14 @@ impl StatusQuery {
     }
 
     pub async fn execute(&self) -> AppResult<StatusDto> {
-        let projects = self.projects.summaries()?;
+        let listing = self.projects.summaries()?;
         let services = self.services.statuses().await?;
-        Ok(StatusDto { app_running: (self.app_running)(), worktree_count: projects.iter().map(|p| p.worktree_count).sum(), services, projects })
+        Ok(StatusDto {
+            app_running: (self.app_running)(),
+            worktree_count: listing.projects.iter().map(|p| p.worktree_count).sum(),
+            services,
+            projects: listing.projects,
+            unreadable_projects: listing.unreadable,
+        })
     }
 }

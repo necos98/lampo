@@ -17,7 +17,7 @@ impl SiteLookup for SiteResolver {
 }
 
 impl ProjectReader for ProjectQueries {
-    fn summaries(&self) -> AppResult<Vec<ProjectSummaryDto>> {
+    fn summaries(&self) -> AppResult<ProjectSummaryListDto> {
         ProjectQueries::summaries(self)
     }
     fn get(&self, project_id: &str) -> AppResult<ProjectDto> {

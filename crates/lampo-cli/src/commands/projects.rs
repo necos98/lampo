@@ -15,8 +15,15 @@ use crate::render;
 pub async fn run(c: &Cmd<'_>, command: ProjectCommand) -> AppResult<i32> {
     match command {
         ProjectCommand::List => {
+            // The JSON document stays the array of rows (a stable contract): the files that do
+            // not load go to stderr there, after the table otherwise.
             let list = c.ctx.projects.summaries()?;
-            c.io.emit(&list, |l| render::project_summaries(l));
+            c.io.emit(&list.projects, |_| render::project_list(&list));
+            if c.io.json
+                && let Some(warning) = render::unreadable_projects_warning(&list.unreadable)
+            {
+                c.io.err_line(&warning);
+            }
         }
         ProjectCommand::Info { id } => {
             let project = c.ctx.projects.get(&c.project_id(id.as_ref())?)?;

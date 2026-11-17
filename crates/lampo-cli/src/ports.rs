@@ -16,7 +16,8 @@ pub trait SiteLookup: Send + Sync {
 }
 
 pub trait ProjectReader: Send + Sync {
-    fn summaries(&self) -> AppResult<Vec<ProjectSummaryDto>>;
+    /// The compact rows, plus the project files that do not load.
+    fn summaries(&self) -> AppResult<ProjectSummaryListDto>;
     fn get(&self, project_id: &str) -> AppResult<ProjectDto>;
 }
 

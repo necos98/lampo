@@ -636,9 +636,19 @@ fn check_worktree_conflicts(worktrees: &[WorktreeEnvironment], candidate: &Proje
     Ok(())
 }
 
-/// First free id derived from `base` (`shop`, `shop-2`, `shop-3`, …).
-pub fn unique_project_id(existing: &[Project], base: &ProjectId) -> ProjectId {
-    let taken = |id: &str| existing.iter().any(|p| p.id.as_str() == id);
+/// A new project may not take the id of a project file that does not load (`unreadable`): its
+/// save would replace that file, and the new project would inherit its worktree environments.
+pub fn check_unreadable_id(unreadable: &BTreeSet<ProjectId>, candidate: &ProjectId) -> Result<(), DomainError> {
+    match unreadable.contains(candidate) {
+        true => Err(DomainError::UnreadableProjectId(candidate.to_string())),
+        false => Ok(()),
+    }
+}
+
+/// First id derived from `base` (`shop`, `shop-2`, `shop-3`, …) that neither an `existing`
+/// project nor a project file that does not load (`unreadable`) has.
+pub fn unique_project_id(existing: &[Project], unreadable: &BTreeSet<ProjectId>, base: &ProjectId) -> ProjectId {
+    let taken = |id: &str| existing.iter().any(|p| p.id.as_str() == id) || unreadable.iter().any(|u| u.as_str() == id);
     if !taken(base.as_str()) {
         return base.clone();
     }
@@ -853,7 +863,18 @@ pub(crate) mod tests {
     #[test]
     fn unique_ids_get_a_numeric_suffix() {
         let existing = vec![project("shop", "C:\\a"), project("shop-2", "C:\\b")];
-        assert_eq!(unique_project_id(&existing, &ProjectId::new("shop").unwrap()).as_str(), "shop-3");
-        assert_eq!(unique_project_id(&existing, &ProjectId::new("blog").unwrap()).as_str(), "blog");
+        let none = BTreeSet::new();
+        assert_eq!(unique_project_id(&existing, &none, &ProjectId::new("shop").unwrap()).as_str(), "shop-3");
+        assert_eq!(unique_project_id(&existing, &none, &ProjectId::new("blog").unwrap()).as_str(), "blog");
+    }
+
+    #[test]
+    fn the_ids_of_unreadable_files_are_never_given_out() {
+        let unreadable: BTreeSet<ProjectId> = [ProjectId::new("blog").unwrap(), ProjectId::new("shop-3").unwrap()].into();
+        let existing = vec![project("shop", "C:\\a"), project("shop-2", "C:\\b")];
+        assert_eq!(unique_project_id(&existing, &unreadable, &ProjectId::new("blog").unwrap()).as_str(), "blog-2");
+        assert_eq!(unique_project_id(&existing, &unreadable, &ProjectId::new("shop").unwrap()).as_str(), "shop-4");
+        assert!(matches!(check_unreadable_id(&unreadable, &ProjectId::new("blog").unwrap()), Err(DomainError::UnreadableProjectId(id)) if id == "blog"));
+        assert!(check_unreadable_id(&unreadable, &ProjectId::new("shop").unwrap()).is_ok());
     }
 }

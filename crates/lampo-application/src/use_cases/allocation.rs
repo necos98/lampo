@@ -38,12 +38,8 @@ impl LoopbackPortAllocator {
     /// The registry, read on the blocking pool; stamped with `commit`.
     async fn snapshot(&self, commit: u64) -> AppResult<SiteSnapshot> {
         let (projects, worktrees, settings, revision) = (self.projects.clone(), self.worktrees.clone(), self.settings.clone(), self.revision.clone());
-        unblocked("reading the projects, worktree environments and settings", move || {
-            let listing = projects.scan()?;
-            let reserved_ports = listing.unreadable.iter().flat_map(|u| u.loopback_ports.iter().copied()).collect();
-            Ok(SiteSnapshot::loaded(listing.projects, reserved_ports, worktrees.list_all()?, settings.load()?, revision, commit))
-        })
-        .await
+        unblocked("reading the projects, worktree environments and settings", move || Ok(SiteSnapshot::loaded(projects.scan()?, worktrees.list_all()?, settings.load()?, revision, commit)))
+            .await
     }
 
     /// Lowest port of the configured range that is neither assigned to a site, nor named by an

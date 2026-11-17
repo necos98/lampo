@@ -52,6 +52,40 @@ async fn project_list_human_is_a_table() {
     let (_, out, _) = run_cli(&fake, &["project", "list"]).await;
     assert!(out.starts_with("ID"), "{out}");
     assert!(out.contains("http://127.0.0.1:8101"));
+    assert!(!out.contains("do not load"), "{out}");
+}
+
+const BLOG_REASON: &str = r"invalid data in C:\Lampo\projects\blog.toml: a project needs at least one address";
+
+fn with_an_unreadable_project() -> std::sync::Arc<Fake> {
+    let fake = Fake::new();
+    fake.unreadable_projects.lock().unwrap().push(UnreadableProjectDto { file: r"C:\Lampo\projects\blog.toml".into(), reason: BLOG_REASON.into() });
+    fake
+}
+
+/// The listings say a project file does not load instead of silently showing fewer projects; the
+/// `--json` document of `project list` stays the array of rows, so the warning goes to stderr.
+#[tokio::test]
+async fn project_list_reports_the_project_files_that_do_not_load() {
+    let fake = with_an_unreadable_project();
+    let (_, out, err) = run_cli(&fake, &["project", "list"]).await;
+    assert!(out.starts_with("ID") && out.contains(&format!("Project files that do not load (1), hidden until repaired:\n  {BLOG_REASON}")), "{out}");
+    assert_eq!(err, "");
+
+    let (code, out, err) = run_cli(&fake, &["project", "list", "--json"]).await;
+    assert_eq!(code, 0);
+    assert_eq!(parse(&out), json!([summary_json()]));
+    assert!(err.starts_with("lampo: warning: 1 project file(s) do not load") && err.contains(BLOG_REASON), "{err}");
+}
+
+#[tokio::test]
+async fn status_reports_the_project_files_that_do_not_load() {
+    let fake = with_an_unreadable_project();
+    fake.app_running.store(false, Ordering::SeqCst);
+    let (_, out, _) = run_cli(&fake, &["status", "--json"]).await;
+    assert_eq!(parse(&out)["unreadableProjects"], json!([{"file": r"C:\Lampo\projects\blog.toml", "reason": BLOG_REASON}]));
+    let (_, out, _) = run_cli(&fake, &["status"]).await;
+    assert!(out.contains(&format!("hidden until repaired:\n  {BLOG_REASON}")), "{out}");
 }
 
 #[tokio::test]

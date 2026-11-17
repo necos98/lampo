@@ -176,6 +176,15 @@ pub struct ProjectSummaryDto {
     pub worktree_count: usize,
 }
 
+/// The compact rows of every project that loads, plus the files that do not (`lampo status`,
+/// `lampo project list`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSummaryListDto {
+    pub projects: Vec<ProjectSummaryDto>,
+    pub unreadable: Vec<UnreadableProjectDto>,
+}
+
 /// Create a project. Only `root` is required: anything omitted is filled from the preset
 /// (`preset_id`, else the detected one, else `generic-php`), detection and settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

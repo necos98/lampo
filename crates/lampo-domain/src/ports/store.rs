@@ -31,6 +31,16 @@ pub struct UnreadableProject {
     pub loopback_ports: BTreeSet<Port>,
 }
 
+impl UnreadableProject {
+    /// The id the file is stored under (`projects\<id>.toml`, case-insensitive like the Windows
+    /// file system), when its name is one: a project saved with this id would replace the file,
+    /// and the worktree environments of this id are its own.
+    pub fn id(&self) -> Option<ProjectId> {
+        let stem = self.file.file_stem()?.to_str()?;
+        ProjectId::new(stem.to_ascii_lowercase()).ok()
+    }
+}
+
 /// Every project file: the projects that load and the ones that do not.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProjectListing {
@@ -38,6 +48,18 @@ pub struct ProjectListing {
     pub projects: Vec<Project>,
     /// Sorted by file name.
     pub unreadable: Vec<UnreadableProject>,
+}
+
+impl ProjectListing {
+    /// The ids of the files that do not load: hidden projects, whose id is still taken.
+    pub fn unreadable_ids(&self) -> BTreeSet<ProjectId> {
+        self.unreadable.iter().filter_map(UnreadableProject::id).collect()
+    }
+
+    /// A project file with this id exists, whether it loads or not.
+    pub fn is_registered(&self, id: &ProjectId) -> bool {
+        self.projects.iter().any(|p| &p.id == id) || self.unreadable.iter().any(|u| u.id().as_ref() == Some(id))
+    }
 }
 
 /// Project configurations (one TOML file per project).
@@ -171,4 +193,30 @@ pub trait WorktreeRepository: Send + Sync {
 pub trait ExecutableLocator: Send + Sync {
     /// Every match of `name` (e.g. `php.exe`) in PATH order.
     fn find_all(&self, name: &str) -> PortResult<Vec<PathBuf>>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::project::tests::project;
+
+    fn unreadable(file: &str) -> UnreadableProject {
+        UnreadableProject { file: PathBuf::from(file), reason: "invalid".into(), loopback_ports: BTreeSet::new() }
+    }
+
+    #[test]
+    fn an_unreadable_file_keeps_the_id_of_its_name() {
+        assert_eq!(unreadable(r"C:\Lampo\projects\shop.toml").id(), Some(ProjectId::new("shop").unwrap()));
+        assert_eq!(unreadable(r"C:\Lampo\projects\Shop.toml").id(), Some(ProjectId::new("shop").unwrap()), "the same file on Windows");
+        assert_eq!(unreadable(r"C:\Lampo\projects\my shop.toml").id(), None, "no project can be saved under this name");
+    }
+
+    #[test]
+    fn a_listing_registers_the_loaded_and_the_unreadable_ids() {
+        let listing = ProjectListing { projects: vec![project("shop", r"C:\sites\shop")], unreadable: vec![unreadable(r"C:\p\blog.toml"), unreadable(r"C:\p\x y.toml")] };
+        assert_eq!(listing.unreadable_ids(), [ProjectId::new("blog").unwrap()].into());
+        for (id, registered) in [("shop", true), ("blog", true), ("api", false)] {
+            assert_eq!(listing.is_registered(&ProjectId::new(id).unwrap()), registered, "{id}");
+        }
+    }
 }

@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::project::ProjectSummaryDto;
+use super::project::{ProjectSummaryDto, UnreadableProjectDto};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ServiceState"))]
@@ -70,4 +70,7 @@ pub struct StatusDto {
     pub services: Vec<ServiceStatusDto>,
     pub projects: Vec<ProjectSummaryDto>,
     pub worktree_count: usize,
+    /// Project files that do not load (absent from `projects`). Absent (older apps) = none.
+    #[serde(default)]
+    pub unreadable_projects: Vec<UnreadableProjectDto>,
 }
