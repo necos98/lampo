@@ -88,6 +88,20 @@ mod tests {
     }
 
     #[test]
+    fn empty_lines_after_several_backslashes_continue_the_line() {
+        // Apache drops one `\` per line feed and decides on the logical line read so far: the
+        // `\\` (or `\\\`) leaves a `\` that also swallows the empty lines, so the `</If>` after
+        // them belongs to the comment and the next `<If>` is nested in the first one.
+        for (line, blanks) in [("# comment \\\\", 1), ("# comment \\\\\\", 2), ("Header set X \\\\", 1), ("Header set X \\\\\\", 2)] {
+            let empty = "\n".repeat(blanks);
+            let text = format!("<If \"true\">\n{line}\n{empty}</If>\n<If \"true\">\nRequire local\n</If>");
+            let nested = 4 + blanks;
+            let reason = refused(&text);
+            assert!(reason.starts_with(&format!("line {nested}: `<If` is not allowed: it is nested inside another <If>")), "{text:?}: {reason}");
+        }
+    }
+
+    #[test]
     fn conditions_side_by_side_or_inside_other_sections_are_accepted() {
         for text in [
             "<If \"%{HTTP_HOST} == 'a'\">\n    Header set X a\n</If>\n<ElseIf \"%{HTTP_HOST} == 'b'\">\n    Header set X b\n</ElseIf>\n<Else>\n    Header set X c\n</Else>",

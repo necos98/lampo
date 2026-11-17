@@ -193,8 +193,9 @@ const WELL_KNOWN: &str = ".well-known/acme-challenge/token";
 /// from 127.0.0.1, so each of them grants everything: none may re-expose the project's internal
 /// files. One site (dedicated port) per directive, so one cannot hide another. A nested `<If>`
 /// would merge after Lampo's barrier, however it is disguised (e.g. behind a `\ ` that Apache
-/// does not read as a continuation): `ApacheDirectives::new` refuses it, so it cannot reach a
-/// vhost and the unit tests of `apache_directives::sections` cover it.
+/// does not read as a continuation, or a `\\` that Apache also continues over an empty line):
+/// `ApacheDirectives::new` refuses it, so it cannot reach a vhost and the unit tests of
+/// `apache_directives::sections` cover it.
 const REGRANTS: &[(&str, &str)] = &[
     ("regrant-root", "<Location />\n    Require ip 127.0.0.1\n</Location>"),
     ("regrant-admin", "<Location /admin>\n    Require ip 127.0.0.1\n</Location>"),

@@ -76,9 +76,9 @@ impl ApacheDirectives {
     /// is read as Apache reads it (first word, quotes stripped) and must be a plain identifier,
     /// so quoting or splicing `${…}` into the name cannot smuggle a forbidden directive past the
     /// checks. Names are case-insensitive; every physical line and every logical line (joined
-    /// where `\` directly precedes the line feed, as in Apache) is checked, so a continuation
-    /// cannot hide a directive. Lines end at LF, as in Apache, and no control character other
-    /// than a tab is allowed ([`forbidden_control_character`]).
+    /// while the text read so far ends with `\` directly before the line feed, as in Apache) is
+    /// checked, so a continuation cannot hide a directive. Lines end at LF, as in Apache, and no
+    /// control character other than a tab is allowed ([`forbidden_control_character`]).
     pub fn validate(&self) -> Result<(), DomainError> {
         if let Some((line, c)) = forbidden_control_character(&self.0) {
             let code = u32::from(c);
@@ -138,8 +138,7 @@ fn forbidden_control_character(text: &str) -> Option<(usize, char)> {
     text.split('\n').enumerate().find_map(|(index, line)| line.chars().find(|c| c.is_control() && *c != '\t').map(|c| (index + 1, c)))
 }
 
-/// One line as Apache reads it: a physical line whose last character is `\` is joined verbatim
-/// with the next.
+/// One line as Apache reads it: physical lines joined verbatim, one `\` dropped at each join.
 struct LogicalLine<'a> {
     /// 1-based number of the physical line it starts on.
     number: usize,
@@ -147,21 +146,22 @@ struct LogicalLine<'a> {
     text: String,
 }
 
-/// Apache continues a line only when `\` directly precedes the line feed (`ap_cfg_getline`):
-/// after a space or a tab the `\` is plain text and the next line stands alone. Reading it any
-/// other way would hide from [`sections::check_nesting`] a section that Apache does see.
+/// Apache appends each physical line to the logical line read so far and continues only when
+/// that text ends with `\` directly before the line feed (`ap_cfg_getline`), dropping that one
+/// `\`. After a space or a tab the `\` is plain text; after `\\` a `\` is left, so the empty
+/// line that follows continues the line too. Reading it any other way would hide from
+/// [`sections::check_nesting`] a section that Apache does see.
 fn logical_lines(text: &str) -> Vec<LogicalLine<'_>> {
     let mut out = Vec::new();
     let mut current: Option<LogicalLine<'_>> = None;
     for (index, line) in text.split('\n').enumerate() {
         let entry = current.get_or_insert_with(|| LogicalLine { number: index + 1, physical: Vec::new(), text: String::new() });
         entry.physical.push(line);
-        match line.strip_suffix('\\') {
-            Some(head) => entry.text.push_str(head),
-            None => {
-                entry.text.push_str(line);
-                out.extend(current.take());
-            }
+        entry.text.push_str(line);
+        if entry.text.ends_with('\\') {
+            entry.text.pop();
+        } else {
+            out.extend(current.take());
         }
     }
     out.extend(current);
@@ -537,6 +537,27 @@ mod tests {
         assert!(reason.starts_with("line 2:"), "{reason}");
         refused("CustomLog \\\n  \"|C:/evil.exe\" common");
         refused("Header set X 1\rInclude C:/evil.conf");
+    }
+
+    /// The logical lines of `text` as `(first physical line, joined text)`.
+    fn split(text: &str) -> Vec<(usize, String)> {
+        logical_lines(text).into_iter().map(|line| (line.number, line.text)).collect()
+    }
+
+    #[test]
+    fn a_continuation_is_decided_on_the_logical_line_read_so_far() {
+        // Apache drops one `\` per line feed and checks the character before it in the whole
+        // logical line read so far (`ap_cfg_getline`): after `X\\` it still ends in `\`, so the
+        // empty line that follows continues the line too, each one dropping another `\`.
+        assert_eq!(split("X\\\\\n\nY"), [(1, "XY".to_string())]);
+        assert_eq!(split("X\\\\\n\n\nY"), [(1, "X".to_string()), (4, "Y".to_string())]);
+        assert_eq!(split("X\\\\\\\n\n\nY"), [(1, "XY".to_string())]);
+        assert_eq!(split("X\\\\\\\n\n\n\nY"), [(1, "X".to_string()), (5, "Y".to_string())]);
+        // A non-empty line ends the logical line: one `\` is left in the text.
+        assert_eq!(split("X\\\\\nY\nZ"), [(1, "X\\Y".to_string()), (3, "Z".to_string())]);
+        // An empty line that starts a logical line never continues it.
+        assert_eq!(split("X\n\nY"), [(1, "X".to_string()), (2, String::new()), (3, "Y".to_string())]);
+        assert_eq!(split("\\\nY"), [(1, "Y".to_string())]);
     }
 
     #[test]

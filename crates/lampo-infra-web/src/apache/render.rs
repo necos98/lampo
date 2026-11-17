@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use lampo_domain::project::TlsMode;
+use lampo_domain::project::{ApacheDirectives, TlsMode};
 use lampo_domain::tcp_port::Port;
 use lampo_domain::web::{VirtualHost, WebServerConfig};
 use lampo_domain::{PortError, PortResult};
@@ -326,7 +326,7 @@ impl ApacheConfigRenderer {
             fcgid_wrapper: fcgid_wrapper_command(&php_cgi),
             env,
             project_env: project_env(vhost)?,
-            custom_directives: vhost.custom_directives.as_str().trim_end().to_string(),
+            custom_directives: rendered_directives(&vhost.custom_directives),
         };
         self.env.get_template("vhost.conf").and_then(|t| t.render(minijinja::context! { vhost => view })).map_err(render_error)
     }
@@ -397,6 +397,19 @@ fn rotated_log_of(config: &WebServerConfig, file: &str) -> PortResult<String> {
 /// `FcgidInitialEnv` values above.
 fn project_env(vhost: &VirtualHost) -> PortResult<Vec<EnvVar>> {
     vhost.env_vars.effective().map(|(name, value)| Ok(EnvVar { name: name.to_string(), value: quoted_text(value)? })).collect()
+}
+
+/// The custom directives as they go into the vhost: verbatim without the trailing line feeds,
+/// empty when blank (no section is rendered). The last line keeps its own spaces and tabs, so
+/// a `\` followed by a blank does not continue it, as `ApacheDirectives::validate` reads it.
+/// Every other logical line reaches Apache as validated; only the last one, when it still ends
+/// in `\`, continues into the fixed `# --- End of custom directives ---` comment, which never
+/// ends in `\` and so closes it before Lampo's own directives.
+fn rendered_directives(directives: &ApacheDirectives) -> String {
+    if directives.is_empty() {
+        return String::new();
+    }
+    directives.as_str().trim_end_matches('\n').to_string()
 }
 
 /// Variables Lampo sets per site; inherited values with these names are ignored.

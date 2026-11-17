@@ -3,6 +3,8 @@
 //! `Host` headers each address answers (DNS-rebinding protection on the dedicated ports).
 //! The regular expressions themselves are exercised against real Apache by `tests/smoke_apache.rs`.
 
+use lampo_domain::project::ApacheDirectives;
+
 use super::render::ApacheConfigRenderer;
 use super::tests_support::{sample_config, sample_options, vhost};
 
@@ -66,6 +68,21 @@ fn every_site_ends_with_the_internal_files_barrier() {
             assert!(custom < text.find(BARRIER).unwrap(), "{name}: the barrier must follow the custom directives");
         }
     }
+}
+
+#[test]
+fn the_last_custom_line_is_continued_only_where_it_was_validated() {
+    // A `\` followed by a blank does not continue the line for Apache nor for the validation:
+    // trimming the blank would join the line with the end-of-directives comment.
+    let render = |text: &str| {
+        let mut config = sample_config();
+        config.vhosts[1].custom_directives = ApacheDirectives::new(text).unwrap();
+        ApacheConfigRenderer::new(sample_options()).render_vhost(&config, &config.vhosts[1]).unwrap()
+    };
+    let shop = render("Header set X-A \\ \n\n");
+    assert!(shop.contains("\nHeader set X-A \\ \n    # --- End of custom directives ---\n"), "{shop}");
+    let blank = render(" \n\t\n");
+    assert!(!blank.contains("# --- End of custom directives ---"), "blank directives render no section: {blank}");
 }
 
 #[test]
