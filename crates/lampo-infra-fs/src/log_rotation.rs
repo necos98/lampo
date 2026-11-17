@@ -1,18 +1,18 @@
-//! Size-bounded log files. A log is kept below [`MAX_LOG_BYTES`] by moving it to `<name>.1`,
-//! the naming Apache's `rotatelogs -n` uses too (`<name>`, `<name>.1`, `<name>.2`, then
-//! `<name>` again). The writers rotate; readers find the file being written with
-//! [`current_log_file`], whichever member of the set that is.
+//! Size-bounded log files. A log is kept below [`MAX_LOG_BYTES`] by moving it to `<name>.1`.
+//! The writers rotate; readers find the file being written with [`current_log_file`],
+//! whichever member of the set that is (a writer holding the file open keeps writing to
+//! `<name>.1` until it reopens it).
 
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-/// Size past which a log is rotated (`rotatelogs` takes it in MiB, see [`MAX_LOG_MIB`]).
+/// Size past which a log is rotated.
 pub const MAX_LOG_BYTES: u64 = MAX_LOG_MIB * 1024 * 1024;
-/// [`MAX_LOG_BYTES`] in MiB, the unit of the `rotatelogs` size argument (`10M`).
+/// [`MAX_LOG_BYTES`] in MiB.
 pub const MAX_LOG_MIB: u64 = 10;
-/// Files in a rotation set, the current one included (`rotatelogs -n 3`). Lampo's own
-/// rotation keeps one previous file (`<name>.1`), which falls within the set.
+/// Files a reader looks at, the current one included. Lampo's rotation keeps one previous file
+/// (`<name>.1`); `<name>.2` may still be left by Apache's `rotatelogs` of Lampo 0.2.0.
 pub const LOG_SET_SIZE: u32 = 3;
 
 /// `<path>.<n>`: the `n`-th member of `path`'s rotation set (`n` ≥ 1).
@@ -36,8 +36,8 @@ pub fn rotate_if_large(path: &Path, max: u64) -> io::Result<bool> {
 }
 
 /// The member of `path`'s rotation set written last: `path` itself unless a numbered sibling
-/// is newer (after `rotatelogs` moved on to `<path>.1`, or right after a rotation, before the
-/// writer created `path` again). `path` when none exists.
+/// is newer (a writer that kept the file open writes to `<path>.1` after a rotation, until it
+/// reopens `path`). `path` when none exists.
 pub fn current_log_file(path: &Path) -> PathBuf {
     let members = std::iter::once(path.to_path_buf()).chain((1..LOG_SET_SIZE).map(|n| rotated_path(path, n)));
     let mut newest: Option<(SystemTime, PathBuf)> = None;

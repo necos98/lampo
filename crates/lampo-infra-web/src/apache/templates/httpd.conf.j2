@@ -27,7 +27,7 @@ HostnameLookups Off
 ServerTokens Prod
 ServerSignature Off
 PidFile "{{ main.pid_file }}"
-# Logs go through rotatelogs: a circular set of size-bounded files (error.log, error.log.1, …).
+# Logs are written directly; Lampo moves one past 10 MiB to <name>.1 before each (re)start.
 ErrorLog {{ main.error_log }}
 LogLevel warn
 LogFormat "%h %l %u %t \"%r\" %>s %b \"%{Referer}i\" \"%{User-Agent}i\" %D" lampo

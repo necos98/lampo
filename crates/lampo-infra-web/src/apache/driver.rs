@@ -17,7 +17,7 @@ use lampo_infra_services::ServiceDriver;
 use super::config::main_conf_path;
 use super::listen::ports_to_own;
 use super::signal::{HttpdSignal, HttpdSignals};
-use super::validation::{httpd_exe, rotatelogs_exe};
+use super::validation::httpd_exe;
 
 /// How long to wait for a started (or restarted) httpd to listen on every configured port.
 pub(crate) const START_TIMEOUT: Duration = Duration::from_secs(20);
@@ -94,17 +94,11 @@ impl ServiceDriver for ApacheDriver {
     }
 }
 
-/// `(httpd.exe, httpd.conf)`, once they and `rotatelogs.exe` exist, or a `NotFound` naming what is
-/// missing.
+/// `(httpd.exe, httpd.conf)`, once they exist, or a `NotFound` naming what is missing.
 pub(crate) fn check_installation(launch: &ServiceLaunch) -> PortResult<(PathBuf, PathBuf)> {
     let program = httpd_exe(&launch.install_dir);
     if !program.is_file() {
         return Err(PortError::not_found("Apache executable", program.display().to_string()));
-    }
-    // The generated logs are piped through it: without it httpd would exit at start-up.
-    let rotatelogs = rotatelogs_exe(&launch.install_dir);
-    if !rotatelogs.is_file() {
-        return Err(PortError::not_found("Apache rotatelogs", rotatelogs.display().to_string()));
     }
     let conf = main_conf_path(&launch.config_dir);
     if !conf.is_file() {

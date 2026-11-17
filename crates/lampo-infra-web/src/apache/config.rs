@@ -6,6 +6,7 @@ use lampo_domain::ports::{CommandRunner, WebServerConfigurator};
 use lampo_domain::web::WebServerConfig;
 use lampo_domain::{PortError, PortResult};
 use lampo_infra_fs::ensure_dir;
+use lampo_infra_fs::log_rotation::{MAX_LOG_BYTES, rotate_if_large};
 
 use super::render::{ApacheConfigRenderer, MAIN_CONF, RenderOptions, VHOSTS_DIR, validation_wrapper};
 use super::staging::{ConfigTree, VALIDATION_WRAPPER};
@@ -82,11 +83,22 @@ impl WebServerConfigurator for ApacheConfigurator {
 }
 
 /// Apache refuses to start when a log file's folder is missing (`httpd -t` does not check it).
+/// Logs past the size limit are moved to `<name>.1` here, before the start or the graceful
+/// restart that follows every apply: httpd writes its logs directly (a piped logger would be one
+/// more process per log, each with its own console) and reopens them at that restart. Until
+/// then it keeps writing to `<name>.1`, which the log reader follows (`current_log_file`).
 fn prepare_runtime_dirs(config: &WebServerConfig) -> PortResult<()> {
     ensure_dir(&config.log_dir)?;
     let parents = config.vhosts.iter().flat_map(|v| [v.error_log.parent(), v.access_log.parent()]).flatten();
     for dir in parents {
         ensure_dir(dir)?;
+    }
+    let logs = std::iter::once(config.log_dir.join("error.log")).chain(config.vhosts.iter().flat_map(|v| [v.error_log.clone(), v.access_log.clone()]));
+    for log in logs {
+        // Best effort: an unrotated log only keeps growing until the next apply.
+        if let Err(e) = rotate_if_large(&log, MAX_LOG_BYTES) {
+            tracing::warn!(file = %log.display(), error = %e, "Apache log not rotated");
+        }
     }
     Ok(())
 }
@@ -175,6 +187,38 @@ mod tests {
         configurator.apply(&fewer).await.unwrap();
         assert!(!live.join("vhosts").join("shop@feature-x.conf").exists());
         assert!(config.config_dir.with_file_name("apache.previous").join("vhosts").join("shop@feature-x.conf").exists());
+    }
+
+    #[tokio::test]
+    async fn logs_past_the_limit_are_moved_aside_on_apply_and_the_others_are_left() {
+        let (_dir, config, _httpd, configurator) = setup();
+        let big = config.vhosts[0].access_log.clone();
+        let small = config.vhosts[0].error_log.clone();
+        let main = config.log_dir.join("error.log");
+        for log in [&big, &small, &main] {
+            std::fs::create_dir_all(log.parent().unwrap()).unwrap();
+            std::fs::write(log, b"line\n").unwrap();
+        }
+        std::fs::File::options().write(true).open(&big).unwrap().set_len(MAX_LOG_BYTES + 1).unwrap();
+        std::fs::File::options().write(true).open(&main).unwrap().set_len(MAX_LOG_BYTES + 1).unwrap();
+
+        configurator.apply(&config).await.unwrap();
+
+        assert!(!big.exists(), "httpd creates it again when it reopens its logs");
+        assert_eq!(std::fs::metadata(lampo_infra_fs::log_rotation::rotated_path(&big, 1)).unwrap().len(), MAX_LOG_BYTES + 1);
+        assert!(lampo_infra_fs::log_rotation::rotated_path(&main, 1).is_file(), "the server's own error log too");
+        assert_eq!(std::fs::read_to_string(&small).unwrap(), "line\n");
+        assert!(!lampo_infra_fs::log_rotation::rotated_path(&small, 1).exists());
+    }
+
+    #[test]
+    fn logs_are_written_by_httpd_itself_never_through_a_piped_program() {
+        let (_dir, config, _httpd, configurator) = setup();
+        for (name, text) in configurator.render(&config).unwrap() {
+            for line in text.lines().filter(|l| l.trim_start().starts_with("ErrorLog") || l.trim_start().starts_with("CustomLog")) {
+                assert!(!line.contains('|'), "{name}: a piped logger is one more process, with a console window: {line}");
+            }
+        }
     }
 
     #[tokio::test]

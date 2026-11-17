@@ -1,8 +1,8 @@
 //! Rotation of the logs nobody else rotates while Lampo runs: PHP's `error_log` files (one per
 //! site, plus the CLI one). PHP reopens the file for every entry, so moving it aside is safe at
-//! any time; a site's log is also rotated when its php.ini is written. Apache's logs go through
-//! `rotatelogs` and the captured service output is rotated as it is written, so neither is
-//! listed here.
+//! any time; a site's log is also rotated when its php.ini is written. Apache's logs are rotated
+//! when its configuration is applied and the captured service output as it is written, so
+//! neither is listed here.
 
 use std::path::PathBuf;
 use std::sync::Arc;

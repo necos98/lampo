@@ -496,9 +496,9 @@ async fn real_apache_serves_php_sites() {
         std::panic::resume_unwind(panic);
     }
     assert_eq!(left, 0);
-    // 9. The logs went through rotatelogs into the files the log reader shows.
+    // 9. httpd wrote the site's log directly into the file the log reader shows.
     let access = std::fs::read_to_string(&shop_access_log).expect("the site's access log exists");
-    assert!(access.contains("\"GET /products/42?color=red HTTP/1.0\" 200 "), "access log not written through rotatelogs:\n{access}");
+    assert!(access.contains("\"GET /products/42?color=red HTTP/1.0\" 200 "), "access log not written:\n{access}");
 }
 
 /// Runs the future, capturing a panic so httpd is always stopped.

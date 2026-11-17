@@ -15,7 +15,7 @@
     ServerAlias {{ alias }}
 {% endfor %}
     DocumentRoot "{{ vhost.document_root }}"
-    # Logs go through rotatelogs: a circular set of size-bounded files (error.log, error.log.1, …).
+    # Logs are written directly; Lampo moves one past 10 MiB to <name>.1 before each (re)start.
     ErrorLog {{ vhost.error_log }}
     CustomLog {{ vhost.access_log }} lampo
 

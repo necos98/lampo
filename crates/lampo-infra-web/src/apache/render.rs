@@ -8,12 +8,10 @@ use lampo_domain::tcp_port::Port;
 use lampo_domain::web::{VirtualHost, WebServerConfig};
 use lampo_domain::{PortError, PortResult};
 use minijinja::{Environment, UndefinedBehavior};
-use lampo_infra_fs::log_rotation::{LOG_SET_SIZE, MAX_LOG_MIB};
 use serde::Serialize;
 
-use super::syntax::{apache_path, fcgid_wrapper_command, quoted_text, rotated_log};
+use super::syntax::{apache_path, fcgid_wrapper_command, quoted, quoted_text};
 use super::templates;
-use super::validation::rotatelogs_exe;
 use crate::site_layout;
 
 /// Name of the main configuration file inside the config dir.
@@ -163,7 +161,7 @@ struct MainView {
     catch_all_name: &'static str,
     modules: Vec<Module>,
     pid_file: String,
-    /// Quoted `ErrorLog` argument (a `rotatelogs` pipe).
+    /// Quoted `ErrorLog` file.
     error_log: String,
     threads_per_child: u32,
     fcgid: FcgidTuning,
@@ -182,7 +180,7 @@ struct VhostView {
     notices: Vec<String>,
     blocks: Vec<VhostBlock>,
     document_root: String,
-    /// Quoted `ErrorLog` / `CustomLog` arguments (`rotatelogs` pipes).
+    /// Quoted `ErrorLog` / `CustomLog` files.
     error_log: String,
     access_log: String,
     php_label: String,
@@ -268,7 +266,7 @@ impl ApacheConfigRenderer {
             listen,
             modules,
             pid_file: format!("{log_dir}/httpd.pid"),
-            error_log: rotated_log_of(config, &format!("{log_dir}/error.log"))?,
+            error_log: quoted(&format!("{log_dir}/error.log")),
             threads_per_child: self.options.threads_per_child,
             fcgid: self.options.fcgid.clone(),
             server_root,
@@ -320,8 +318,8 @@ impl ApacheConfigRenderer {
             notices,
             blocks,
             document_root: apache_path(&vhost.document_root)?,
-            error_log: rotated_log_of(config, &apache_path(&vhost.error_log)?)?,
-            access_log: rotated_log_of(config, &apache_path(&vhost.access_log)?)?,
+            error_log: quoted(&apache_path(&vhost.error_log)?),
+            access_log: quoted(&apache_path(&vhost.access_log)?),
             php_label: php_label(&vhost.php_cgi),
             fcgid_wrapper: fcgid_wrapper_command(&php_cgi),
             env,
@@ -383,13 +381,6 @@ fn internal_server_name(vhost: &VirtualHost) -> String {
         lampo_domain::site::SiteId::Project(p) => format!("{p}.lampo.invalid"),
         lampo_domain::site::SiteId::Worktree { parent, slug } => format!("{slug}.{parent}.lampo.invalid"),
     }
-}
-
-/// The `ErrorLog` / `CustomLog` argument (quoted) writing `file` through `rotatelogs`, rotated like
-/// every Lampo log (`lampo_infra_fs::log_rotation`): the log reader finds the current file.
-fn rotated_log_of(config: &WebServerConfig, file: &str) -> PortResult<String> {
-    let rotatelogs = apache_path(&rotatelogs_exe(&config.server_root))?;
-    Ok(rotated_log(&rotatelogs, file, LOG_SET_SIZE, MAX_LOG_MIB))
 }
 
 /// The project's variables as `SetEnv` arguments (request environment: `getenv()`, `$_SERVER`).

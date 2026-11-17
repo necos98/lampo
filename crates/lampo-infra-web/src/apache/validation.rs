@@ -17,12 +17,6 @@ pub fn httpd_exe(server_root: &Path) -> PathBuf {
     server_root.join("bin").join("httpd.exe")
 }
 
-/// `<server_root>\bin\rotatelogs.exe` (shipped with Apache Lounge): every generated log is
-/// piped through it.
-pub fn rotatelogs_exe(server_root: &Path) -> PathBuf {
-    server_root.join("bin").join("rotatelogs.exe")
-}
-
 /// Runs `httpd.exe -t -f <conf>`.
 pub struct HttpdValidator {
     commands: Arc<dyn CommandRunner>,

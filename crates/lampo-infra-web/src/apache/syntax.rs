@@ -56,21 +56,6 @@ pub fn fcgid_wrapper_command(exe: &str) -> String {
     quoted(&argv_word(exe))
 }
 
-/// The argument of `ErrorLog` / `CustomLog` sending the log through `rotatelogs`: a circular set
-/// of `generations` files (`<file>`, `<file>.1`, …) of up to `size_mib` MiB each. `||` starts the
-/// program directly (no `cmd.exe` in between), splitting the line with `apr_tokenize_to_argv`,
-/// so paths with spaces get inner quotes as in [`fcgid_wrapper_command`]. Both paths must
-/// already be safe (see [`apache_path`]).
-///
-/// `rotatelogs` reads a `%` in the file name as a `strftime` pattern and refuses it with `-n`:
-/// such a file is logged to directly, without rotation, rather than not at all.
-pub fn rotated_log(rotatelogs: &str, file: &str, generations: u32, size_mib: u64) -> String {
-    if file.contains('%') {
-        return quoted(file);
-    }
-    quoted(&format!("||{} -n {generations} {} {size_mib}M", argv_word(rotatelogs), argv_word(file)))
-}
-
 /// One word of an `apr_tokenize_to_argv` command line inside a quoted Apache argument. A value
 /// with a space or a single quote (which `apr_tokenize_to_argv` treats as a quote too) is
 /// wrapped in escaped double quotes.
@@ -120,16 +105,5 @@ mod tests {
     fn wrapper_quoting() {
         assert_eq!(fcgid_wrapper_command("C:/php/php-cgi.exe"), "\"C:/php/php-cgi.exe\"");
         assert_eq!(fcgid_wrapper_command("C:/Program Files/php/php-cgi.exe"), r#""\"C:/Program Files/php/php-cgi.exe\"""#);
-    }
-
-    #[test]
-    fn rotated_log_quoting() {
-        assert_eq!(rotated_log("C:/a/bin/rotatelogs.exe", "C:/logs/error.log", 3, 10), r#""||C:/a/bin/rotatelogs.exe -n 3 C:/logs/error.log 10M""#);
-        assert_eq!(
-            rotated_log("C:/Program Files/a/bin/rotatelogs.exe", "C:/Lampo Data/logs/access.log", 3, 10),
-            r#""||\"C:/Program Files/a/bin/rotatelogs.exe\" -n 3 \"C:/Lampo Data/logs/access.log\" 10M""#
-        );
-        assert_eq!(rotated_log("C:/a/rotatelogs.exe", "C:/Users/o'brien/error.log", 3, 10), r#""||C:/a/rotatelogs.exe -n 3 \"C:/Users/o'brien/error.log\" 10M""#);
-        assert_eq!(rotated_log("C:/a/rotatelogs.exe", "C:/Users/100%/error.log", 3, 10), r#""C:/Users/100%/error.log""#, "rotatelogs refuses `%` with -n");
     }
 }
