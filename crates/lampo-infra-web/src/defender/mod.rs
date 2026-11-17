@@ -1,9 +1,10 @@
-//! The optional Microsoft Defender exclusions of Lampo's MySQL data folder (a path exclusion) and
-//! of the servers Lampo runs from its packages, `php-cgi.exe` and `httpd.exe` (process
-//! exclusions).
+//! The optional Microsoft Defender exclusions of Lampo's MySQL data folder (a path exclusion), of
+//! the servers Lampo runs from its packages, `php-cgi.exe` and `httpd.exe` (process exclusions),
+//! and of a folder holding the user's projects (a path exclusion).
 //!
-//! * [`target`] — the only folder that may be excluded, and the link check (both sides);
+//! * [`target`] — the only MySQL folder that may be excluded, and the link check (both sides);
 //! * [`executable`] — the only executables that may be excluded, and their check (both sides);
+//! * [`projects`] — the folders a projects folder may never be, and their check (both sides);
 //! * [`request`] — the helper's command line in this mode;
 //! * [`profiles`] — the user profiles of this machine (registry);
 //! * [`powershell`] — the Defender cmdlets, run by the helper;
@@ -14,6 +15,7 @@ pub mod executable;
 pub mod helper;
 pub mod powershell;
 pub mod profiles;
+pub mod projects;
 pub mod request;
 pub mod target;
 
@@ -33,9 +35,10 @@ use crate::elevation::{HelperLauncher, LaunchOutcome};
 const HELPER: &str = "lampo-hosts-helper";
 
 /// Checks every target as the helper will (so a refused target never shows a prompt), creates
-/// the folder when adding (as the user, who owns the data folder), then runs
-/// `lampo-hosts-helper.exe --defender-exclusion add|remove [--path <folder>] [--process <exe>]...`
-/// once through the [`HelperLauncher`] (one UAC prompt in production) and maps its exit code.
+/// the MySQL folder when adding (as the user, who owns the data folder; never the projects
+/// folder, which must exist), then runs `lampo-hosts-helper.exe --defender-exclusion add|remove
+/// [--path <folder>] [--projects <folder>] [--process <exe>]...` once through the
+/// [`HelperLauncher`] (one UAC prompt in production) and maps its exit code.
 pub struct DefenderScanExclusion {
     helper_exe: PathBuf,
     launcher: Arc<dyn HelperLauncher>,
@@ -58,9 +61,15 @@ impl DefenderScanExclusion {
         let profiles = self.profiles.profile_dirs();
         let adding = change == ScanExclusionChange::Add;
         let folder = targets.folder.as_deref().map(|folder| prepare_folder(folder, &profiles, adding)).transpose()?;
+        let projects = targets.projects.as_deref().map(|folder| validated_projects_folder(folder, &profiles, adding)).transpose()?;
         let processes = targets.processes.iter().map(|exe| executable::validated_executable(requested(exe)?, &profiles, adding).map_err(|e| refused(exe, e))).collect::<PortResult<_>>()?;
-        Ok(ScanExclusionTargets { folder, processes })
+        Ok(ScanExclusionTargets { folder, processes, projects })
     }
+}
+
+/// The projects folder the helper will accept for `folder`.
+fn validated_projects_folder(folder: &Path, profiles: &[PathBuf], must_exist: bool) -> PortResult<PathBuf> {
+    projects::validated_projects_folder(requested(folder)?, profiles, must_exist).map_err(|e| refused(folder, e))
 }
 
 fn refused(path: &Path, error: TargetError) -> PortError {
@@ -90,13 +99,23 @@ impl ScanExclusionEditor for DefenderScanExclusion {
             return Err(PortError::not_found("elevated helper", self.helper_exe.display().to_string()));
         }
         let display = |p: &PathBuf| p.display().to_string();
-        let args = ExclusionArgs { change, path: targets.folder.as_ref().map(display), processes: targets.processes.iter().map(display).collect() }.to_args();
+        let args = ExclusionArgs {
+            change,
+            path: targets.folder.as_ref().map(display),
+            projects: targets.projects.as_ref().map(display),
+            processes: targets.processes.iter().map(display).collect(),
+        }
+        .to_args();
         let (launcher, helper_exe) = (self.launcher.clone(), self.helper_exe.clone());
         let outcome = tokio::task::spawn_blocking(move || launcher.run(&helper_exe, &args)).await.map_err(|e| PortError::process(HELPER, e))??;
         match outcome {
             LaunchOutcome::Denied => Ok(ScanExclusionOutcome::Cancelled),
             LaunchOutcome::Exited(code) => helper_exit::to_outcome(code),
         }
+    }
+
+    fn accepted_projects_folder(&self, folder: &Path) -> PortResult<PathBuf> {
+        validated_projects_folder(folder, &self.profiles.profile_dirs(), true)
     }
 }
 
@@ -108,8 +127,8 @@ pub mod helper_exit {
 
     pub use crate::hosts::helper_exit::{BAD_ARGUMENTS, OK};
 
-    /// A target is not Lampo's MySQL folder or one of its server executables for a user profile,
-    /// or a link is in its way.
+    /// A target is not Lampo's MySQL folder, one of its server executables or an allowed projects
+    /// folder for a user profile, or a link is in its way.
     pub const INVALID_TARGET: i32 = 20;
     pub const DEFENDER_UNAVAILABLE: i32 = 21;
     pub const REFUSED: i32 = 22;
@@ -195,7 +214,7 @@ mod tests {
     }
 
     fn folder_only(folder: &Path) -> ScanExclusionTargets {
-        ScanExclusionTargets { folder: Some(folder.to_path_buf()), processes: Vec::new() }
+        ScanExclusionTargets { folder: Some(folder.to_path_buf()), ..Default::default() }
     }
 
     #[tokio::test]
@@ -203,7 +222,7 @@ mod tests {
         let s = setup(LaunchOutcome::Exited(helper_exit::OK));
         assert_eq!(s.adapter.change(&folder_only(&s.folder), ScanExclusionChange::Add).await, Ok(ScanExclusionOutcome::Applied));
         assert!(s.folder.is_dir(), "created as the user before the prompt");
-        assert_eq!(s.calls(), vec![ExclusionArgs { change: ScanExclusionChange::Add, path: Some(s.folder.display().to_string()), processes: Vec::new() }]);
+        assert_eq!(s.calls(), vec![ExclusionArgs { change: ScanExclusionChange::Add, path: Some(s.folder.display().to_string()), projects: None, processes: Vec::new() }]);
     }
 
     #[tokio::test]
@@ -217,17 +236,17 @@ mod tests {
     #[tokio::test]
     async fn every_target_goes_in_one_prompt() {
         let s = setup(LaunchOutcome::Exited(helper_exit::OK));
-        let targets = ScanExclusionTargets { folder: Some(s.folder.clone()), processes: vec![s.php.clone(), s.httpd.clone()] };
+        let targets = ScanExclusionTargets { folder: Some(s.folder.clone()), processes: vec![s.php.clone(), s.httpd.clone()], projects: None };
         assert_eq!(s.adapter.change(&targets, ScanExclusionChange::Add).await, Ok(ScanExclusionOutcome::Applied));
         let processes = vec![s.php.display().to_string(), s.httpd.display().to_string()];
-        assert_eq!(s.calls(), vec![ExclusionArgs { change: ScanExclusionChange::Add, path: Some(s.folder.display().to_string()), processes }]);
+        assert_eq!(s.calls(), vec![ExclusionArgs { change: ScanExclusionChange::Add, path: Some(s.folder.display().to_string()), projects: None, processes }]);
     }
 
     #[tokio::test]
     async fn removing_works_for_an_uninstalled_package() {
         let s = setup(LaunchOutcome::Exited(helper_exit::OK));
         std::fs::remove_dir_all(s.php.parent().unwrap()).unwrap();
-        let targets = ScanExclusionTargets { folder: None, processes: vec![s.php.clone()] };
+        let targets = ScanExclusionTargets { processes: vec![s.php.clone()], ..Default::default() };
         assert!(matches!(s.adapter.change(&targets, ScanExclusionChange::Add).await, Err(PortError::InvalidData { .. })), "adding needs the file");
         assert_eq!(s.adapter.change(&targets, ScanExclusionChange::Remove).await, Ok(ScanExclusionOutcome::Applied));
         assert_eq!(s.calls().len(), 1, "only the removal prompted");
@@ -274,13 +293,62 @@ mod tests {
         let php_cli = s.php.with_file_name("php.exe");
         std::fs::write(&php_cli, b"").unwrap();
         let empty = ScanExclusionTargets::default();
-        let mixed = ScanExclusionTargets { folder: Some(s.folder.clone()), processes: vec![s.php.clone(), php_cli.clone()] };
-        let too_many = ScanExclusionTargets { folder: None, processes: vec![s.php.clone(); MAX_PROCESSES + 1] };
-        for targets in [empty, mixed, too_many, ScanExclusionTargets { folder: None, processes: vec![PathBuf::from(r"C:\Windows\System32\cmd.exe")] }] {
+        let mixed = ScanExclusionTargets { folder: Some(s.folder.clone()), processes: vec![s.php.clone(), php_cli.clone()], projects: None };
+        let too_many = ScanExclusionTargets { processes: vec![s.php.clone(); MAX_PROCESSES + 1], ..Default::default() };
+        for targets in [empty, mixed, too_many, ScanExclusionTargets { processes: vec![PathBuf::from(r"C:\Windows\System32\cmd.exe")], ..Default::default() }] {
             let err = s.adapter.change(&targets, ScanExclusionChange::Add).await.unwrap_err();
             assert!(matches!(err, PortError::InvalidData { .. }), "{targets:?}: {err:?}");
         }
         assert!(s.launcher.calls.lock().unwrap().is_empty());
+    }
+
+    fn projects_only(folder: &Path) -> ScanExclusionTargets {
+        ScanExclusionTargets { projects: Some(folder.to_path_buf()), ..Default::default() }
+    }
+
+    #[tokio::test]
+    async fn a_projects_folder_is_asked_for_but_never_created() {
+        let s = setup(LaunchOutcome::Exited(helper_exit::OK));
+        let projects = s.profile.join(r"Desktop\Progetti");
+        let err = s.adapter.change(&projects_only(&projects), ScanExclusionChange::Add).await.unwrap_err();
+        assert!(matches!(err, PortError::InvalidData { .. }) && !projects.exists(), "adding needs the folder: {err:?}");
+        std::fs::create_dir_all(&projects).unwrap();
+        assert_eq!(s.adapter.change(&projects_only(&projects), ScanExclusionChange::Add).await, Ok(ScanExclusionOutcome::Applied));
+        let expected = ExclusionArgs { change: ScanExclusionChange::Add, path: None, projects: Some(projects.display().to_string()), processes: Vec::new() };
+        assert_eq!(s.calls(), vec![expected]);
+    }
+
+    /// One folder per rule of [`projects`], each existing so that only the rule refuses it.
+    #[tokio::test]
+    async fn refused_projects_folders_never_show_a_prompt() {
+        let s = setup(LaunchOutcome::Exited(helper_exit::OK));
+        let below = ["AppData", r"AppData\Local\Lampo", r"Start Menu\Programs\Startup", "Desktop", "Documents", "Downloads", "OneDrive", r"OneDrive\Documents", "DESKTO~1"];
+        let refused: Vec<PathBuf> = std::iter::once(s.profile.clone()).chain(below.map(|relative| s.profile.join(relative))).collect();
+        for folder in &refused {
+            std::fs::create_dir_all(folder).unwrap();
+        }
+        let outside =
+            [s.profile.parent().unwrap().join("Progetti"), PathBuf::from(r"C:\Windows"), PathBuf::from(r"C:\Program Files (x86)"), PathBuf::from(r"C:\ProgramData"), PathBuf::from(r"C:\")];
+        for folder in refused.iter().chain(&outside) {
+            for change in [ScanExclusionChange::Add, ScanExclusionChange::Remove] {
+                let err = s.adapter.change(&projects_only(folder), change).await.unwrap_err();
+                assert!(matches!(err, PortError::InvalidData { .. }), "{folder:?}: {err:?}");
+            }
+            assert!(s.adapter.accepted_projects_folder(folder).is_err(), "{folder:?} is never suggested");
+        }
+        assert!(s.launcher.calls.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn accepted_projects_folders_exist_and_keep_the_profiles_spelling() {
+        let s = setup(LaunchOutcome::Exited(helper_exit::OK));
+        let projects = s.profile.join(r"Desktop\Progetti");
+        assert!(s.adapter.accepted_projects_folder(&projects).is_err(), "a missing folder is not suggested");
+        std::fs::create_dir_all(&projects).unwrap();
+        assert_eq!(s.adapter.accepted_projects_folder(&projects), Ok(projects.clone()));
+        let upper = PathBuf::from(s.profile.display().to_string().to_uppercase()).join(r"Desktop\Progetti");
+        assert_eq!(s.adapter.accepted_projects_folder(&upper), Ok(projects));
+        assert!(s.launcher.calls.lock().unwrap().is_empty(), "never a prompt");
     }
 
     #[tokio::test]

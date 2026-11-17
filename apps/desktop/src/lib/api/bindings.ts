@@ -1008,7 +1008,7 @@ export type ScanExclusionResult = { change: ScanExclusionChange, outcome: ScanEx
 folder: string, };
 
 /**
- * Which of Lampo's files one request changes, all through one UAC prompt. At least one.
+ * Which files one request changes, all through one UAC prompt. At least one.
  */
 export type DefenderExclusionRequest = { change: ScanExclusionChange, 
 /**
@@ -1019,7 +1019,16 @@ php: boolean,
 /**
  * The MySQL data folder (a path exclusion).
  */
-mysql: boolean, };
+mysql: boolean, 
+/**
+ * A folder holding the user's projects (a path exclusion): `projectsFolder`, or the
+ * suggested one ([`DefenderExclusionInfoDto::projects_folder`]) when it is absent.
+ */
+projects: boolean, 
+/**
+ * The projects folder to exclude (an absolute path); only with `projects`.
+ */
+projectsFolder?: string | null, };
 
 /**
  * The result of one request (see [`ScanExclusionResultDto`]: there is no "active" state).
@@ -1032,7 +1041,11 @@ folder: string | null,
 /**
  * The executables the request named (empty without `php`).
  */
-processes: Array<string>, };
+processes: Array<string>, 
+/**
+ * The projects folder, when the request named it.
+ */
+projects: string | null, };
 
 /**
  * What each part of a request would cover now, shown before the user asks for it.
@@ -1045,7 +1058,12 @@ folder: string,
 /**
  * `php-cgi.exe` of every installed PHP and `httpd.exe` of every installed Apache (`php`).
  */
-processes: Array<string>, };
+processes: Array<string>, 
+/**
+ * The suggested projects folder (`projects`): the deepest folder holding the folders of the
+ * registered projects that may be excluded; `null` when there is none.
+ */
+projectsFolder: string | null, };
 
 // --- App ---
 

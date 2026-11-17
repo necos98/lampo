@@ -1,11 +1,11 @@
-//! `defender exclusion add|remove [--php] [--mysql]`: runs in this process (the UAC prompt belongs
-//! to the terminal), never in the app, which owns no state of it.
+//! `defender exclusion add|remove [--php] [--mysql] [--projects [<folder>]]`: runs in this process
+//! (the UAC prompt belongs to the terminal), never in the app, which owns no state of it.
 
 use lampo_application::dto::{DefenderExclusionRequestDto, ScanExclusionChangeDto, ScanExclusionOutcomeDto};
 use lampo_application::{AppResult, CallContext};
 
 use super::Cmd;
-use crate::cli::{DefenderCommand, ExclusionCommand};
+use crate::cli::{DefenderCommand, ExclusionCommand, ExclusionTargets};
 use crate::exit_code::ExitCode;
 use crate::render;
 
@@ -20,10 +20,18 @@ async fn exclusion(c: &Cmd<'_>, command: ExclusionCommand) -> AppResult<i32> {
         ExclusionCommand::Add(targets) => (ScanExclusionChangeDto::Add, targets),
         ExclusionCommand::Remove(targets) => (ScanExclusionChangeDto::Remove, targets),
     };
-    let request = DefenderExclusionRequestDto { change, php: targets.php, mysql: targets.mysql };
-    let result = c.ctx.scan_exclusion.change(request, CallContext::cli(c.g.allow_elevation)).await?;
+    let result = c.ctx.scan_exclusion.change(request(c, change, targets), CallContext::cli(c.g.allow_elevation)).await?;
     c.io.emit(&result, render::defender_exclusion);
     Ok(exit_code(result.outcome).code())
+}
+
+/// A relative projects folder is the terminal's: made absolute here, where the cwd is known.
+fn request(c: &Cmd<'_>, change: ScanExclusionChangeDto, targets: ExclusionTargets) -> DefenderExclusionRequestDto {
+    DefenderExclusionRequestDto {
+        projects: targets.projects.is_some(),
+        projects_folder: targets.projects.flatten().map(|folder| c.ctx.env.absolute(&folder)),
+        ..DefenderExclusionRequestDto::new(change, targets.php, targets.mysql)
+    }
 }
 
 /// Declined prompt: as for the hosts file. Defender not doing it: an external program failed.

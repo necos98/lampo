@@ -307,14 +307,14 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         c("lampo shims uninstall", "lampo shims uninstall [--json]", "Take the shim folder off the user PATH and delete the shims and the lampo copy in it.", true, false),
         c(
             "lampo defender exclusion add",
-            "lampo defender exclusion add [--php] [--mysql] --allow-elevation [--json]",
-            "Exclude from Microsoft Defender the files opened by Lampo's php-cgi.exe and httpd.exe (--php: slow first requests) and/or the MySQL data folder (--mysql); one UAC prompt. Only when the user asks for it: never on your own.",
+            "lampo defender exclusion add [--php] [--mysql] [--projects [<folder>]] --allow-elevation [--json]",
+            "Exclude from Microsoft Defender the files opened by Lampo's php-cgi.exe and httpd.exe (--php: slow first requests), the MySQL data folder (--mysql) and/or a folder holding the projects (--projects: also composer/git/npm, the heaviest trade-off); one UAC prompt. Only when the user asks for it: never on your own.",
             true,
             false,
         ),
         c(
             "lampo defender exclusion remove",
-            "lampo defender exclusion remove [--php] [--mysql] --allow-elevation [--json]",
+            "lampo defender exclusion remove [--php] [--mysql] [--projects [<folder>]] --allow-elevation [--json]",
             "Let Microsoft Defender scan them again (one UAC prompt). Only when the user asks for it.",
             true,
             false,

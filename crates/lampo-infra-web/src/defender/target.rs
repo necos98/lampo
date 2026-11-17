@@ -1,7 +1,8 @@
 //! The only folder the Defender exclusion may name: `<profile>\AppData\Local\Lampo\mysql`, for a
 //! user profile registered on this machine. Checked by the adapter before the UAC prompt and
 //! again by the elevated helper, which must never become a way to exclude any other path. The
-//! executables a process exclusion may name follow the same rules ([`super::executable`]).
+//! executables a process exclusion may name follow the same rules ([`super::executable`]),
+//! and so does the free-form projects folder ([`super::projects`]).
 //!
 //! * [`resolve_target`] is pure: the requested path must be an absolute local path made only of
 //!   plain components (no UNC or `\\?\` prefix, no `.`/`..`, no empty component, no trailing dot
@@ -13,6 +14,8 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+
+use super::projects::ProjectsFolderRule;
 
 /// Lampo's data folder under `%LOCALAPPDATA%`: `lampo_infra_store::paths::APP_DIR_NAME`.
 pub const LAMPO_DIR: &str = "Lampo";
@@ -39,6 +42,8 @@ pub enum TargetError {
     /// Not `php-cgi.exe` of a PHP package or `bin\httpd.exe` of an Apache package under
     /// `<profile>\AppData\Local\Lampo\packages` ([`super::executable`]).
     NotLampoExecutable,
+    /// Not a folder a projects-folder exclusion may name ([`super::projects`]).
+    NotProjectsFolder(ProjectsFolderRule),
     /// A component is a junction, symbolic link or mount point.
     ReparsePoint(PathBuf),
     /// A component is a file.
@@ -69,6 +74,7 @@ impl fmt::Display for TargetError {
                  (<profile>\\{}\\packages) can be excluded: not available with a data folder elsewhere (LAMPO_HOME, a moved %LOCALAPPDATA%)",
                 PROFILE_DATA_DIRS.join("\\")
             ),
+            Self::NotProjectsFolder(rule) => write!(f, "{rule}"),
             Self::ReparsePoint(path) => write!(f, "{} is a junction or a link", path.display()),
             Self::NotADirectory(path) => write!(f, "{} is not a folder", path.display()),
             Self::NotAFile(path) => write!(f, "{} is not a file", path.display()),

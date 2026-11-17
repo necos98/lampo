@@ -117,6 +117,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let scan_exclusion = Arc::new(DefenderExclusion::new(
         Arc::new(web::DefenderScanExclusion::new(elevated_helper, elevated_launcher, Arc::new(web::defender::profiles::RegistryProfiles))),
         installed.clone(),
+        projects.clone(),
         paths.clone(),
     ));
 

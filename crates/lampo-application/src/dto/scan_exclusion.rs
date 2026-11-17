@@ -1,5 +1,5 @@
-//! DTOs of the optional Microsoft Defender exclusions: the MySQL data folder and the PHP/Apache
-//! server processes (`lampo defender exclusion`, Settings). The `ScanExclusion*` types are the
+//! DTOs of the optional Microsoft Defender exclusions: the MySQL data folder, the PHP/Apache
+//! server processes and a projects folder (`lampo defender exclusion`, Settings). The `ScanExclusion*` types are the
 //! MySQL-only form (`lampo mysql defender-exclusion`, the settings panel), kept as they are.
 
 use serde::{Deserialize, Serialize};
@@ -41,8 +41,8 @@ pub struct ScanExclusionResultDto {
     pub folder: String,
 }
 
-/// Which of Lampo's files one request changes, all through one UAC prompt. At least one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Which files one request changes, all through one UAC prompt. At least one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DefenderExclusionRequest"))]
 #[serde(rename_all = "camelCase")]
 pub struct DefenderExclusionRequestDto {
@@ -52,6 +52,21 @@ pub struct DefenderExclusionRequestDto {
     pub php: bool,
     /// The MySQL data folder (a path exclusion).
     pub mysql: bool,
+    /// A folder holding the user's projects (a path exclusion): `projectsFolder`, or the
+    /// suggested one ([`DefenderExclusionInfoDto::projects_folder`]) when it is absent.
+    #[serde(default)]
+    pub projects: bool,
+    /// The projects folder to exclude (an absolute path); only with `projects`.
+    #[serde(default)]
+    #[cfg_attr(test, ts(optional = nullable))]
+    pub projects_folder: Option<String>,
+}
+
+impl DefenderExclusionRequestDto {
+    /// A request naming no projects folder.
+    pub fn new(change: ScanExclusionChangeDto, php: bool, mysql: bool) -> Self {
+        Self { change, php, mysql, projects: false, projects_folder: None }
+    }
 }
 
 /// The result of one request (see [`ScanExclusionResultDto`]: there is no "active" state).
@@ -65,6 +80,8 @@ pub struct DefenderExclusionResultDto {
     pub folder: Option<String>,
     /// The executables the request named (empty without `php`).
     pub processes: Vec<String>,
+    /// The projects folder, when the request named it.
+    pub projects: Option<String>,
 }
 
 /// What each part of a request would cover now, shown before the user asks for it.
@@ -76,4 +93,7 @@ pub struct DefenderExclusionInfoDto {
     pub folder: String,
     /// `php-cgi.exe` of every installed PHP and `httpd.exe` of every installed Apache (`php`).
     pub processes: Vec<String>,
+    /// The suggested projects folder (`projects`): the deepest folder holding the folders of the
+    /// registered projects that may be excluded; `null` when there is none.
+    pub projects_folder: Option<String>,
 }

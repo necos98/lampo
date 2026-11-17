@@ -135,6 +135,7 @@ pub fn build() -> AppResult<CliContext> {
         scan_exclusion: Arc::new(DefenderExclusion::new(
             Arc::new(DefenderScanExclusion::new(elevated_helper, Arc::new(RunAsLauncher::default()), Arc::new(RegistryProfiles))),
             installed.clone(),
+            projects_repo.clone(),
             paths.clone(),
         )),
         packages: Arc::new(PackageCatalog::new(PackageCatalogDeps {

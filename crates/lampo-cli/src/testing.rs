@@ -393,6 +393,9 @@ impl ShimAdmin for Fake {
 /// The folder every fake Defender exclusion names.
 pub const MYSQL_DATA_FOLDER: &str = r"C:\Users\me\AppData\Local\Lampo\mysql";
 
+/// The folder every fake `--projects` exclusion without a folder names.
+pub const SUGGESTED_PROJECTS_FOLDER: &str = r"C:\Users\me\Desktop\Progetti";
+
 /// The executables every fake `--php` exclusion names.
 pub const SERVER_EXECUTABLES: [&str; 2] = [r"C:\Users\me\AppData\Local\Lampo\packages\apache-2.4\bin\httpd.exe", r"C:\Users\me\AppData\Local\Lampo\packages\php-8.3\php-cgi.exe"];
 
@@ -406,12 +409,13 @@ impl Fake {
 #[async_trait]
 impl ScanExclusionAdmin for Fake {
     async fn change(&self, request: DefenderExclusionRequestDto, context: CallContext) -> AppResult<DefenderExclusionResultDto> {
-        let outcome = self.scan_exclusion_outcome(request, context)?;
+        let outcome = self.scan_exclusion_outcome(request.clone(), context)?;
         let processes = if request.php { SERVER_EXECUTABLES.map(String::from).to_vec() } else { Vec::new() };
-        Ok(DefenderExclusionResultDto { change: request.change, outcome, folder: request.mysql.then(|| MYSQL_DATA_FOLDER.into()), processes })
+        let projects = request.projects.then(|| request.projects_folder.unwrap_or_else(|| SUGGESTED_PROJECTS_FOLDER.into()));
+        Ok(DefenderExclusionResultDto { change: request.change, outcome, folder: request.mysql.then(|| MYSQL_DATA_FOLDER.into()), processes, projects })
     }
     async fn change_mysql(&self, change: ScanExclusionChangeDto, context: CallContext) -> AppResult<ScanExclusionResultDto> {
-        let outcome = self.scan_exclusion_outcome(DefenderExclusionRequestDto { change, php: false, mysql: true }, context)?;
+        let outcome = self.scan_exclusion_outcome(DefenderExclusionRequestDto::new(change, false, true), context)?;
         Ok(ScanExclusionResultDto { change, outcome, folder: MYSQL_DATA_FOLDER.into() })
     }
 }

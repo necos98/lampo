@@ -29,8 +29,10 @@ pub fn defender_exclusion(r: &DefenderExclusionResultDto) -> String {
     }];
     lines.extend(r.folder.iter().map(|folder| format!("  {folder} (the data of every MySQL instance)")));
     lines.extend(r.processes.iter().map(|exe| format!("  the files opened by {exe}")));
+    lines.extend(r.projects.iter().map(|folder| format!("  {folder} (your projects, with their vendor and node_modules folders)")));
     if r.change == ScanExclusionChangeDto::Add {
-        let selectors: Vec<&str> = [(!r.processes.is_empty(), "--php"), (r.folder.is_some(), "--mysql")].into_iter().filter_map(|(named, flag)| named.then_some(flag)).collect();
+        let projects = r.projects.as_ref().map(|folder| format!("--projects \"{folder}\""));
+        let selectors: Vec<&str> = [(!r.processes.is_empty()).then_some("--php"), r.folder.is_some().then_some("--mysql"), projects.as_deref()].into_iter().flatten().collect();
         lines.push(format!("Undo it with `lampo defender exclusion remove {} --allow-elevation`.", selectors.join(" ")));
         if !r.processes.is_empty() {
             lines.push("After installing another PHP version, run `lampo defender exclusion add --php --allow-elevation` again.".to_string());
@@ -72,7 +74,26 @@ mod tests {
     }
 
     fn defender(change: ScanExclusionChangeDto, folder: Option<&str>, processes: &[&str]) -> DefenderExclusionResultDto {
-        DefenderExclusionResultDto { change, outcome: ScanExclusionOutcomeDto::Applied, folder: folder.map(String::from), processes: processes.iter().map(|p| p.to_string()).collect() }
+        DefenderExclusionResultDto {
+            change,
+            outcome: ScanExclusionOutcomeDto::Applied,
+            folder: folder.map(String::from),
+            processes: processes.iter().map(|p| p.to_string()).collect(),
+            projects: None,
+        }
+    }
+
+    const PROJECTS: &str = r"C:\Users\me\Desktop\Progetti";
+
+    #[test]
+    fn a_projects_folder_is_listed_with_how_to_undo_it() {
+        let projects = |change| DefenderExclusionResultDto { projects: Some(PROJECTS.into()), ..defender(change, None, &[]) };
+        let added = defender_exclusion(&projects(ScanExclusionChangeDto::Add));
+        assert!(added.contains(&format!("  {PROJECTS} (your projects")), "{added}");
+        assert!(added.contains(&format!("`lampo defender exclusion remove --projects \"{PROJECTS}\" --allow-elevation`")) && !added.contains("another PHP"), "{added}");
+        let every = defender_exclusion(&DefenderExclusionResultDto { projects: Some(PROJECTS.into()), ..defender(ScanExclusionChangeDto::Add, Some(FOLDER), &[PHP]) });
+        assert!(every.contains(&format!("remove --php --mysql --projects \"{PROJECTS}\" --allow-elevation")), "{every}");
+        assert!(defender_exclusion(&projects(ScanExclusionChangeDto::Remove)).ends_with(&format!("  {PROJECTS} (your projects, with their vendor and node_modules folders)")));
     }
 
     const OUTCOMES: [(ScanExclusionOutcomeDto, &str); 4] = [

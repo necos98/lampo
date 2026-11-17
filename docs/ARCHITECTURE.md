@@ -192,7 +192,7 @@ administrators.
 
 ### Microsoft Defender exclusions
 
-Two optional exclusions, offered **only on an explicit request** (Settings > CLI e integrazioni >
+Three optional exclusions, offered **only on an explicit request** (Settings > CLI e integrazioni >
 Microsoft Defender, or the CLI; nothing adds them at install or start), each a trade-off the user
 accepts:
 
@@ -217,21 +217,34 @@ accepts:
   ~14% of Defender's scan time. Those are data files, never run. `mysqld.exe` gets no process
   exclusion: the folder already covers what it writes, and `--mysql` keeps meaning exactly that
   folder.
+* **A projects folder** (`lampo defender exclusion add|remove --projects [<folder>]`; a separate
+  option of the panel, never recommended, with a folder picker and a warning). The heaviest
+  trade-off and the only one that also speeds up `composer install`, `git checkout`, `npm
+  install` and the IDE: downloaded code (`vendor\`, `node_modules\`) lands there and is never
+  scanned. One folder per request (`-ExclusionPath`). Without `<folder>`, `DefenderExclusion`
+  suggests one: the common ancestor of the registered projects' parent folders (ignoring case,
+  drive-rooted projects on one drive), or the first of its ancestors the adapter accepts
+  (`ScanExclusionEditor::accepted_projects_folder`, no prompt); `Validation` (exit 4) when none
+  is. The settings panel shows the same suggestion (`DefenderExclusionInfoDto::projects_folder`).
+  The projects' configuration is a file the user can write, so it only spares typing: it is
+  never trusted, the adapter and the helper check the folder structurally.
 
-Both can go in one request (`--php --mysql`): **one UAC prompt per request**, whatever it names.
+They can go in one request (`--php --mysql`): **one UAC prompt per request**, whatever it names.
 The CLI needs `--allow-elevation` (exit 7 without it, 8 when the prompt is declined, 10 for
 `--php` with no PHP or Apache installed, 12 when Defender does not do it). `DefenderExclusion`
-(application) builds the targets (`LampoPaths::service_kind_dir(mysql)` and the installed
-executables); `DefenderScanExclusion` (`lampo_infra_web::defender`, port `ScanExclusionEditor`)
-runs `lampo-hosts-helper.exe --defender-exclusion add|remove [--path <folder>] [--process
-<exe>]...` once. Both the GUI and the CLI run it in their own process (the CLI never asks the
+(application) builds the targets (`LampoPaths::service_kind_dir(mysql)`, the installed
+executables and the projects folder); `DefenderScanExclusion` (`lampo_infra_web::defender`, port
+`ScanExclusionEditor`) runs `lampo-hosts-helper.exe --defender-exclusion add|remove [--path
+<folder>] [--projects <folder>] [--process <exe>]...` once. Both the GUI and the CLI run it in their own process (the CLI never asks the
 app), so the prompt belongs to the app window or to the terminal.
 
 The helper must not become a way to exclude any path or program, so in this mode
-(`defender::helper`, `defender::target`, `defender::executable`, `defender::request`):
+(`defender::helper`, `defender::target`, `defender::executable`, `defender::projects`,
+`defender::request`):
 
 * **Strict command line.** Exactly `--defender-exclusion add|remove`, then at most one `--path
-  <p>`, then up to 64 `--process <exe>`, at least one target, nothing else.
+  <p>`, then at most one `--projects <p>`, then up to 64 `--process <exe>`, at least one target,
+  nothing else.
 * **One folder.** `<p>` must be an absolute drive path of plain components (no UNC or `\\?\`
   prefix, no `.`/`..`, no empty component, no trailing dot or space, no `*`, `?`, `%`, `:` stream
   or control character, at most 1024 characters) and equal, ignoring case, to
@@ -248,6 +261,18 @@ The helper must not become a way to exclude any path or program, so in this mode
   profile's path, Lampo's fixed names and the series digits. `php.exe`, `mysqld.exe`, `ab.exe`,
   a bare `php-cgi.exe`, a wildcard or anything outside `packages` is refused: one exclusion per
   installed executable, never a pattern.
+* **A projects folder, never a sensitive one.** The projects folder is free-form, so the rules
+  say what it may never be (`defender::projects`, checked against the profile list only, never
+  against the projects' configuration). Same form rules as above, and: not the drive root, nor
+  `<drive>\Windows`, `<drive>\Program Files*`, `<drive>\ProgramData` or anything in them (even
+  under a profile registered there); strictly inside a registered profile, never the profile
+  itself nor a folder holding one, and accepted by the rules of every profile it is in; never
+  `AppData` or anything in it, nor a `Start Menu` folder (the Startup folders); never
+  `Desktop`, `Documents`, `Downloads` themselves, nor a first-level `OneDrive*` folder or its
+  `Desktop`/`Documents`/`Downloads` (their subfolders are fine: `Desktop\Progetti`); no `~` in
+  the names below the profile (an 8.3 short name such as `APPDAT~1` would hide `AppData`). The
+  folder handed to Defender keeps the profile's spelling, then the requested names. It is never
+  created: adding needs it to exist.
 * **Another administrator's credentials.** When the prompt is approved by another
   administrator, the helper runs as that account and its own `%LOCALAPPDATA%` is not the
   requester's. The request names the targets (from the requester's data root) and the helper
@@ -265,8 +290,8 @@ The helper must not become a way to exclude any path or program, so in this mode
   user accepted.
 * **No interpolation.** Defender is reached through `<GetSystemDirectoryW()>\WindowsPowerShell\
   v1.0\powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command <constant
-  script>`: the folder travels as the environment variable `LAMPO_DEFENDER_FOLDER` and the
-  executables as `LAMPO_DEFENDER_PROCESSES`, one per line (validated paths hold no control
+  script>`: the folders travel as the environment variables `LAMPO_DEFENDER_FOLDER` (MySQL) and
+  `LAMPO_DEFENDER_PROJECTS`, and the executables as `LAMPO_DEFENDER_PROCESSES`, one per line (validated paths hold no control
   character), read by the script as plain strings for `Add-MpPreference` /
   `Remove-MpPreference -ExclusionPath` / `-ExclusionProcess`. The child gets a minimal
   environment (`SystemRoot`, `windir`, `TEMP`/`TMP` under the Windows folder, `PSModulePath` =

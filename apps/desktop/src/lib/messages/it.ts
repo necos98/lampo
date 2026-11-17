@@ -691,7 +691,7 @@ export const it = {
 		},
 		defender: {
 			title: 'Microsoft Defender',
-			help: 'L’analisi in tempo reale di Defender rallenta Lampo: puoi escludere dall’analisi i server PHP e Apache e i dati MySQL di Lampo, mai i tuoi progetti, i pacchetti o il resto dei dati. Ogni modifica chiede la conferma di amministratore (UAC); puoi togliere un’esclusione quando vuoi.',
+			help: 'L’analisi in tempo reale di Defender rallenta Lampo: puoi escludere dall’analisi i server PHP e Apache e i dati MySQL di Lampo e, se lo scegli, una cartella con i tuoi progetti; mai i pacchetti o il resto dei dati. Ogni modifica chiede la conferma di amministratore (UAC); puoi togliere un’esclusione quando vuoi.',
 			unknownState: 'Senza diritti di amministratore Lampo non può leggere le esclusioni di Defender: qui vedi solo l’esito dell’ultima richiesta fatta da questa finestra.',
 			recommended: 'Consigliata',
 			add: 'Aggiungi esclusione',
@@ -728,6 +728,26 @@ export const it = {
 				done: {
 					add: 'Esclusione aggiunta: Defender non analizza più i dati MySQL.',
 					remove: 'Esclusione rimossa: Defender analizza di nuovo i dati MySQL.'
+				} satisfies Record<ScanExclusionChange, string>
+			},
+			projects: {
+				title: 'Cartella dei progetti',
+				help: 'Oltre alle richieste web velocizza anche composer install, git checkout, npm install e l’IDE, che leggono e scrivono migliaia di file nei progetti. Di solito basta l’esclusione dei processi PHP e Apache: usa questa solo se quei comandi restano lenti.',
+				risk: 'È il compromesso più pesante: nella cartella finisce codice scaricato da Internet (vendor, node_modules) che Defender non analizzerà più, né quando viene scritto né quando viene letto. Scegli una cartella che contiene solo progetti.',
+				targets: 'Cartella',
+				picker: 'Scegli la cartella dei progetti',
+				suggested: 'Proposta dalle cartelle dei progetti registrati; puoi sceglierne un’altra.',
+				noSuggestion: 'Nessuna cartella da proporre: scegli quella che contiene i tuoi progetti.',
+				rules: 'Deve stare nel tuo profilo utente, ma non può essere il profilo stesso, AppData, né Desktop, Documenti o Download stessi (una loro sottocartella sì).',
+				confirmAdd: {
+					title: 'Escludere la cartella dei progetti da Microsoft Defender?',
+					body: (folder: string) =>
+						`Defender smetterà di analizzare ${folder} e tutto ciò che contiene, compreso il codice scaricato in vendor e node_modules: un file dannoso finito lì non verrebbe analizzato. Windows chiederà la conferma di amministratore; puoi togliere l’esclusione quando vuoi.`,
+					confirm: 'Escludi comunque'
+				},
+				done: {
+					add: 'Esclusione aggiunta: Defender non analizza più la cartella dei progetti.',
+					remove: 'Esclusione rimossa: Defender analizza di nuovo la cartella dei progetti.'
 				} satisfies Record<ScanExclusionChange, string>
 			},
 			outcome: {

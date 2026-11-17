@@ -1,11 +1,11 @@
 //! Changing Defender's exclusions from the elevated helper, through the Defender cmdlets of
 //! Windows PowerShell (`Add-MpPreference` / `Remove-MpPreference`, `-ExclusionPath` for the
-//! folder and `-ExclusionProcess` for the executables).
+//! folders and `-ExclusionProcess` for the executables).
 //!
 //! No text is ever built from input: PowerShell is `<GetSystemDirectoryW()>\WindowsPowerShell\
 //! v1.0\powershell.exe` (never found through PATH), the script is a constant, and the targets
-//! reach it as environment variables (`$env:LAMPO_DEFENDER_FOLDER`, and
-//! `$env:LAMPO_DEFENDER_PROCESSES` with one executable per line), which PowerShell reads as plain
+//! reach it as environment variables (`$env:LAMPO_DEFENDER_FOLDER`, `$env:LAMPO_DEFENDER_PROJECTS`
+//! and `$env:LAMPO_DEFENDER_PROCESSES` with one executable per line), which PowerShell reads as plain
 //! strings. The child gets a minimal environment: the modules come only from System32, so nothing
 //! the user can write (their PSModulePath, profile, temp folder) is loaded elevated.
 
@@ -36,8 +36,10 @@ pub trait DefenderSettings {
     fn apply(&self, change: ScanExclusionChange, targets: &ScanExclusionTargets) -> DefenderResult;
 }
 
-/// The variable carrying the folder to the scripts (absent: no folder).
+/// The variable carrying the MySQL folder to the scripts (absent: no folder).
 const FOLDER_VAR: &str = "LAMPO_DEFENDER_FOLDER";
+/// The variable carrying the projects folder (absent: none).
+const PROJECTS_VAR: &str = "LAMPO_DEFENDER_PROJECTS";
 /// The variable carrying the executables, one per line (absent: none). Validated paths never
 /// hold a control character, so the separator cannot appear inside one.
 const PROCESSES_VAR: &str = "LAMPO_DEFENDER_PROCESSES";
@@ -52,31 +54,31 @@ const SCRIPT_NOT_CONFIRMED: i32 = 22;
 /// Adds the exclusions only when Defender is the running antivirus (`AMRunningMode` is `Normal`,
 /// not `Passive Mode` or `EDR Block Mode` next to another product), then reads them back.
 const ADD_SCRIPT: &str = r#"$ErrorActionPreference = 'Stop'
-$folder = $env:LAMPO_DEFENDER_FOLDER
+$paths = @(@($env:LAMPO_DEFENDER_FOLDER, $env:LAMPO_DEFENDER_PROJECTS) | Where-Object { $_ })
 $processes = @(([string]$env:LAMPO_DEFENDER_PROCESSES).Split([char]10) | Where-Object { $_ })
 if (-not (Get-Command Add-MpPreference -ErrorAction SilentlyContinue)) { exit 20 }
 try { $status = Get-MpComputerStatus } catch { exit 20 }
 if (-not $status.AntivirusEnabled -or $status.AMRunningMode -ne 'Normal') { exit 20 }
 try {
-  if ($folder) { Add-MpPreference -ExclusionPath $folder }
+  if ($paths) { Add-MpPreference -ExclusionPath $paths }
   if ($processes) { Add-MpPreference -ExclusionProcess $processes }
 } catch { exit 21 }
 try { $now = Get-MpPreference } catch { exit 22 }
-if ($folder -and @($now.ExclusionPath) -notcontains $folder) { exit 22 }
+foreach ($path in $paths) { if (@($now.ExclusionPath) -notcontains $path) { exit 22 } }
 foreach ($process in $processes) { if (@($now.ExclusionProcess) -notcontains $process) { exit 22 } }
 exit 0"#;
 
 /// Removes the exclusions whatever Defender's state (a passive Defender keeps its settings).
 const REMOVE_SCRIPT: &str = r#"$ErrorActionPreference = 'Stop'
-$folder = $env:LAMPO_DEFENDER_FOLDER
+$paths = @(@($env:LAMPO_DEFENDER_FOLDER, $env:LAMPO_DEFENDER_PROJECTS) | Where-Object { $_ })
 $processes = @(([string]$env:LAMPO_DEFENDER_PROCESSES).Split([char]10) | Where-Object { $_ })
 if (-not (Get-Command Remove-MpPreference -ErrorAction SilentlyContinue)) { exit 20 }
 try {
-  if ($folder) { Remove-MpPreference -ExclusionPath $folder }
+  if ($paths) { Remove-MpPreference -ExclusionPath $paths }
   if ($processes) { Remove-MpPreference -ExclusionProcess $processes }
 } catch { exit 21 }
 try { $now = Get-MpPreference } catch { exit 22 }
-if ($folder -and @($now.ExclusionPath) -contains $folder) { exit 22 }
+foreach ($path in $paths) { if (@($now.ExclusionPath) -contains $path) { exit 22 } }
 foreach ($process in $processes) { if (@($now.ExclusionProcess) -contains $process) { exit 22 } }
 exit 0"#;
 /// The Defender cmdlets through Windows PowerShell.
@@ -136,6 +138,9 @@ pub(crate) fn powershell_command(change: ScanExclusionChange, targets: &ScanExcl
     command.env_clear().envs(minimal_environment(&windows, &powershell_dir));
     if let Some(folder) = &targets.folder {
         command.env(FOLDER_VAR, folder);
+    }
+    if let Some(projects) = &targets.projects {
+        command.env(PROJECTS_VAR, projects);
     }
     if !targets.processes.is_empty() {
         command.env(PROCESSES_VAR, process_list(&targets.processes));
@@ -208,7 +213,9 @@ mod tests {
     fn the_scripts_read_the_targets_only_from_the_environment() {
         for change in [ScanExclusionChange::Add, ScanExclusionChange::Remove] {
             let text = script(change);
-            assert!(text.contains(&format!("$env:{FOLDER_VAR}")) && text.contains(&format!("$env:{PROCESSES_VAR}")));
+            for var in [FOLDER_VAR, PROJECTS_VAR, PROCESSES_VAR] {
+                assert!(text.contains(&format!("$env:{var}")), "{change:?} reads {var}");
+            }
             assert!(!text.contains('"'), "no interpolating strings");
             assert!(!text.contains('*'), "no wildcard");
             for code in [SCRIPT_OK, SCRIPT_UNAVAILABLE, SCRIPT_REFUSED, SCRIPT_NOT_CONFIRMED] {
@@ -218,8 +225,20 @@ mod tests {
         }
         assert_eq!(PROCESS_SEPARATOR, "\n", "the scripts split on [char]10");
         for (script, cmdlet, other) in [(ADD_SCRIPT, "Add-MpPreference", "Remove-MpPreference"), (REMOVE_SCRIPT, "Remove-MpPreference", "Add-MpPreference")] {
-            assert!(script.contains(&format!("{cmdlet} -ExclusionPath $folder")) && script.contains(&format!("{cmdlet} -ExclusionProcess $processes")));
-            assert!(script.contains("@($now.ExclusionProcess)") && !script.contains(other));
+            assert!(script.contains(&format!("{cmdlet} -ExclusionPath $paths")) && script.contains(&format!("{cmdlet} -ExclusionProcess $processes")));
+            assert!(script.contains("@($now.ExclusionPath)") && script.contains("@($now.ExclusionProcess)") && !script.contains(other));
+        }
+    }
+
+    /// Windows PowerShell's own parser accepts both scripts.
+    #[cfg(windows)]
+    #[test]
+    fn the_scripts_parse() {
+        const PARSE: &str = "$errors = $null; [void][System.Management.Automation.Language.Parser]::ParseInput($env:SCRIPT, [ref]$null, [ref]$errors); exit $errors.Count";
+        for script in [ADD_SCRIPT, REMOVE_SCRIPT] {
+            let mut command = Command::new(system_directory().unwrap().join(r"WindowsPowerShell\v1.0\powershell.exe"));
+            command.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", PARSE]).env("SCRIPT", script).stdout(Stdio::null());
+            assert_eq!(run_bounded(&mut command, PowerShellDefender::DEFAULT_TIMEOUT), Some(0), "{script}");
         }
     }
 
@@ -239,28 +258,31 @@ mod tests {
     fn powershell_comes_from_system32_with_a_minimal_environment() {
         let folder = PathBuf::from(r"C:\Users\me\AppData\Local\Lampo\mysql");
         let php = PathBuf::from(r"C:\Users\me\AppData\Local\Lampo\packages\php-8.3\php-cgi.exe");
-        let targets = ScanExclusionTargets { folder: Some(folder.clone()), processes: vec![php.clone()] };
+        let projects = PathBuf::from(r"C:\Users\me\Desktop\Progetti");
+        let targets = ScanExclusionTargets { folder: Some(folder.clone()), processes: vec![php.clone()], projects: Some(projects.clone()) };
         let command = powershell_command(ScanExclusionChange::Add, &targets).unwrap();
         let system = system_directory().unwrap();
         assert_eq!(Path::new(command.get_program()), system.join(r"WindowsPowerShell\v1.0\powershell.exe"));
         let args: Vec<_> = command.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
         assert_eq!(args.last().map(String::as_str), Some(ADD_SCRIPT));
-        assert!(!args.iter().any(|a| a.contains(r"Lampo\")), "no target is ever on the command line");
+        assert!(!args.iter().any(|a| a.contains(r"Lampo\") || a.contains("Progetti")), "no target is ever on the command line");
         let env = environment(&command);
         assert!(env.contains(&(FOLDER_VAR.to_string(), Some(folder.display().to_string()))));
         assert!(env.contains(&(PROCESSES_VAR.to_string(), Some(php.display().to_string()))));
+        assert!(env.contains(&(PROJECTS_VAR.to_string(), Some(projects.display().to_string()))));
         assert!(env.contains(&("PSModulePath".to_string(), Some(system.join(r"WindowsPowerShell\v1.0\Modules").display().to_string()))));
     }
 
     #[cfg(windows)]
     #[test]
     fn absent_targets_set_no_variable() {
-        let processes_only = ScanExclusionTargets { folder: None, processes: vec![PathBuf::from(r"C:\a\php-cgi.exe")] };
-        let names: Vec<String> = environment(&powershell_command(ScanExclusionChange::Remove, &processes_only).unwrap()).into_iter().map(|(k, _)| k).collect();
-        assert!(!names.contains(&FOLDER_VAR.to_string()) && names.contains(&PROCESSES_VAR.to_string()), "{names:?}");
-        let folder_only = ScanExclusionTargets { folder: Some(PathBuf::from(r"C:\a")), processes: Vec::new() };
-        let names: Vec<String> = environment(&powershell_command(ScanExclusionChange::Remove, &folder_only).unwrap()).into_iter().map(|(k, _)| k).collect();
-        assert!(names.contains(&FOLDER_VAR.to_string()) && !names.contains(&PROCESSES_VAR.to_string()), "{names:?}");
+        let variables = |targets: &ScanExclusionTargets| -> Vec<&str> {
+            let names: Vec<String> = environment(&powershell_command(ScanExclusionChange::Remove, targets).unwrap()).into_iter().map(|(k, _)| k).collect();
+            [FOLDER_VAR, PROJECTS_VAR, PROCESSES_VAR].into_iter().filter(|var| names.iter().any(|name| name == var)).collect()
+        };
+        assert_eq!(variables(&ScanExclusionTargets { processes: vec![PathBuf::from(r"C:\a\php-cgi.exe")], ..Default::default() }), [PROCESSES_VAR]);
+        assert_eq!(variables(&ScanExclusionTargets { folder: Some(PathBuf::from(r"C:\a")), ..Default::default() }), [FOLDER_VAR]);
+        assert_eq!(variables(&ScanExclusionTargets { projects: Some(PathBuf::from(r"C:\b")), ..Default::default() }), [PROJECTS_VAR]);
     }
 
     #[cfg(windows)]

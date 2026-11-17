@@ -1,6 +1,8 @@
 //! The antivirus scan exclusions of Lampo's files. Implemented by `lampo-infra-web`
 //! (`DefenderScanExclusion`, through the elevated helper).
 
+use std::path::{Path, PathBuf};
+
 use async_trait::async_trait;
 
 use crate::error::PortResult;
@@ -16,4 +18,9 @@ use crate::scan_exclusion::{ScanExclusionChange, ScanExclusionOutcome, ScanExclu
 #[async_trait]
 pub trait ScanExclusionEditor: Send + Sync {
     async fn change(&self, targets: &ScanExclusionTargets, change: ScanExclusionChange) -> PortResult<ScanExclusionOutcome>;
+
+    /// `folder` as adding it as the projects folder would name it (the spelling the elevated side
+    /// rebuilds), or `InvalidData` when that would be refused. Never shows a prompt: it tells
+    /// which folder may be suggested.
+    fn accepted_projects_folder(&self, folder: &Path) -> PortResult<PathBuf>;
 }

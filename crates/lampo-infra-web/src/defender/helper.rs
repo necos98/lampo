@@ -1,5 +1,6 @@
 //! Defender mode of `lampo-hosts-helper.exe`:
-//! `--defender-exclusion add|remove [--path <folder>] [--process <exe>]...` ([`super::request`]).
+//! `--defender-exclusion add|remove [--path <folder>] [--projects <folder>] [--process <exe>]...`
+//! ([`super::request`]).
 //!
 //! Security design — the helper runs as an administrator, so it must not become a way to exclude
 //! any file or program from the antivirus scan:
@@ -12,8 +13,14 @@
 //!   `bin\httpd.exe` of an Apache package under that profile's `AppData\Local\Lampo\packages`,
 //!   rebuilt the same way ([`super::executable`]); one exclusion per executable, never a
 //!   wildcard or a bare name.
+//! * **A projects folder, never a sensitive one.** The projects folder is free-form, so the
+//!   helper checks it structurally against the profile list, never against the projects'
+//!   configuration (a file the user can write): inside a registered profile but never the profile
+//!   itself, `AppData`, a `Start Menu`, the roots of `Desktop`, `Documents`, `Downloads` or
+//!   `OneDrive*`, an 8.3 short name, a drive root, `Windows`, `Program Files*` or `ProgramData`
+//!   ([`super::projects`]).
 //! * **Real files only.** No component may be a junction, link or mount point, and adding needs
-//!   the folder and the executables to exist (removing does not: a package may be gone).
+//!   the folders and the executables to exist (removing does not: a package may be gone).
 //! * **All or nothing.** One refused target refuses the whole request before Defender is asked.
 //! * **No interpolation.** Defender is reached through a constant PowerShell script, the targets
 //!   through environment variables ([`super::powershell`]).
@@ -27,6 +34,7 @@ use super::executable::validated_executable;
 use super::helper_exit;
 use super::powershell::{DefenderResult, DefenderSettings, PowerShellDefender};
 use super::profiles::{RegistryProfiles, UserProfiles};
+use super::projects::validated_projects_folder;
 use super::request::ExclusionArgs;
 use super::target::{TargetError, check_no_links, resolve_target};
 
@@ -60,8 +68,9 @@ fn validated_targets(args: &ExclusionArgs, profiles: &[PathBuf]) -> Result<ScanE
             Ok(folder)
         })
         .transpose()?;
+    let projects = args.projects.as_deref().map(|folder| validated_projects_folder(folder, profiles, adding)).transpose()?;
     let processes = args.processes.iter().map(|exe| validated_executable(exe, profiles, adding)).collect::<Result<_, _>>()?;
-    Ok(ScanExclusionTargets { folder, processes })
+    Ok(ScanExclusionTargets { folder, processes, projects })
 }
 
 #[cfg(test)]
@@ -142,7 +151,86 @@ mod tests {
     }
 
     fn targets(folder: Option<&Path>, processes: &[&Path]) -> ScanExclusionTargets {
-        ScanExclusionTargets { folder: folder.map(Path::to_path_buf), processes: processes.iter().map(|p| p.to_path_buf()).collect() }
+        ScanExclusionTargets { folder: folder.map(Path::to_path_buf), processes: processes.iter().map(|p| p.to_path_buf()).collect(), projects: None }
+    }
+
+    fn projects_args(change: &str, folder: &Path) -> Vec<String> {
+        ["--defender-exclusion", change, "--projects"].into_iter().map(String::from).chain([folder.display().to_string()]).collect()
+    }
+
+    #[test]
+    fn a_projects_folder_reaches_defender() {
+        let p = Profile::new();
+        let projects = p.path.join(r"Desktop\Progetti");
+        std::fs::create_dir_all(&projects).unwrap();
+        let defender = FakeDefender::new(DefenderResult::Applied);
+        assert_eq!(run_with(&projects_args("add", &projects), &p.profiles(), &defender), helper_exit::OK);
+        let mut every = args("remove", Some(&p.folder), &[&p.php]);
+        every.splice(4..4, ["--projects".to_string(), projects.display().to_string()]);
+        assert_eq!(run_with(&every, &p.profiles(), &defender), helper_exit::OK);
+        let only = ScanExclusionTargets { projects: Some(projects.clone()), ..Default::default() };
+        let all = ScanExclusionTargets { projects: Some(projects), ..targets(Some(&p.folder), &[&p.php]) };
+        assert_eq!(defender.calls(), vec![(ScanExclusionChange::Add, only), (ScanExclusionChange::Remove, all)]);
+    }
+
+    /// One folder per rule of [`super::super::projects`]; each exists, so only the rule refuses it.
+    #[test]
+    fn refused_projects_folders_never_reach_defender() {
+        let p = Profile::new();
+        let defender = FakeDefender::new(DefenderResult::Applied);
+        let outside = p.dir.path().join("Progetti");
+        let refused = [
+            p.path.clone(),
+            p.dir.path().to_path_buf(),
+            outside,
+            p.path.join("AppData"),
+            p.path.join(r"AppData\Local\Lampo"),
+            p.path.join(r"AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"),
+            p.path.join(r"Start Menu\Programs\Startup"),
+            p.path.join("Desktop"),
+            p.path.join("Documents"),
+            p.path.join("Downloads"),
+            p.path.join("OneDrive"),
+            p.path.join(r"OneDrive\Desktop"),
+            p.path.join("PROGET~1"),
+        ];
+        for folder in &refused {
+            std::fs::create_dir_all(folder).unwrap();
+        }
+        let malformed = [PathBuf::from(r"Desktop\Progetti"), p.path.join(r"Desktop\..\AppData"), PathBuf::from(format!(r"\\?\{}", p.path.join("Progetti").display()))];
+        let system = [PathBuf::from(r"C:\Windows"), PathBuf::from(r"C:\Program Files"), PathBuf::from(r"C:\ProgramData"), PathBuf::from(r"C:\")];
+        for folder in refused.iter().chain(&malformed).chain(&system) {
+            for change in ["add", "remove"] {
+                assert_eq!(run_with(&projects_args(change, folder), &p.profiles(), &defender), helper_exit::INVALID_TARGET, "{change} {folder:?}");
+            }
+        }
+        let system_profile = FixedProfiles(vec![PathBuf::from(r"C:\Windows\ServiceProfiles\LocalService")]);
+        assert_eq!(run_with(&projects_args("remove", Path::new(r"C:\Windows\ServiceProfiles\LocalService\x")), &system_profile, &defender), helper_exit::INVALID_TARGET);
+        assert_eq!(run_with(&projects_args("remove", &p.path.join("Progetti")), &FixedProfiles(Vec::new()), &defender), helper_exit::INVALID_TARGET, "no registered profile");
+        assert!(defender.calls().is_empty());
+    }
+
+    #[test]
+    fn adding_needs_the_projects_folder_removing_does_not() {
+        let p = Profile::new();
+        let gone = p.path.join(r"Desktop\Progetti");
+        let defender = FakeDefender::new(DefenderResult::Applied);
+        assert_eq!(run_with(&projects_args("add", &gone), &p.profiles(), &defender), helper_exit::INVALID_TARGET);
+        assert_eq!(run_with(&projects_args("remove", &gone), &p.profiles(), &defender), helper_exit::OK);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_to_a_refused_folder_is_refused() {
+        let p = Profile::new();
+        std::fs::create_dir_all(p.path.join("Desktop")).unwrap();
+        let linked = p.path.join(r"Desktop\Progetti");
+        junction(&linked, &p.path.join("AppData"));
+        let defender = FakeDefender::new(DefenderResult::Applied);
+        for change in ["add", "remove"] {
+            assert_eq!(run_with(&projects_args(change, &linked), &p.profiles(), &defender), helper_exit::INVALID_TARGET, "{change}");
+        }
+        assert!(defender.calls().is_empty());
     }
 
     #[test]

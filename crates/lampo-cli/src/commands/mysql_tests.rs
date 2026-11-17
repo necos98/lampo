@@ -25,7 +25,7 @@ async fn add_and_remove_run_here_with_the_elevation_flag() {
     assert!(out.contains("scans"), "{out}");
 
     let calls = fake.scan_exclusion_calls.lock().unwrap().clone();
-    let mysql_only = |change| (DefenderExclusionRequestDto { change, php: false, mysql: true }, CallContext::cli(true));
+    let mysql_only = |change| (DefenderExclusionRequestDto::new(change, false, true), CallContext::cli(true));
     assert_eq!(calls, vec![mysql_only(ScanExclusionChangeDto::Add), mysql_only(ScanExclusionChangeDto::Remove)]);
     assert_eq!(fake.ensure_calls.load(Ordering::SeqCst), 0, "the app is never started");
     assert!(fake.sent.lock().unwrap().is_empty(), "nothing goes through the app");

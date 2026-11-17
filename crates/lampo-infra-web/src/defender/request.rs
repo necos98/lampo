@@ -1,18 +1,20 @@
 //! The command line of the helper's Defender mode, the mode flag first:
 //!
 //! ```text
-//! --defender-exclusion add|remove [--path <folder>] [--process <exe>]...
+//! --defender-exclusion add|remove [--path <folder>] [--projects <folder>] [--process <exe>]...
 //! ```
 //!
-//! At least one target; the folder (at most one) comes before the executables. The MySQL-only
-//! form `--defender-exclusion add|remove --path <folder>` is unchanged. Nothing else is accepted;
-//! the targets are checked by [`super::target`] and [`super::executable`] on both sides.
+//! At least one target, in that order: the MySQL folder and the projects folder (at most one
+//! each), then the executables. The MySQL-only form `--defender-exclusion add|remove --path
+//! <folder>` is unchanged. Nothing else is accepted; the targets are checked by
+//! [`super::target`], [`super::projects`] and [`super::executable`] on both sides.
 
 use lampo_domain::scan_exclusion::ScanExclusionChange;
 
 /// Selects the Defender mode; always the first argument.
 pub const MODE_FLAG: &str = "--defender-exclusion";
 const PATH_FLAG: &str = "--path";
+const PROJECTS_FLAG: &str = "--projects";
 const PROCESS_FLAG: &str = "--process";
 const ADD: &str = "add";
 const REMOVE: &str = "remove";
@@ -21,12 +23,13 @@ const REMOVE: &str = "remove";
 pub const MAX_PROCESSES: usize = 64;
 
 /// The parsed command line of the Defender mode. Nothing in it is trusted:
-/// [`super::target::resolve_target`] and [`super::executable::resolve_executable`] decide what
-/// the paths may be.
+/// [`super::target::resolve_target`], [`super::projects::resolve_projects_folder`] and
+/// [`super::executable::resolve_executable`] decide what the paths may be.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExclusionArgs {
     pub change: ScanExclusionChange,
     pub path: Option<String>,
+    pub projects: Option<String>,
     pub processes: Vec<String>,
 }
 
@@ -43,12 +46,10 @@ impl ExclusionArgs {
             return None;
         }
         let change = parse_change(change)?;
-        let (path, rest) = match rest {
-            [flag, path, rest @ ..] if flag == PATH_FLAG => (Some(path.clone()), rest),
-            _ => (None, rest),
-        };
+        let (path, rest) = optional_value(rest, PATH_FLAG);
+        let (projects, rest) = optional_value(rest, PROJECTS_FLAG);
         let processes = parse_processes(rest)?;
-        (path.is_some() || !processes.is_empty()).then_some(Self { change, path, processes })
+        (path.is_some() || projects.is_some() || !processes.is_empty()).then_some(Self { change, path, projects, processes })
     }
 
     /// The command line [`ExclusionArgs::parse`] reads back.
@@ -60,6 +61,9 @@ impl ExclusionArgs {
         let mut args = vec![MODE_FLAG.to_string(), change.to_string()];
         if let Some(path) = &self.path {
             args.extend([PATH_FLAG.to_string(), path.clone()]);
+        }
+        if let Some(projects) = &self.projects {
+            args.extend([PROJECTS_FLAG.to_string(), projects.clone()]);
         }
         for process in &self.processes {
             args.extend([PROCESS_FLAG.to_string(), process.clone()]);
@@ -73,6 +77,14 @@ fn parse_change(value: &str) -> Option<ScanExclusionChange> {
         ADD => Some(ScanExclusionChange::Add),
         REMOVE => Some(ScanExclusionChange::Remove),
         _ => None,
+    }
+}
+
+/// The value of `flag` when `args` start with it, and the arguments after it.
+fn optional_value<'a>(args: &'a [String], flag: &str) -> (Option<String>, &'a [String]) {
+    match args {
+        [first, value, rest @ ..] if first == flag => (Some(value.clone()), rest),
+        _ => (None, args),
     }
 }
 
@@ -91,13 +103,14 @@ mod tests {
     const FOLDER: &str = r"C:\Users\me\AppData\Local\Lampo\mysql";
     const PHP: &str = r"C:\Users\me\AppData\Local\Lampo\packages\php-8.3\php-cgi.exe";
     const HTTPD: &str = r"C:\Users\me\AppData\Local\Lampo\packages\apache-2.4\bin\httpd.exe";
+    const PROJECTS: &str = r"C:\Users\me\Desktop\Progetti";
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
     }
 
     fn request(change: ScanExclusionChange, path: Option<&str>, processes: &[&str]) -> ExclusionArgs {
-        ExclusionArgs { change, path: path.map(str::to_string), processes: processes.iter().map(|p| p.to_string()).collect() }
+        ExclusionArgs { change, path: path.map(str::to_string), projects: None, processes: processes.iter().map(|p| p.to_string()).collect() }
     }
 
     #[test]
@@ -118,8 +131,18 @@ mod tests {
         assert_eq!(both.to_args(), s(&["--defender-exclusion", "remove", "--path", FOLDER, "--process", PHP]));
         assert_eq!(ExclusionArgs::parse(&both.to_args()), Some(both));
         let most: Vec<String> = (0..MAX_PROCESSES).map(|i| format!(r"C:\x\{i}.exe")).collect();
-        let most = ExclusionArgs { change: ScanExclusionChange::Add, path: None, processes: most };
+        let most = ExclusionArgs { change: ScanExclusionChange::Add, path: None, projects: None, processes: most };
         assert_eq!(ExclusionArgs::parse(&most.to_args()), Some(most));
+    }
+
+    #[test]
+    fn the_projects_folder_comes_after_the_mysql_folder() {
+        let projects = ExclusionArgs { projects: Some(PROJECTS.to_string()), ..request(ScanExclusionChange::Add, None, &[]) };
+        assert_eq!(projects.to_args(), s(&["--defender-exclusion", "add", "--projects", PROJECTS]));
+        assert_eq!(ExclusionArgs::parse(&projects.to_args()), Some(projects));
+        let every = ExclusionArgs { projects: Some(PROJECTS.to_string()), ..request(ScanExclusionChange::Remove, Some(FOLDER), &[PHP]) };
+        assert_eq!(every.to_args(), s(&["--defender-exclusion", "remove", "--path", FOLDER, "--projects", PROJECTS, "--process", PHP]));
+        assert_eq!(ExclusionArgs::parse(&every.to_args()), Some(every));
     }
 
     #[test]
@@ -141,11 +164,15 @@ mod tests {
             s(&["--defender-exclusion", "add", "--process", PHP, PHP]),
             s(&["--defender-exclusion", "add", "--path", FOLDER, "--hosts", "h"]),
             s(&["--block", "a.json", "--defender-exclusion", "add", "--path", FOLDER]),
+            s(&["--defender-exclusion", "add", "--projects"]),
+            s(&["--defender-exclusion", "add", "--projects", PROJECTS, "--projects", r"C:\Users\me\Other"]),
+            s(&["--defender-exclusion", "add", "--projects", PROJECTS, "--path", FOLDER]),
+            s(&["--defender-exclusion", "add", "--process", PHP, "--projects", PROJECTS]),
         ] {
             assert_eq!(ExclusionArgs::parse(&bad), None, "{bad:?}");
         }
         let too_many: Vec<String> = (0..=MAX_PROCESSES).map(|i| format!(r"C:\x\{i}.exe")).collect();
-        let too_many = ExclusionArgs { change: ScanExclusionChange::Add, path: None, processes: too_many };
+        let too_many = ExclusionArgs { change: ScanExclusionChange::Add, path: None, projects: None, processes: too_many };
         assert_eq!(ExclusionArgs::parse(&too_many.to_args()), None, "more than {MAX_PROCESSES} executables");
     }
 

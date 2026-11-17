@@ -1,6 +1,6 @@
 //! The real `lampo-hosts-helper` binary in its Defender mode, run non-elevated with requests it
 //! must refuse before reaching Defender. No valid target is ever passed, so nothing changes even
-//! when the tests run as an administrator.
+//! when the tests run as an administrator (the projects folders named are all refused by a rule).
 
 use std::process::Command;
 
@@ -77,6 +77,34 @@ fn executables_other_than_lampos_servers_are_refused() {
 }
 
 #[test]
+fn sensitive_folders_are_refused_as_the_projects_folder() {
+    let profile = profile();
+    assert_refused(
+        "--projects",
+        &[
+            profile.clone(),
+            format!(r"{profile}\AppData"),
+            format!(r"{profile}\AppData\Local\Lampo"),
+            format!(r"{profile}\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"),
+            format!(r"{profile}\Desktop"),
+            format!(r"{profile}\Documents"),
+            format!(r"{profile}\Downloads"),
+            format!(r"{profile}\OneDrive"),
+            format!(r"{profile}\Desktop\..\AppData"),
+            format!(r"{profile}\Desktop\"),
+            format!(r"\\?\{profile}\Desktop\Progetti"),
+            r"C:\Users".to_string(),
+            r"C:\Users\nobody-registered\Progetti".to_string(),
+            r"%USERPROFILE%\Desktop\Progetti".to_string(),
+            r"C:\Windows".to_string(),
+            r"C:\Program Files".to_string(),
+            r"C:\ProgramData".to_string(),
+            r"C:\".to_string(),
+        ],
+    );
+}
+
+#[test]
 fn malformed_command_lines_are_refused() {
     let folder = format!(r"{}\AppData\Local\Lampo\mysql", profile());
     for args in [
@@ -86,6 +114,8 @@ fn malformed_command_lines_are_refused() {
         vec!["--defender-exclusion", "add", "--path", &folder, "--extension", ".ibd"],
         vec!["--defender-exclusion", "add", "--process"],
         vec!["--defender-exclusion", "add", "--process", "php-cgi.exe", "--path", &folder],
+        vec!["--defender-exclusion", "add", "--projects"],
+        vec!["--defender-exclusion", "add", "--projects", &folder, "--path", &folder],
     ] {
         assert_eq!(run_helper(&args), helper_exit::BAD_ARGUMENTS, "{args:?}");
     }

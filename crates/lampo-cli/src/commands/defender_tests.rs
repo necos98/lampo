@@ -1,5 +1,5 @@
-//! `defender exclusion add|remove [--php] [--mysql]`: local, one request per call, prompts only
-//! with `--allow-elevation`, one exit code per outcome.
+//! `defender exclusion add|remove [--php] [--mysql] [--projects [<folder>]]`: local, one request
+//! per call, prompts only with `--allow-elevation`, one exit code per outcome.
 
 use std::sync::atomic::Ordering;
 
@@ -14,7 +14,44 @@ fn parse(out: &str) -> Value {
 }
 
 fn request(change: ScanExclusionChangeDto, php: bool, mysql: bool) -> DefenderExclusionRequestDto {
-    DefenderExclusionRequestDto { change, php, mysql }
+    DefenderExclusionRequestDto::new(change, php, mysql)
+}
+
+fn projects(change: ScanExclusionChangeDto, folder: Option<&str>) -> DefenderExclusionRequestDto {
+    DefenderExclusionRequestDto { projects: true, projects_folder: folder.map(String::from), ..request(change, false, false) }
+}
+
+#[tokio::test]
+async fn projects_without_a_folder_asks_for_the_suggested_one() {
+    let fake = Fake::new();
+    let (code, out, err) = run_cli(&fake, &["defender", "exclusion", "add", "--projects", "--allow-elevation"]).await;
+    assert_eq!((code, err.as_str()), (0, ""));
+    assert!(out.contains(SUGGESTED_PROJECTS_FOLDER) && out.contains("remove --projects"), "{out}");
+    let (code, out, _) = run_cli(&fake, &["defender", "exclusion", "remove", "--php", "--projects", "--allow-elevation", "--json"]).await;
+    assert_eq!(code, 0);
+    assert_eq!(parse(&out)["projects"], SUGGESTED_PROJECTS_FOLDER);
+    let calls = fake.scan_exclusion_calls.lock().unwrap().clone();
+    let both = DefenderExclusionRequestDto { php: true, ..projects(ScanExclusionChangeDto::Remove, None) };
+    assert_eq!(calls, vec![(projects(ScanExclusionChangeDto::Add, None), CallContext::cli(true)), (both, CallContext::cli(true))]);
+}
+
+/// The fake terminal is in `C:\work\shop`.
+#[tokio::test]
+async fn a_given_projects_folder_is_made_absolute_against_the_terminal() {
+    let fake = Fake::new();
+    run_cli(&fake, &["defender", "exclusion", "add", "--projects", r"C:\Users\me\Code", "--allow-elevation"]).await;
+    run_cli(&fake, &["defender", "exclusion", "remove", "--projects", r"..\Progetti", "--allow-elevation"]).await;
+    let calls: Vec<DefenderExclusionRequestDto> = fake.scan_exclusion_calls.lock().unwrap().iter().map(|(request, _)| request.clone()).collect();
+    assert_eq!(calls, vec![projects(ScanExclusionChangeDto::Add, Some(r"C:\Users\me\Code")), projects(ScanExclusionChangeDto::Remove, Some(r"C:\work\Progetti"))]);
+}
+
+#[tokio::test]
+async fn a_refused_projects_folder_is_invalid_input() {
+    let fake = Fake::new();
+    *fake.scan_exclusion_result.lock().unwrap() = Err(AppError::new(ErrorCode::Validation, "AppData and the folders in it are never excluded"));
+    let (code, _, err) = run_cli(&fake, &["defender", "exclusion", "add", "--projects", r"C:\Users\me\AppData", "--allow-elevation"]).await;
+    assert_eq!(code, 4);
+    assert!(err.contains("AppData"), "{err}");
 }
 
 #[tokio::test]
@@ -90,7 +127,7 @@ async fn each_outcome_has_its_exit_code_and_json_is_the_dto() {
         *fake.scan_exclusion_result.lock().unwrap() = Ok(outcome);
         let (code, out, _) = run_cli(&fake, &["defender", "exclusion", "add", "--php", "--allow-elevation", "--json"]).await;
         assert_eq!(code, exit, "{outcome:?}");
-        assert_eq!(parse(&out), json!({"change": "add", "outcome": wire, "folder": null, "processes": SERVER_EXECUTABLES}), "{outcome:?}");
+        assert_eq!(parse(&out), json!({"change": "add", "outcome": wire, "folder": null, "processes": SERVER_EXECUTABLES, "projects": null}), "{outcome:?}");
     }
 }
 

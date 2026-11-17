@@ -1,4 +1,7 @@
 <script lang="ts">
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import type { Snippet } from 'svelte';
+
 	import type { ScanExclusionChange } from '#lib/api/index.js';
 	import { Badge } from '#lib/components/ui/badge/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
@@ -16,9 +19,15 @@
 		/** Shown instead of the paths when there is nothing to exclude (the buttons are disabled). */
 		empty?: string;
 		recommended?: boolean;
+		/** The trade-off is a serious one: shown as a warning, not as a note. */
+		warning?: boolean;
+		/** The folder a `projects` request names. */
+		projectsFolder?: string;
+		/** Replaces the list of `paths` (e.g. to choose the folder). */
+		children?: Snippet;
 	}
 
-	let { target, paths, confirmBody, empty, recommended = false }: Props = $props();
+	let { target, paths, confirmBody, empty, recommended = false, warning = false, projectsFolder, children }: Props = $props();
 
 	const t = m.settings.defender;
 	const option = $derived(t[target]);
@@ -39,9 +48,15 @@
 		{#if recommended}<Badge variant="secondary">{t.recommended}</Badge>{/if}
 	</div>
 	<p class="text-xs text-muted-foreground">{option.help}</p>
-	<p class="mt-1 text-xs text-muted-foreground">{option.risk}</p>
+	{#if warning}
+		<p class="mt-1 flex gap-1.5 text-xs text-amber-600 dark:text-amber-400" role="note"><TriangleAlert class="mt-px size-3.5 shrink-0" aria-hidden="true" />{option.risk}</p>
+	{:else}
+		<p class="mt-1 text-xs text-muted-foreground">{option.risk}</p>
+	{/if}
 
-	{#if paths.length === 0}
+	{#if children}
+		{@render children()}
+	{:else if paths.length === 0}
 		<p class="mt-2 text-xs">{empty}</p>
 	{:else}
 		<p class="mt-2 text-xs text-muted-foreground">{option.targets}</p>
@@ -53,7 +68,7 @@
 	{/if}
 
 	<div class="mt-2 flex flex-wrap items-center justify-end gap-2">
-		<Button size="sm" variant="outline" {disabled} onclick={() => scanExclusion.remove(target)}>{label('remove')}</Button>
+		<Button size="sm" variant="outline" {disabled} onclick={() => scanExclusion.remove(target, projectsFolder)}>{label('remove')}</Button>
 		<Button size="sm" variant="outline" {disabled} onclick={() => (confirmAdd = true)}>{label('add')}</Button>
 	</div>
 	{#if last}
@@ -68,6 +83,7 @@
 		title={option.confirmAdd.title}
 		body={confirmBody}
 		confirmLabel={option.confirmAdd.confirm}
-		onconfirm={() => scanExclusion.add(target)}
+		destructive={warning}
+		onconfirm={() => scanExclusion.add(target, projectsFolder)}
 	/>
 </section>

@@ -91,6 +91,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 		'C:\\Users\\dev\\AppData\\Local\\Lampo\\packages\\apache-2.4\\bin\\httpd.exe',
 		'C:\\Users\\dev\\AppData\\Local\\Lampo\\packages\\php-8.3\\php-cgi.exe'
 	];
+	const suggestedProjectsFolder = 'C:\\Users\\dev\\Desktop\\Progetti';
 	const expectedPlugin = '0.1.0-mock-h1a2b3c4d';
 	let claudeCode: T.ClaudeCodeStatus = {
 		state: 'not-installed',
@@ -782,11 +783,17 @@ export function createMockBackend({ fresh }: Options): Backend {
 			const steps = [step('detect-claude', claudeCode.claudeVersion), step('remove-plugin'), step('remove-marketplace'), step('remove-files', claudeCode.pluginDir)];
 			return { ok: true, steps, status: clone(claudeCode) };
 		},
-		defenderExclusionInfo: async () => ({ folder: mysqlDataFolder, processes: [...serverExecutables] }),
+		defenderExclusionInfo: async () => ({ folder: mysqlDataFolder, processes: [...serverExecutables], projectsFolder: suggestedProjectsFolder }),
 		// The browser has no UAC prompt nor Defender: every change is confirmed.
-		changeDefenderExclusion: async ({ change, php, mysql }) => {
+		changeDefenderExclusion: async ({ change, php, mysql, projects, projectsFolder }) => {
 			await sleep(1200);
-			return { change, outcome: 'applied', folder: mysql ? mysqlDataFolder : null, processes: php ? [...serverExecutables] : [] };
+			return {
+				change,
+				outcome: 'applied',
+				folder: mysql ? mysqlDataFolder : null,
+				processes: php ? [...serverExecutables] : [],
+				projects: projects ? (projectsFolder ?? suggestedProjectsFolder) : null
+			};
 		}
 	};
 

@@ -169,7 +169,7 @@ tuo utente, con `claude plugin …`) un plugin generato da Lampo in
 
 ## Esclusioni da Microsoft Defender (facoltative)
 
-Due esclusioni facoltative, da aggiungere solo se le vuoi:
+Tre esclusioni facoltative, da aggiungere solo se le vuoi:
 
 - **PHP e Apache** (`--php`): se la prima richiesta a ogni sito impiega diversi secondi (le
   successive no), la causa è di solito la scansione in tempo reale di Defender sui file PHP letti
@@ -183,35 +183,48 @@ Due esclusioni facoltative, da aggiungere solo se le vuoi:
 - **Dati MySQL** (`--mysql`): le suite di test ricreano il database a ogni esecuzione e Defender
   analizza ogni scrittura dei file di MySQL (`.ibd`, redo log). Lampo esclude la sola cartella dei
   dati MySQL, `%LOCALAPPDATA%\Lampo\mysql` (i dati di tutte le istanze).
+- **Cartella dei progetti** (`--projects`): la più pesante, separata dalle altre e mai consigliata
+  di default. Esclude una cartella che contiene i tuoi progetti (per esempio
+  `C:\Users\<utente>\Desktop\Progetti`) e velocizza anche `composer install`, `git checkout`,
+  `npm install` e l'IDE, non solo le richieste web (per quelle basta `--php`). Il compromesso:
+  nella cartella finisce codice scaricato da Internet (`vendor`, `node_modules`) che Defender non
+  analizzerà più, né quando viene scritto né quando viene letto. Senza indicarla, Lampo propone la
+  cartella più profonda che contiene tutti i progetti registrati, se è ammessa. Deve esistere e
+  stare nel tuo profilo utente; non può essere il profilo stesso, `AppData` o una cartella dentro
+  `AppData` o `Start Menu`, né `Desktop`, `Documents`, `Downloads` o `OneDrive` stessi (una loro
+  sottocartella sì), né passare per una giunzione o un collegamento; mai la radice di un disco,
+  `Windows`, `Program Files` o `ProgramData`.
 
 Come:
 
 - dalla GUI: Impostazioni › CLI e integrazioni › Microsoft Defender;
-- dalla CLI: `lampo defender exclusion add --php --allow-elevation`, `--mysql`, o entrambe
-  (`--php --mysql`); `remove` le toglie. `lampo mysql defender-exclusion add|remove` resta valido e
-  equivale a `--mysql`.
+- dalla CLI: `lampo defender exclusion add --php --allow-elevation`, `--mysql`,
+  `--projects [<cartella>]` o più di una insieme (`--php --mysql`); `remove` le toglie.
+  `lampo mysql defender-exclusion add|remove` resta valido e equivale a `--mysql`.
 
 Ogni richiesta chiede una sola conferma di amministratore (UAC), qualunque cosa includa; Lampo non
 aggiunge mai un'esclusione da solo, né all'installazione né all'avvio. Viene escluso solo questo:
 mai un altro programma (`php.exe`, `mysqld.exe`), un carattere jolly, il resto dei pacchetti o dei
-dati, una cartella di progetto o un'estensione. Il compromesso: un file dannoso letto da PHP o
-Apache, o salvato nella cartella dei dati MySQL, non verrebbe analizzato in quel momento (lo è
-comunque quando viene scritto da un altro programma, copiato o eseguito).
+dati, un'estensione o, se non la scegli tu con `--projects`, una cartella di progetti. Il
+compromesso: un file dannoso letto da PHP o Apache, o salvato nella cartella dei dati MySQL, non
+verrebbe analizzato in quel momento (lo è comunque quando viene scritto da un altro programma,
+copiato o eseguito); nella cartella dei progetti non verrebbe analizzato affatto.
 
 Se Defender non è l'antivirus attivo (ne usi un altro, o è disattivato), o se le esclusioni sono
 gestite da Tamper Protection o dai criteri di chi gestisce il PC (Criteri di gruppo, Intune), Lampo
 lo dice (la CLI esce con codice 12; 8 se annulli il prompt UAC; 10 se con `--php` non c'è nessun
-PHP o Apache installato). Senza diritti di amministratore le esclusioni di Defender non si possono
-leggere, quindi Lampo mostra solo l'esito dell'ultima richiesta. Per controllarle, da un PowerShell
+PHP o Apache installato; 4 se la cartella dei progetti non è ammessa o non ce n'è una da
+proporre). Senza diritti di amministratore le esclusioni di Defender non si possono leggere,
+quindi Lampo mostra solo l'esito dell'ultima richiesta. Per controllarle, da un PowerShell
 amministratore: `(Get-MpPreference).ExclusionProcess` e `(Get-MpPreference).ExclusionPath`. La
 funzione è disponibile solo con la cartella dati standard (non con `LAMPO_HOME`).
 
 Il disinstallatore non rimuove le esclusioni (dati e pacchetti restano su disco): toglile prima con
-`lampo defender exclusion remove --php --mysql --allow-elevation` (o dalla GUI), oppure dopo, da un
-PowerShell amministratore aperto con il tuo utente:
-`Remove-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Lampo\mysql"` e, per ogni eseguibile
-elencato da `(Get-MpPreference).ExclusionProcess` sotto `Lampo\packages`,
-`Remove-MpPreference -ExclusionProcess "<percorso>"`.
+`lampo defender exclusion remove --php --mysql --allow-elevation` (più `--projects "<cartella>"`
+se l'avevi aggiunta; o dalla GUI), oppure dopo, da un PowerShell amministratore aperto con il tuo
+utente: `Remove-MpPreference -ExclusionPath "$env:LOCALAPPDATA\Lampo\mysql"` (e lo stesso per la
+cartella dei progetti) e, per ogni eseguibile elencato da `(Get-MpPreference).ExclusionProcess`
+sotto `Lampo\packages`, `Remove-MpPreference -ExclusionProcess "<percorso>"`.
 
 ## Documentazione
 
