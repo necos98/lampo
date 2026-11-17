@@ -113,8 +113,11 @@ starting services); report the others (VC++ downloads, other programs on a port)
   programs, load code or expose folders are refused up front (validation error, nothing
   saved): `Include`, `LoadModule`, `Define`, piped or out-of-folder logs (`CustomLog "|…"`),
   `ScriptAlias`, `RewriteMap`, `Fcgid*`, `<Directory>`, `Alias` or `RewriteRule` to a disk
-  path, the `file` expression function, `SetEnv PATH`/`PHPRC`. The error names the line and
-  the directive (`details.reason`). Use `<Location>` blocks or `.htaccess` instead.
+  path, the `file` expression function, `SetEnv PATH`/`PHPRC`, `ServerName`/`ServerAlias`
+  (change the project's addresses instead), an `<If>` nested in another `<If>`/`<Else>`
+  (combine the conditions with `&&`). The error names the line and the directive
+  (`details.reason`). Use `<Location>` blocks or `.htaccess` instead. Whatever they grant,
+  `.env*`, `.git*`, `.ht*`, logs and `.sql`/`.bak` files stay denied (403).
 
 ### The site does not open at all
 

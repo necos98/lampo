@@ -47,5 +47,18 @@
 {{ vhost.custom_directives }}
     # --- End of custom directives ---
 {% endif %}
+
+    # Never serve the project's internal files (httpd.conf denies the same ones), whatever the
+    # custom directives above grant. Apache merges <If> after every other section (.htaccess
+    # included), in order, and nested <If> only after all of them: this is the last top-level
+    # one and custom directives cannot nest <If>, so its denial is the one that applies.
+    # AuthMerging Off drops an inherited `AuthMerging Or`, Satisfy All a `Satisfy Any`.
+    <Location "/">
+        <If "%{REQUEST_FILENAME} =~ m#(/\.(ht|env|git)[^/]*|/\.(git|svn|hg)(/.*)?|\.(log|sql|bak))$#i">
+            AuthMerging Off
+            Satisfy All
+            Require all denied
+        </If>
+    </Location>
 </VirtualHost>
 {% endfor %}

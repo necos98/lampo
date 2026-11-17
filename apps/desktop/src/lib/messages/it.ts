@@ -314,7 +314,7 @@ export const it = {
 			title: 'Direttive Apache personalizzate',
 			help: 'Aggiunte al virtual host del progetto. Lampo verifica la configurazione prima di applicarla.',
 			rejected: 'Apache ha rifiutato la configurazione:',
-			refused: 'Lampo non accetta queste direttive: possono eseguire programmi o esporre file del disco. Usa blocchi <Location> o il file .htaccess.',
+			refused: 'Lampo non accetta queste direttive: possono eseguire programmi, esporre file del disco o rendere il sito leggibile da altre pagine web. Usa blocchi <Location> o il file .htaccess.',
 			placeholder: '# es. SetEnv APP_ENV local'
 		}
 	},

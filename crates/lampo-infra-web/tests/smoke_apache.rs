@@ -171,9 +171,34 @@ fn http_get(port: u16, host: &str, path: &str, extra: &str) -> (u16, String) {
 }
 
 /// Files a project keeps next to its code when the document root is the project root.
-const PROJECT_INTERNALS: &[&str] =
-    &[".env", ".env.local", ".gitignore", ".git/config", ".git/refs/heads/main", ".svn/entries", "storage/logs/laravel.log", "backup/dump.sql", "backup/Dump.SQL", "index.php.bak"];
+const PROJECT_INTERNALS: &[&str] = &[
+    ".env",
+    ".env.local",
+    "admin/.env",
+    ".htpasswd",
+    ".gitignore",
+    ".git/config",
+    ".git/refs/heads/main",
+    ".svn/entries",
+    "storage/logs/laravel.log",
+    "x.sql",
+    "backup/dump.sql",
+    "backup/Dump.SQL",
+    "index.php.bak",
+];
 const WELL_KNOWN: &str = ".well-known/acme-challenge/token";
+
+/// Custom directives that re-grant access in a section Apache merges after httpd.conf's
+/// denials (`AuthMerging Off`, the default, replaces them). Every request of a local site comes
+/// from 127.0.0.1, so each of them grants everything: none may re-expose the project's internal
+/// files. One site (dedicated port) per directive, so one cannot hide another.
+const REGRANTS: &[(&str, &str)] = &[
+    ("regrant-root", "<Location />\n    Require ip 127.0.0.1\n</Location>"),
+    ("regrant-admin", "<Location /admin>\n    Require ip 127.0.0.1\n</Location>"),
+    ("regrant-if", "<If \"true\">\n    Require local\n</If>"),
+    ("regrant-or", "<Location />\n    AuthMerging Or\n    Require local\n</Location>"),
+    ("regrant-location-if", "<Location />\n    <If \"true\">\n        Require local\n    </If>\n</Location>"),
+];
 
 fn write_project_internals(docroot: &Path) {
     for file in PROJECT_INTERNALS.iter().chain([&WELL_KNOWN]) {
@@ -314,7 +339,17 @@ async fn real_apache_serves_php_sites() {
     };
     let wt = site(&data, "shop@feature-x", &[], Some(wt_port), &docroot, &old_dir, old_minor);
 
-    for s in [&shop, &wt] {
+    let regrants: Vec<(u16, Site)> = REGRANTS
+        .iter()
+        .map(|(id, directives)| {
+            let port = free_port();
+            let mut s = site(&data, id, &[], Some(port), &docroot, &php, "8.3");
+            s.vhost.custom_directives = ApacheDirectives::new(*directives).unwrap();
+            (port, s)
+        })
+        .collect();
+
+    for s in [&shop, &wt].into_iter().chain(regrants.iter().map(|(_, s)| s)) {
         PhpIniRenderer.write(&s.ini).unwrap();
     }
 
@@ -329,7 +364,7 @@ async fn real_apache_serves_php_sites() {
         listen_port: Port::of(shared),
         config_dir: data.join("generated").join("apache"),
         log_dir: data.join("logs").join("apache"),
-        vhosts: vec![shop.vhost.clone(), wt.vhost.clone()],
+        vhosts: [&shop, &wt].into_iter().chain(regrants.iter().map(|(_, s)| s)).map(|s| s.vhost.clone()).collect(),
     };
 
     // 1. Validation with the real `httpd -t`: a broken site is rejected, nothing changes.
@@ -405,6 +440,12 @@ async fn real_apache_serves_php_sites() {
         //     directories are not listed, `/.well-known/` stays reachable.
         assert_dotfiles_are_refused(shared, "shop.test");
         assert_dotfiles_are_refused(wt_port, "127.0.0.1");
+
+        // 5c. No custom directive re-grants them, whatever section it merges in.
+        for (port, s) in &regrants {
+            println!("re-grant attempt on port {port}: {:?}", s.vhost.custom_directives.as_str());
+            assert_dotfiles_are_refused(*port, "127.0.0.1");
+        }
 
         // 6. Idle php-cgi processes are reaped.
         assert!(php_cgi_count(&php) >= 1);

@@ -116,8 +116,13 @@ of a project that has some, fails with `ElevationRequired` *before* saving anyth
 
 Custom Apache directives reach the vhost verbatim and come from the GUI, the CLI, agents and
 imported files, so they are untrusted: `ApacheDirectives::new` refuses whatever runs programs,
-loads code, changes Lampo's variables or PHP environment, or maps/grants access to folders
-(`lampo_domain::apache_directives`). A stored value is only checked structurally when read, so
+loads code, changes Lampo's variables, PHP environment or host names (`ServerName`/`ServerAlias`
+would defeat the DNS-rebinding catch-all), maps/grants access to folders, or nests `<If>`
+sections (`lampo_domain::apache_directives`). Every vhost ends with a `<Location "/">` holding
+an `<If>` that denies the project's internal files (`.env*`, `.git*`, VCS folders, `.ht*`,
+logs, dumps), as `httpd.conf` does: Apache merges `<If>` after every other section and nested
+`<If>` only after all top-level ones, so a `Require` in a custom `<Location>`/`<If>` (every local
+request comes from 127.0.0.1) cannot re-grant them. A stored value is only checked structurally when read, so
 an old project still loads; `ProjectWriter` refuses to save it and the sync leaves its vhost
 out (`config-rejected`, like a vhost `httpd -t` rejects) until it is fixed. An import never
 brings the export's directives nor the php.ini keys that load or run files

@@ -41,6 +41,33 @@ fn secrets_logs_and_dumps_are_denied() {
     assert!(main.contains("<Files \".ht*\">\n    Require all denied\n</Files>"));
 }
 
+/// The denial every site repeats as its last section (see vhost.conf.j2).
+const BARRIER: &str = "    <Location \"/\">
+        <If \"%{REQUEST_FILENAME} =~ m#(/\\.(ht|env|git)[^/]*|/\\.(git|svn|hg)(/.*)?|\\.(log|sql|bak))$#i\">
+            AuthMerging Off
+            Satisfy All
+            Require all denied
+        </If>
+    </Location>
+</VirtualHost>";
+
+#[test]
+fn every_site_ends_with_the_internal_files_barrier() {
+    // Apache merges a site's last top-level <If> after its custom <Location>/<If> sections, so
+    // the barrier must close every block of every site, after the custom directives.
+    for (name, text) in ApacheConfigRenderer::new(sample_options()).render(&sample_config()).unwrap() {
+        if !name.starts_with("vhosts/") {
+            continue;
+        }
+        let blocks = text.matches("<VirtualHost ").count();
+        assert!(blocks > 0, "{name}");
+        assert_eq!(text.matches(BARRIER).count(), blocks, "{name}:\n{text}");
+        if let Some(custom) = text.find("# --- End of custom directives ---") {
+            assert!(custom < text.find(BARRIER).unwrap(), "{name}: the barrier must follow the custom directives");
+        }
+    }
+}
+
 #[test]
 fn directory_listing_is_off_by_default_but_htaccess_still_works() {
     for (name, text) in ApacheConfigRenderer::new(sample_options()).render(&sample_config()).unwrap() {
