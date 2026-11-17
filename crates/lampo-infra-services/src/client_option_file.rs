@@ -114,7 +114,9 @@ pub(crate) mod tests {
     use std::os::windows::io::AsRawHandle;
 
     use lampo_domain::ports::NoMysqlRootPasswords;
-    use windows_sys::Win32::Security::Authorization::{ConvertSecurityDescriptorToStringSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT};
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT,
+    };
     use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
 
     use super::*;
@@ -137,9 +139,26 @@ pub(crate) mod tests {
         }
     }
 
+    /// `sddl` as Windows writes it back: well-known SIDs become their alias (the built-in
+    /// Administrator of a CI runner, `S-1-5-21-…-500`, is written `LA`).
+    fn as_windows_writes_it(sddl: &str) -> String {
+        let text = wide(Path::new(sddl));
+        unsafe {
+            let mut sd: PSECURITY_DESCRIPTOR = null_mut();
+            assert_ne!(ConvertStringSecurityDescriptorToSecurityDescriptorW(text.as_ptr(), SDDL_REVISION_1, &mut sd, null_mut()), 0);
+            let mut out: *mut u16 = null_mut();
+            assert_ne!(ConvertSecurityDescriptorToStringSecurityDescriptorW(sd, SDDL_REVISION_1, DACL_SECURITY_INFORMATION, &mut out, null_mut()), 0);
+            let len = (0..).take_while(|&i| *out.add(i) != 0).count();
+            let sddl = String::from_utf16_lossy(std::slice::from_raw_parts(out, len));
+            windows_sys::Win32::Foundation::LocalFree(out.cast());
+            windows_sys::Win32::Foundation::LocalFree(sd);
+            sddl
+        }
+    }
+
     /// The only access granted is the current user's full access, nothing inherited.
     pub(crate) fn assert_user_only(path: &Path) {
-        assert_eq!(dacl_of(path), format!("D:P(A;;FA;;;{})", current_user_sid().unwrap()));
+        assert_eq!(dacl_of(path), as_windows_writes_it(&format!("D:P(A;;FA;;;{})", current_user_sid().unwrap())));
     }
 
     struct Stored(MysqlPassword);
