@@ -6,8 +6,11 @@ use clap::Subcommand;
 pub enum MysqlCommand {
     /// Exclude Lampo's MySQL data folder from Microsoft Defender's scan, or scan it again
     ///
-    /// The folder is `%LOCALAPPDATA%\Lampo\mysql` (the data of every MySQL instance) and only
-    /// that: never the packages, the rest of Lampo's data, a process or an extension. Test suites
+    /// Same as `lampo defender exclusion add|remove --mysql`, kept for existing scripts (its
+    /// JSON output is unchanged); `lampo defender exclusion --php` also excludes the PHP and
+    /// Apache servers. The folder is `%LOCALAPPDATA%\Lampo\mysql` (the data of every MySQL
+    /// instance) and only that: never the packages, the rest of Lampo's data, a process or an
+    /// extension. Test suites
     /// rewrite its `.ibd` and redo-log files all the time and Defender scans each write; skipping
     /// them speeds the suites up. The trade-off: a malicious file saved in that folder would not
     /// be scanned there (it still is when it is copied or run from elsewhere).

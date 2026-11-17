@@ -132,8 +132,9 @@ pub fn build() -> AppResult<CliContext> {
             checks,
         })),
         shims: Arc::new(ShimSetup::new(shim_installer, user_path, locator, paths.clone(), shim_tools)),
-        scan_exclusion: Arc::new(MysqlScanExclusion::new(
+        scan_exclusion: Arc::new(DefenderExclusion::new(
             Arc::new(DefenderScanExclusion::new(elevated_helper, Arc::new(RunAsLauncher::default()), Arc::new(RegistryProfiles))),
+            installed.clone(),
             paths.clone(),
         )),
         packages: Arc::new(PackageCatalog::new(PackageCatalogDeps {

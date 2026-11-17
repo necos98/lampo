@@ -1,6 +1,7 @@
 //! The only folder the Defender exclusion may name: `<profile>\AppData\Local\Lampo\mysql`, for a
 //! user profile registered on this machine. Checked by the adapter before the UAC prompt and
-//! again by the elevated helper, which must never become a way to exclude any other path.
+//! again by the elevated helper, which must never become a way to exclude any other path. The
+//! executables a process exclusion may name follow the same rules ([`super::executable`]).
 //!
 //! * [`resolve_target`] is pure: the requested path must be an absolute local path made only of
 //!   plain components (no UNC or `\\?\` prefix, no `.`/`..`, no empty component, no trailing dot
@@ -17,6 +18,8 @@ use std::path::{Path, PathBuf};
 pub const LAMPO_DIR: &str = "Lampo";
 /// The MySQL folder of the data root: `ServiceKind::MYSQL`, holding every instance's data.
 pub const MYSQL_DIR: &str = "mysql";
+/// Lampo's data folder, relative to a user profile.
+pub const PROFILE_DATA_DIRS: [&str; 3] = ["AppData", "Local", LAMPO_DIR];
 /// The excluded folder, relative to a user profile.
 pub const PROFILE_RELATIVE_DIRS: [&str; 4] = ["AppData", "Local", LAMPO_DIR, MYSQL_DIR];
 /// Longest path accepted, in characters.
@@ -33,11 +36,16 @@ pub enum TargetError {
     Malformed,
     /// Not `<profile>\AppData\Local\Lampo\mysql` for a user profile of this machine.
     NotLampoMysqlFolder,
+    /// Not `php-cgi.exe` of a PHP package or `bin\httpd.exe` of an Apache package under
+    /// `<profile>\AppData\Local\Lampo\packages` ([`super::executable`]).
+    NotLampoExecutable,
     /// A component is a junction, symbolic link or mount point.
     ReparsePoint(PathBuf),
     /// A component is a file.
     NotADirectory(PathBuf),
-    /// The folder does not exist (adding needs it).
+    /// The executable is a folder.
+    NotAFile(PathBuf),
+    /// The folder or executable does not exist (adding needs it).
     Missing(PathBuf),
     Unreadable {
         path: PathBuf,
@@ -55,8 +63,15 @@ impl fmt::Display for TargetError {
                  not available with a data folder elsewhere (LAMPO_HOME, a moved %LOCALAPPDATA%)",
                 PROFILE_RELATIVE_DIRS.join("\\")
             ),
+            Self::NotLampoExecutable => write!(
+                f,
+                "only php-cgi.exe of a PHP package or bin\\httpd.exe of an Apache package installed by Lampo in a Windows user profile \
+                 (<profile>\\{}\\packages) can be excluded: not available with a data folder elsewhere (LAMPO_HOME, a moved %LOCALAPPDATA%)",
+                PROFILE_DATA_DIRS.join("\\")
+            ),
             Self::ReparsePoint(path) => write!(f, "{} is a junction or a link", path.display()),
             Self::NotADirectory(path) => write!(f, "{} is not a folder", path.display()),
+            Self::NotAFile(path) => write!(f, "{} is not a file", path.display()),
             Self::Missing(path) => write!(f, "{} does not exist", path.display()),
             Self::Unreadable { path, message } => write!(f, "cannot inspect {}: {message}", path.display()),
         }
@@ -67,19 +82,26 @@ impl fmt::Display for TargetError {
 /// Profiles whose path is not a plain local path (`%SystemRoot%\...`, UNC) never match.
 pub fn resolve_target(requested: &str, profiles: &[PathBuf]) -> Result<PathBuf, TargetError> {
     let requested = plain_local_components(requested).ok_or(TargetError::Malformed)?;
-    profiles
-        .iter()
-        .filter_map(|profile| profile.to_str())
-        .filter_map(|profile| plain_local_components(profile.strip_suffix(SEPARATOR).unwrap_or(profile)))
+    profile_components(profiles)
         .map(|profile| [profile, PROFILE_RELATIVE_DIRS.to_vec()].concat())
         .find(|expected| same_components(expected, &requested))
-        .map(|expected| PathBuf::from(expected.join("\\")))
+        .map(|expected| join_components(&expected))
         .ok_or(TargetError::NotLampoMysqlFolder)
+}
+
+/// The components of every profile that is a plain local path (a trailing separator in the
+/// registry is ignored); `%SystemRoot%\...` and UNC profiles are skipped.
+pub(super) fn profile_components(profiles: &[PathBuf]) -> impl Iterator<Item = Vec<&str>> {
+    profiles.iter().filter_map(|profile| profile.to_str()).filter_map(|profile| plain_local_components(profile.strip_suffix(SEPARATOR).unwrap_or(profile)))
+}
+
+pub(super) fn join_components(components: &[&str]) -> PathBuf {
+    PathBuf::from(components.join("\\"))
 }
 
 /// `["C:", "Users", "me"]` for `C:\Users\me`; `None` for anything but a drive-rooted path of
 /// plain components.
-fn plain_local_components(path: &str) -> Option<Vec<&str>> {
+pub(super) fn plain_local_components(path: &str) -> Option<Vec<&str>> {
     if path.chars().count() > MAX_PATH_CHARS {
         return None;
     }
@@ -94,7 +116,7 @@ fn is_plain_component(component: &str) -> bool {
     !component.is_empty() && component != "." && component != ".." && !component.ends_with(['.', ' ']) && !component.chars().any(|c| c.is_control() || FORBIDDEN_CHARS.contains(&c))
 }
 
-fn same_components(a: &[&str], b: &[&str]) -> bool {
+pub(super) fn same_components(a: &[&str], b: &[&str]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.to_lowercase() == y.to_lowercase())
 }
 
@@ -118,14 +140,14 @@ pub fn check_no_links(folder: &Path, must_exist: bool) -> Result<(), TargetError
 }
 
 #[cfg(windows)]
-fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
+pub(super) fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
     use std::os::windows::fs::MetadataExt;
     use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
     meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
 }
 
 #[cfg(not(windows))]
-fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
+pub(super) fn is_reparse_point(meta: &std::fs::Metadata) -> bool {
     meta.file_type().is_symlink()
 }
 

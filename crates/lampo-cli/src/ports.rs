@@ -146,10 +146,12 @@ pub trait ProgramRunner: Send + Sync {
     fn run(&self, spec: &SpawnSpec) -> Result<i32, SpawnError>;
 }
 
-/// The optional Defender exclusion of the MySQL data folder (`mysql defender-exclusion`); runs
-/// in this process, so its UAC prompt belongs to the terminal.
+/// The optional Defender exclusions (`defender exclusion`, `mysql defender-exclusion`); runs in
+/// this process, so its UAC prompt belongs to the terminal.
 #[async_trait]
 pub trait ScanExclusionAdmin: Send + Sync {
     /// `ElevationRequired` unless `context` allows a prompt.
-    async fn change(&self, change: ScanExclusionChangeDto, context: CallContext) -> AppResult<ScanExclusionResultDto>;
+    async fn change(&self, request: DefenderExclusionRequestDto, context: CallContext) -> AppResult<DefenderExclusionResultDto>;
+    /// The MySQL data folder only, with its own result (`mysql defender-exclusion`).
+    async fn change_mysql(&self, change: ScanExclusionChangeDto, context: CallContext) -> AppResult<ScanExclusionResultDto>;
 }

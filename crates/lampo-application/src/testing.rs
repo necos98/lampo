@@ -1554,6 +1554,7 @@ pub fn fake_layout(mut p: InstalledPackage) -> InstalledPackage {
     let dir = p.install_dir.clone();
     let entries: Vec<(EntryRole, PathBuf)> = match p.id.kind.as_str() {
         "php" => vec![(EntryRole::Cli, dir.join("php.exe")), (EntryRole::FastCgi, dir.join("php-cgi.exe"))],
+        "apache" => vec![(EntryRole::Server, dir.join("bin").join("httpd.exe"))],
         "mod-fcgid" => vec![(EntryRole::ApacheModule, dir.join("mod_fcgid.so"))],
         "mysql" => vec![(EntryRole::ClientDir, dir.join("bin"))],
         "redis" => vec![(EntryRole::Cli, dir.join("redis-cli.exe")), (EntryRole::ClientDir, dir.clone())],

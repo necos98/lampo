@@ -2264,6 +2264,7 @@ dependencies = [
  "async-trait",
  "lampo-domain",
  "lampo-infra-fs",
+ "lampo-infra-packages",
  "lampo-infra-services",
  "lampo-infra-store",
  "minijinja",

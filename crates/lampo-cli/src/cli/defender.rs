@@ -1,0 +1,56 @@
+//! Arguments of `defender`: Lampo's optional Microsoft Defender exclusions.
+
+use clap::{Args, Subcommand};
+
+#[derive(Debug, Subcommand)]
+pub enum DefenderCommand {
+    /// Exclude Lampo's servers and/or MySQL data from Microsoft Defender's scan, or scan them again
+    ///
+    /// --php: one process exclusion for `php-cgi.exe` of every PHP installed by Lampo and one
+    /// for Apache's `bin\httpd.exe` (`%LOCALAPPDATA%\Lampo\packages\...`, never a wildcard).
+    /// Defender then skips the files those processes open: the first request to a site no
+    /// longer waits seconds for Defender to scan its PHP sources (which it does again after
+    /// every definition update, reboot or change), for every project wherever it is, and no
+    /// source folder is excluded. The executables are those installed now: after installing
+    /// another PHP, run `add --php` again. The trade-off: a malicious file read by PHP or
+    /// Apache is not scanned at that moment (it still is when written by another program,
+    /// copied or run).
+    ///
+    /// --mysql: the folder `%LOCALAPPDATA%\Lampo\mysql` (the data of every MySQL instance),
+    /// which test suites rewrite all the time; same as `lampo mysql defender-exclusion`.
+    ///
+    /// Each call shows one UAC prompt whatever it names, so it needs `--allow-elevation` (exit
+    /// 7 without it, 8 when the prompt is declined). Exit 10 for --php with no PHP or Apache
+    /// installed. Exit 12 when Defender is not installed or not the active antivirus, refuses
+    /// the change (Tamper Protection, a group policy or Intune) or does not show it afterwards;
+    /// the message says which. Defender's exclusions cannot be read without administrator
+    /// rights, so Lampo cannot tell whether they are still in place. Lampo never adds them on
+    /// its own.
+    ///
+    /// Examples:
+    ///   lampo defender exclusion add --php --allow-elevation
+    ///   lampo defender exclusion add --php --mysql --allow-elevation
+    ///   lampo defender exclusion remove --php --allow-elevation --json
+    #[command(subcommand, verbatim_doc_comment)]
+    Exclusion(ExclusionCommand),
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ExclusionCommand {
+    /// Add the exclusions (one UAC prompt; needs --allow-elevation).
+    Add(ExclusionTargets),
+    /// Remove the exclusions (one UAC prompt; needs --allow-elevation).
+    Remove(ExclusionTargets),
+}
+
+/// What the request names: at least one.
+#[derive(Debug, Args)]
+#[group(required = true, multiple = true)]
+pub struct ExclusionTargets {
+    /// php-cgi.exe of every installed PHP and Apache's httpd.exe (process exclusions).
+    #[arg(long)]
+    pub php: bool,
+    /// The MySQL data folder (%LOCALAPPDATA%\Lampo\mysql).
+    #[arg(long)]
+    pub mysql: bool,
+}

@@ -83,7 +83,7 @@ pub use project_writer::{ProjectWriter, ProjectWriterDeps};
 pub use projects::{CreateProject, DeleteProject, DetectProject, ProjectQueries, RelinkProject, SetProjectActive, SetProjectPhp, SuggestAddresses, UpdateProject};
 pub use resolution::SiteResolver;
 pub use scaffold::{ScaffoldProject, ScaffoldProjectDeps};
-pub use scan_exclusion::MysqlScanExclusion;
+pub use scan_exclusion::DefenderExclusion;
 pub use service_catalog::ServiceCatalog;
 pub use service_leases::ServiceLease;
 pub use services::{OfflineServiceStatus, ServiceControl, ServiceControlDeps, ServiceEnsurer, ServiceQueries, ServiceStatusSource};

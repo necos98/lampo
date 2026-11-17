@@ -2,7 +2,7 @@
 //!
 //! The web tier. One reason to change: *how Apache, PHP and the hosts file are configured and
 //! controlled on Windows*, plus the other change that needs the same elevated helper: the
-//! optional Defender exclusion of the MySQL data folder.
+//! optional Defender exclusions of the MySQL data folder and of the PHP/Apache server processes.
 //!
 //! | Adapter                  | Ports                                   |
 //! |--------------------------|-----------------------------------------|
@@ -14,8 +14,9 @@
 //!
 //! Binary: `lampo-hosts-helper` — the only code that ever runs elevated ([`elevation`]). It
 //! splices the requested `lampo_domain::hosts::HostsBlock` into the hosts file (see
-//! [`hosts::helper`]) or, in its Defender mode, adds or removes the exclusion of one fixed folder
-//! (see [`defender::helper`]), and nothing else.
+//! [`hosts::helper`]) or, in its Defender mode, adds or removes the exclusions of one fixed folder
+//! and of the `php-cgi.exe`/`httpd.exe` of Lampo's packages (see [`defender::helper`]), and nothing
+//! else.
 
 pub mod apache;
 pub mod defender;

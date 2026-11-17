@@ -87,6 +87,10 @@ export function createMockBackend({ fresh }: Options): Backend {
 	};
 	let shims: T.ShimStatus = { shimDir: 'C:\\Users\\dev\\AppData\\Local\\Lampo\\shims', installed: true, onPath: false, shadowed: [{ tool: 'php', shim: 'C:\\Users\\dev\\AppData\\Local\\Lampo\\shims\\php.exe', shadowedBy: 'C:\\xampp\\php\\php.exe' }] };
 	const mysqlDataFolder = 'C:\\Users\\dev\\AppData\\Local\\Lampo\\mysql';
+	const serverExecutables = [
+		'C:\\Users\\dev\\AppData\\Local\\Lampo\\packages\\apache-2.4\\bin\\httpd.exe',
+		'C:\\Users\\dev\\AppData\\Local\\Lampo\\packages\\php-8.3\\php-cgi.exe'
+	];
 	const expectedPlugin = '0.1.0-mock-h1a2b3c4d';
 	let claudeCode: T.ClaudeCodeStatus = {
 		state: 'not-installed',
@@ -783,6 +787,11 @@ export function createMockBackend({ fresh }: Options): Backend {
 		changeMysqlScanExclusion: async (change) => {
 			await sleep(1200);
 			return { change, outcome: 'applied', folder: mysqlDataFolder };
+		},
+		defenderExclusionInfo: async () => ({ folder: mysqlDataFolder, processes: [...serverExecutables] }),
+		changeDefenderExclusion: async ({ change, php, mysql }) => {
+			await sleep(1200);
+			return { change, outcome: 'applied', folder: mysql ? mysqlDataFolder : null, processes: php ? [...serverExecutables] : [] };
 		}
 	};
 

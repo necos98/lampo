@@ -114,8 +114,11 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     let elevated_helper = exe_dir().join("lampo-hosts-helper.exe");
     let hosts = Arc::new(web::ElevatedHostsFile::system(elevated_helper.clone(), elevated_launcher.clone())?);
     // Only on an explicit request from the settings page, never at install or start.
-    let scan_exclusion =
-        Arc::new(MysqlScanExclusion::new(Arc::new(web::DefenderScanExclusion::new(elevated_helper, elevated_launcher, Arc::new(web::defender::profiles::RegistryProfiles))), paths.clone()));
+    let scan_exclusion = Arc::new(DefenderExclusion::new(
+        Arc::new(web::DefenderScanExclusion::new(elevated_helper, elevated_launcher, Arc::new(web::defender::profiles::RegistryProfiles))),
+        installed.clone(),
+        paths.clone(),
+    ));
 
     let php_ini: Arc<dyn PhpIniWriter> = Arc::new(web::PhpIniRenderer);
 

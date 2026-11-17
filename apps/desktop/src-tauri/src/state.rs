@@ -54,7 +54,7 @@ pub struct AppState {
     pub hosts_sync: Arc<HostsSyncQuery>,
     pub shims: Arc<ShimSetup>,
     pub claude_code: Arc<ClaudeCodeSetup>,
-    pub scan_exclusion: Arc<MysqlScanExclusion>,
+    pub scan_exclusion: Arc<DefenderExclusion>,
 
     pub startup: Arc<Startup>,
     pub shutdown: Arc<Shutdown>,

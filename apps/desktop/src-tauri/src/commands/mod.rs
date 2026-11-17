@@ -89,6 +89,8 @@ macro_rules! lampo_command_handler {
             $crate::commands::integrations::uninstall_claude_code,
             $crate::commands::scan_exclusion::mysql_scan_exclusion_info,
             $crate::commands::scan_exclusion::change_mysql_scan_exclusion,
+            $crate::commands::scan_exclusion::defender_exclusion_info,
+            $crate::commands::scan_exclusion::change_defender_exclusion,
         ]
     };
 }

@@ -1012,6 +1012,46 @@ folder: string, };
  */
 export type ScanExclusionInfo = { folder: string, };
 
+/**
+ * Which of Lampo's files one request changes, all through one UAC prompt. At least one.
+ */
+export type DefenderExclusionRequest = { change: ScanExclusionChange, 
+/**
+ * The files opened by `php-cgi.exe` of every installed PHP and by Apache's `httpd.exe`
+ * (process exclusions).
+ */
+php: boolean, 
+/**
+ * The MySQL data folder (a path exclusion).
+ */
+mysql: boolean, };
+
+/**
+ * The result of one request (see [`ScanExclusionResultDto`]: there is no "active" state).
+ */
+export type DefenderExclusionResult = { change: ScanExclusionChange, outcome: ScanExclusionOutcome, 
+/**
+ * The MySQL data folder, when the request named it.
+ */
+folder: string | null, 
+/**
+ * The executables the request named (empty without `php`).
+ */
+processes: Array<string>, };
+
+/**
+ * What each part of a request would cover now, shown before the user asks for it.
+ */
+export type DefenderExclusionInfo = { 
+/**
+ * The MySQL data folder (`mysql`).
+ */
+folder: string, 
+/**
+ * `php-cgi.exe` of every installed PHP and `httpd.exe` of every installed Apache (`php`).
+ */
+processes: Array<string>, };
+
 // --- App ---
 
 export type AppInfo = { version: string, configDir: string, dataDir: string, shimDir: string, controlProtocolVersion: number, };

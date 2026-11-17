@@ -267,6 +267,8 @@ pub enum EntryRole {
     Cli,
     /// The FastCGI executable Apache runs (`php-cgi.exe`).
     FastCgi,
+    /// The server executable a service runs (Apache's `bin\httpd.exe`).
+    Server,
     /// The directory holding the command-line clients (`mysql.exe`, `mysqldump.exe`).
     ClientDir,
     /// A PHP archive run with PHP (`composer.phar`).

@@ -72,7 +72,9 @@ export const COMMANDS = {
 	installClaudeCode: 'install_claude_code',
 	uninstallClaudeCode: 'uninstall_claude_code',
 	mysqlScanExclusionInfo: 'mysql_scan_exclusion_info',
-	changeMysqlScanExclusion: 'change_mysql_scan_exclusion'
+	changeMysqlScanExclusion: 'change_mysql_scan_exclusion',
+	defenderExclusionInfo: 'defender_exclusion_info',
+	changeDefenderExclusion: 'change_defender_exclusion'
 } as const;
 
 export type CommandName = (typeof COMMANDS)[keyof typeof COMMANDS];
@@ -176,3 +178,7 @@ export const uninstallClaudeCode = () => call<T.ClaudeCodeAction>(COMMANDS.unins
 // Microsoft Defender exclusion of the MySQL data folder (a UAC prompt per change)
 export const mysqlScanExclusionInfo = () => call<T.ScanExclusionInfo>(COMMANDS.mysqlScanExclusionInfo);
 export const changeMysqlScanExclusion = (change: T.ScanExclusionChange) => call<T.ScanExclusionResult>(COMMANDS.changeMysqlScanExclusion, { change });
+
+// Microsoft Defender exclusions of the PHP/Apache servers and/or the MySQL data folder (one UAC prompt per change)
+export const defenderExclusionInfo = () => call<T.DefenderExclusionInfo>(COMMANDS.defenderExclusionInfo);
+export const changeDefenderExclusion = (request: T.DefenderExclusionRequest) => call<T.DefenderExclusionResult>(COMMANDS.changeDefenderExclusion, { request });

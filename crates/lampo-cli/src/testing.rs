@@ -132,8 +132,9 @@ pub struct Fake {
     pub open_log_result: Mutex<AppResult<()>>,
     /// What a Defender exclusion request answers (default: applied).
     pub scan_exclusion_result: Mutex<AppResult<ScanExclusionOutcomeDto>>,
-    /// The change and context of every Defender exclusion request.
-    pub scan_exclusion_calls: Mutex<Vec<(ScanExclusionChangeDto, CallContext)>>,
+    /// The request and context of every Defender exclusion request (`mysql defender-exclusion`
+    /// is recorded as the MySQL-only request).
+    pub scan_exclusion_calls: Mutex<Vec<(DefenderExclusionRequestDto, CallContext)>>,
 }
 
 impl Fake {
@@ -392,11 +393,25 @@ impl ShimAdmin for Fake {
 /// The folder every fake Defender exclusion names.
 pub const MYSQL_DATA_FOLDER: &str = r"C:\Users\me\AppData\Local\Lampo\mysql";
 
+/// The executables every fake `--php` exclusion names.
+pub const SERVER_EXECUTABLES: [&str; 2] = [r"C:\Users\me\AppData\Local\Lampo\packages\apache-2.4\bin\httpd.exe", r"C:\Users\me\AppData\Local\Lampo\packages\php-8.3\php-cgi.exe"];
+
+impl Fake {
+    fn scan_exclusion_outcome(&self, request: DefenderExclusionRequestDto, context: CallContext) -> AppResult<ScanExclusionOutcomeDto> {
+        self.scan_exclusion_calls.lock().unwrap().push((request, context));
+        self.scan_exclusion_result.lock().unwrap().clone()
+    }
+}
+
 #[async_trait]
 impl ScanExclusionAdmin for Fake {
-    async fn change(&self, change: ScanExclusionChangeDto, context: CallContext) -> AppResult<ScanExclusionResultDto> {
-        self.scan_exclusion_calls.lock().unwrap().push((change, context));
-        let outcome = self.scan_exclusion_result.lock().unwrap().clone()?;
+    async fn change(&self, request: DefenderExclusionRequestDto, context: CallContext) -> AppResult<DefenderExclusionResultDto> {
+        let outcome = self.scan_exclusion_outcome(request, context)?;
+        let processes = if request.php { SERVER_EXECUTABLES.map(String::from).to_vec() } else { Vec::new() };
+        Ok(DefenderExclusionResultDto { change: request.change, outcome, folder: request.mysql.then(|| MYSQL_DATA_FOLDER.into()), processes })
+    }
+    async fn change_mysql(&self, change: ScanExclusionChangeDto, context: CallContext) -> AppResult<ScanExclusionResultDto> {
+        let outcome = self.scan_exclusion_outcome(DefenderExclusionRequestDto { change, php: false, mysql: true }, context)?;
         Ok(ScanExclusionResultDto { change, outcome, folder: MYSQL_DATA_FOLDER.into() })
     }
 }

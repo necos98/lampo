@@ -5,9 +5,10 @@
 //!   preserving everything outside the Lampo markers byte for byte, writes atomically, and exits
 //!   with `lampo_infra_web::hosts::helper_exit` codes. Debug builds also accept `--hosts <path>`
 //!   (tests); release builds do not. See `lampo_infra_web::hosts::helper`.
-//! * `lampo-hosts-helper.exe --defender-exclusion add|remove --path <folder>`: adds or removes the
-//!   Microsoft Defender exclusion of Lampo's MySQL data folder of a user profile, and of nothing
-//!   else; exits with `lampo_infra_web::defender::helper_exit` codes. See
+//! * `lampo-hosts-helper.exe --defender-exclusion add|remove [--path <folder>] [--process <exe>]...`:
+//!   adds or removes the Microsoft Defender exclusions of Lampo's MySQL data folder of a user
+//!   profile (path) and of the `php-cgi.exe`/`httpd.exe` of its packages (processes), and of
+//!   nothing else; exits with `lampo_infra_web::defender::helper_exit` codes. See
 //!   `lampo_infra_web::defender::helper`.
 
 // No console window flashes when started through UAC.

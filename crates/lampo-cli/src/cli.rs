@@ -7,10 +7,12 @@ use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 
 use crate::exit_code::ExitCode;
 
+mod defender;
 mod desktop;
 mod introspection;
 mod logs;
 mod mysql;
+pub use defender::{DefenderCommand, ExclusionCommand, ExclusionTargets};
 pub use desktop::OpenArgs;
 pub use introspection::{CompletionShell, CompletionsArgs, WhichArgs};
 pub use logs::{LogLevelArg, LogsArgs};
@@ -111,6 +113,10 @@ pub enum Command {
     /// Lampo's MySQL data as a whole: its optional Microsoft Defender exclusion (UAC prompt).
     #[command(subcommand)]
     Mysql(MysqlCommand),
+    /// Optional Microsoft Defender exclusions of Lampo's PHP/Apache servers and MySQL data (UAC
+    /// prompt): faster first requests to every site.
+    #[command(subcommand)]
+    Defender(DefenderCommand),
     /// Run a command with the site's toolchain (PHP, Composer, MySQL client) on PATH.
     ///
     /// Everything after `--` is the command line. The child's stdio is inherited and its exit

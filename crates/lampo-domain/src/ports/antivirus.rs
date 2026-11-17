@@ -1,20 +1,19 @@
-//! The antivirus scan exclusion of a Lampo folder. Implemented by `lampo-infra-web`
+//! The antivirus scan exclusions of Lampo's files. Implemented by `lampo-infra-web`
 //! (`DefenderScanExclusion`, through the elevated helper).
-
-use std::path::Path;
 
 use async_trait::async_trait;
 
 use crate::error::PortResult;
-use crate::scan_exclusion::{ScanExclusionChange, ScanExclusionOutcome};
+use crate::scan_exclusion::{ScanExclusionChange, ScanExclusionOutcome, ScanExclusionTargets};
 
-/// Adds or removes the Microsoft Defender exclusion of `folder` (a UAC prompt each time).
+/// Adds or removes the Microsoft Defender exclusions of `targets`, all through one UAC prompt.
 ///
 /// The outcomes the user can act on (prompt declined, Defender absent or not active, a policy
 /// refusing or hiding the change) are [`ScanExclusionOutcome`]s, not errors. Errors:
-/// `InvalidData` for a folder the elevated side would refuse (checked before any prompt),
-/// `NotFound` when the helper is missing, `Process` when it cannot be run or fails.
+/// `InvalidData` for a target the elevated side would refuse, or no target at all (checked
+/// before any prompt), `NotFound` when the helper is missing, `Process` when it cannot be run or
+/// fails.
 #[async_trait]
 pub trait ScanExclusionEditor: Send + Sync {
-    async fn change(&self, folder: &Path, change: ScanExclusionChange) -> PortResult<ScanExclusionOutcome>;
+    async fn change(&self, targets: &ScanExclusionTargets, change: ScanExclusionChange) -> PortResult<ScanExclusionOutcome>;
 }

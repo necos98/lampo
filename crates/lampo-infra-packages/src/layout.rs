@@ -24,6 +24,7 @@ struct Layout {
 
 const LAYOUTS: &[Layout] = &[
     Layout { kind: "php", entries: &[(EntryRole::Cli, PHP_CLI), (EntryRole::FastCgi, "php-cgi.exe")], php_extension: None },
+    Layout { kind: "apache", entries: &[(EntryRole::Server, r"bin\httpd.exe")], php_extension: None },
     Layout { kind: "mod-fcgid", entries: &[(EntryRole::ApacheModule, "mod_fcgid.so")], php_extension: None },
     Layout { kind: "mysql", entries: &[(EntryRole::ClientDir, "bin")], php_extension: None },
     Layout { kind: "redis", entries: &[(EntryRole::Cli, "redis-cli.exe"), (EntryRole::ClientDir, "")], php_extension: None },
@@ -68,7 +69,7 @@ mod tests {
         let addon = installed(PackageKind::PHP_REDIS, Some("8.3"));
         assert_eq!(addon.php_extension.as_ref().map(|e| e.as_str()), Some("redis"));
         assert_eq!(addon.entry(EntryRole::PhpExtension), Some(Path::new("C:\\p\\x\\php_redis.dll")));
-        assert!(installed(PackageKind::APACHE, None).entry_points.is_empty());
+        assert_eq!(installed(PackageKind::APACHE, None).entry(EntryRole::Server), Some(Path::new("C:\\p\\x\\bin\\httpd.exe")));
         assert!(installed(PackageKind::new("postgresql").unwrap(), None).entry_points.is_empty(), "unknown kinds offer nothing");
     }
 }
