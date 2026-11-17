@@ -191,7 +191,10 @@ const WELL_KNOWN: &str = ".well-known/acme-challenge/token";
 /// Custom directives that re-grant access in a section Apache merges after httpd.conf's
 /// denials (`AuthMerging Off`, the default, replaces them). Every request of a local site comes
 /// from 127.0.0.1, so each of them grants everything: none may re-expose the project's internal
-/// files. One site (dedicated port) per directive, so one cannot hide another.
+/// files. One site (dedicated port) per directive, so one cannot hide another. A nested `<If>`
+/// would merge after Lampo's barrier, however it is disguised (e.g. behind a `\ ` that Apache
+/// does not read as a continuation): `ApacheDirectives::new` refuses it, so it cannot reach a
+/// vhost and the unit tests of `apache_directives::sections` cover it.
 const REGRANTS: &[(&str, &str)] = &[
     ("regrant-root", "<Location />\n    Require ip 127.0.0.1\n</Location>"),
     ("regrant-admin", "<Location /admin>\n    Require ip 127.0.0.1\n</Location>"),

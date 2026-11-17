@@ -77,6 +77,17 @@ mod tests {
     }
 
     #[test]
+    fn a_backslash_followed_by_blanks_does_not_continue_the_line() {
+        // Apache continues a line only when `\` directly precedes the line feed: after a space
+        // or a tab the next line stands alone, so the `<If>` on line 3 is nested.
+        for line in ["# comment \\ ", "# comment \\\t", "SetEnv A \\ ", "SetEnv A \\\t"] {
+            let text = format!("<If \"true\">\n{line}\n<If \"true\">\nRequire local\n</If>\n</If>");
+            let reason = refused(&text);
+            assert!(reason.starts_with("line 3: `<If` is not allowed: it is nested inside another <If>"), "{text:?}: {reason}");
+        }
+    }
+
+    #[test]
     fn conditions_side_by_side_or_inside_other_sections_are_accepted() {
         for text in [
             "<If \"%{HTTP_HOST} == 'a'\">\n    Header set X a\n</If>\n<ElseIf \"%{HTTP_HOST} == 'b'\">\n    Header set X b\n</ElseIf>\n<Else>\n    Header set X c\n</Else>",

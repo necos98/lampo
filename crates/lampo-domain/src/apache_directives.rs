@@ -76,9 +76,9 @@ impl ApacheDirectives {
     /// is read as Apache reads it (first word, quotes stripped) and must be a plain identifier,
     /// so quoting or splicing `${…}` into the name cannot smuggle a forbidden directive past the
     /// checks. Names are case-insensitive; every physical line and every logical line (joined
-    /// at a trailing `\`) is checked, so a continuation cannot hide a directive. Lines end at
-    /// LF, as in Apache, and no control character other than a tab is allowed
-    /// ([`forbidden_control_character`]).
+    /// where `\` directly precedes the line feed, as in Apache) is checked, so a continuation
+    /// cannot hide a directive. Lines end at LF, as in Apache, and no control character other
+    /// than a tab is allowed ([`forbidden_control_character`]).
     pub fn validate(&self) -> Result<(), DomainError> {
         if let Some((line, c)) = forbidden_control_character(&self.0) {
             let code = u32::from(c);
@@ -138,7 +138,8 @@ fn forbidden_control_character(text: &str) -> Option<(usize, char)> {
     text.split('\n').enumerate().find_map(|(index, line)| line.chars().find(|c| c.is_control() && *c != '\t').map(|c| (index + 1, c)))
 }
 
-/// One line as Apache reads it: a physical line ending in `\` is joined verbatim with the next.
+/// One line as Apache reads it: a physical line whose last character is `\` is joined verbatim
+/// with the next.
 struct LogicalLine<'a> {
     /// 1-based number of the physical line it starts on.
     number: usize,
@@ -146,13 +147,16 @@ struct LogicalLine<'a> {
     text: String,
 }
 
+/// Apache continues a line only when `\` directly precedes the line feed (`ap_cfg_getline`):
+/// after a space or a tab the `\` is plain text and the next line stands alone. Reading it any
+/// other way would hide from [`sections::check_nesting`] a section that Apache does see.
 fn logical_lines(text: &str) -> Vec<LogicalLine<'_>> {
     let mut out = Vec::new();
     let mut current: Option<LogicalLine<'_>> = None;
     for (index, line) in text.split('\n').enumerate() {
         let entry = current.get_or_insert_with(|| LogicalLine { number: index + 1, physical: Vec::new(), text: String::new() });
         entry.physical.push(line);
-        match line.trim_end_matches(is_space).strip_suffix('\\') {
+        match line.strip_suffix('\\') {
             Some(head) => entry.text.push_str(head),
             None => {
                 entry.text.push_str(line);
