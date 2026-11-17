@@ -72,7 +72,8 @@ export const COMMANDS = {
 	installClaudeCode: 'install_claude_code',
 	uninstallClaudeCode: 'uninstall_claude_code',
 	defenderExclusionInfo: 'defender_exclusion_info',
-	changeDefenderExclusion: 'change_defender_exclusion'
+	changeDefenderExclusion: 'change_defender_exclusion',
+	defenderExclusionCommands: 'defender_exclusion_commands'
 } as const;
 
 export type CommandName = (typeof COMMANDS)[keyof typeof COMMANDS];
@@ -173,6 +174,8 @@ export const claudeCodeStatus = () => call<T.ClaudeCodeStatus>(COMMANDS.claudeCo
 export const installClaudeCode = () => call<T.ClaudeCodeAction>(COMMANDS.installClaudeCode);
 export const uninstallClaudeCode = () => call<T.ClaudeCodeAction>(COMMANDS.uninstallClaudeCode);
 
-// Microsoft Defender exclusions of the PHP/Apache servers and/or the MySQL data folder (one UAC prompt per change)
+// Microsoft Defender exclusions of the PHP/Apache servers, the MySQL data folder and/or a projects folder (one UAC prompt per change),
+// and their PowerShell commands for whoever manages the PC (no prompt)
 export const defenderExclusionInfo = () => call<T.DefenderExclusionInfo>(COMMANDS.defenderExclusionInfo);
 export const changeDefenderExclusion = (request: T.DefenderExclusionRequest) => call<T.DefenderExclusionResult>(COMMANDS.changeDefenderExclusion, { request });
+export const defenderExclusionCommands = (request: T.DefenderExclusionRequest) => call<T.DefenderExclusionCommand[]>(COMMANDS.defenderExclusionCommands, { request });

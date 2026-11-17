@@ -97,3 +97,27 @@ pub struct DefenderExclusionInfoDto {
     /// registered projects that may be excluded; `null` when there is none.
     pub projects_folder: Option<String>,
 }
+
+/// What one Defender exclusion excludes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DefenderExclusionKind"))]
+#[serde(rename_all = "kebab-case")]
+pub enum DefenderExclusionKindDto {
+    /// The files a process opens (`-ExclusionProcess`).
+    Process,
+    /// A folder and everything in it (`-ExclusionPath`).
+    Path,
+}
+
+/// One exclusion of a request as a PowerShell command, for whoever manages the PC (group policy,
+/// Intune) when Defender refuses Lampo's request: the exact path a request would name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DefenderExclusionCommand"))]
+#[serde(rename_all = "camelCase")]
+pub struct DefenderExclusionCommandDto {
+    pub kind: DefenderExclusionKindDto,
+    pub path: String,
+    /// `Add-MpPreference -ExclusionProcess '<path>'` (or `Remove-MpPreference`, `-ExclusionPath`),
+    /// one line, the path quoted for PowerShell.
+    pub command: String,
+}

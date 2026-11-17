@@ -154,4 +154,6 @@ pub trait ScanExclusionAdmin: Send + Sync {
     async fn change(&self, request: DefenderExclusionRequestDto, context: CallContext) -> AppResult<DefenderExclusionResultDto>;
     /// The MySQL data folder only, with its own result (`mysql defender-exclusion`).
     async fn change_mysql(&self, change: ScanExclusionChangeDto, context: CallContext) -> AppResult<ScanExclusionResultDto>;
+    /// The PowerShell commands making `request`'s change, for whoever manages the PC (no prompt).
+    fn commands(&self, request: DefenderExclusionRequestDto) -> AppResult<Vec<DefenderExclusionCommandDto>>;
 }

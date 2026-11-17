@@ -320,6 +320,13 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
             false,
         ),
         c(
+            "lampo defender exclusion commands",
+            "lampo defender exclusion commands [--php] [--mysql] [--projects [<folder>]] [--json]",
+            "Print the Add-MpPreference lines of those exclusions with this PC's paths (default --php), for whoever manages the PC when Defender refuses the change (exit 12). No prompt, changes nothing.",
+            false,
+            false,
+        ),
+        c(
             "lampo mysql defender-exclusion add",
             "lampo mysql defender-exclusion add --allow-elevation [--json]",
             "Same as `lampo defender exclusion add --mysql` (kept for existing scripts). Only when the user asks for it: never on your own.",

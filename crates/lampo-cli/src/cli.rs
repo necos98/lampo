@@ -12,7 +12,7 @@ mod desktop;
 mod introspection;
 mod logs;
 mod mysql;
-pub use defender::{DefenderCommand, ExclusionCommand, ExclusionTargets};
+pub use defender::{CommandTargets, DefenderCommand, ExclusionCommand, ExclusionTargets};
 pub use desktop::OpenArgs;
 pub use introspection::{CompletionShell, CompletionsArgs, WhichArgs};
 pub use logs::{LogLevelArg, LogsArgs};

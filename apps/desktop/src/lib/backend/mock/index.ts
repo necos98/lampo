@@ -783,6 +783,15 @@ export function createMockBackend({ fresh }: Options): Backend {
 			const steps = [step('detect-claude', claudeCode.claudeVersion), step('remove-plugin'), step('remove-marketplace'), step('remove-files', claudeCode.pluginDir)];
 			return { ok: true, steps, status: clone(claudeCode) };
 		},
+		// The lines the backend builds (it also doubles the typographic quotes).
+		defenderExclusionCommands: async ({ php, mysql, projects, projectsFolder }) => {
+			const line = (kind: T.DefenderExclusionKind, path: string): T.DefenderExclusionCommand => {
+				const parameter = kind === 'path' ? '-ExclusionPath' : '-ExclusionProcess';
+				return { kind, path, command: `Add-MpPreference ${parameter} '${path.replaceAll("'", "''")}'` };
+			};
+			const folders = [...(mysql ? [mysqlDataFolder] : []), ...(projects ? [projectsFolder ?? suggestedProjectsFolder] : [])];
+			return [...folders.map((folder) => line('path', folder)), ...(php ? serverExecutables.map((exe) => line('process', exe)) : [])];
+		},
 		defenderExclusionInfo: async () => ({ folder: mysqlDataFolder, processes: [...serverExecutables], projectsFolder: suggestedProjectsFolder }),
 		// The browser has no UAC prompt nor Defender: every change is confirmed.
 		changeDefenderExclusion: async ({ change, php, mysql, projects, projectsFolder }) => {

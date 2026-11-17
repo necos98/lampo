@@ -1,6 +1,8 @@
-import type { DefenderExclusionInfo, DefenderExclusionRequest, DefenderExclusionResult, ScanExclusionChange } from '../api/index.js';
+import type { DefenderExclusionCommand, DefenderExclusionInfo, DefenderExclusionRequest, DefenderExclusionResult, ScanExclusionChange, ScanExclusionOutcome } from '../api/index.js';
 import type { Backend } from '../backend/ports.js';
 import { messages as m } from '../messages/index.js';
+import type { Notifier } from '../services/notifier.js';
+import type { CopyText } from './logFiles.js';
 import { Resource } from './resource.svelte.js';
 import type { CommandRunner, Outcome } from './runner.js';
 
@@ -23,6 +25,19 @@ export function scanExclusionMessage(target: DefenderTarget, result: DefenderExc
 	return result.outcome === 'applied' ? t[target].done[result.change] : t.outcome[result.outcome];
 }
 
+/** The outcomes that mean a policy controls Defender's exclusions: whoever manages the PC can add them. */
+const MANAGED_OUTCOMES: ReadonlySet<ScanExclusionOutcome> = new Set(['refused', 'not-confirmed']);
+
+/** Whether `result` is an addition that whoever manages the PC must make instead (the commands are for them). */
+export function needsItCommands(result: DefenderExclusionResult | null): boolean {
+	return result?.change === 'add' && MANAGED_OUTCOMES.has(result.outcome);
+}
+
+/** The text copied for whoever manages the PC: the PowerShell lines, one per exclusion, as `lampo defender exclusion commands` prints them. */
+export function itCommandsText(commands: readonly DefenderExclusionCommand[]): string {
+	return commands.map((c) => c.command).join('\n');
+}
+
 /** The request naming `target` only; `projectsFolder` is the folder of a `projects` request. */
 export function exclusionRequest(target: DefenderTarget, change: ScanExclusionChange, projectsFolder?: string): DefenderExclusionRequest {
 	const projects = target === 'projects';
@@ -42,10 +57,14 @@ export class ScanExclusionStore {
 
 	readonly #backend: Backend;
 	readonly #runner: CommandRunner;
+	readonly #notifier: Notifier;
+	readonly #copyText: CopyText;
 
-	constructor(backend: Backend, runner: CommandRunner) {
+	constructor(backend: Backend, runner: CommandRunner, notifier: Notifier, copyText: CopyText) {
 		this.#backend = backend;
 		this.#runner = runner;
+		this.#notifier = notifier;
+		this.#copyText = copyText;
 		this.info = new Resource(() => backend.commands.defenderExclusionInfo());
 	}
 
@@ -53,6 +72,20 @@ export class ScanExclusionStore {
 	/** `projectsFolder`: the folder a `projects` request names (ignored for the others). */
 	add = (target: DefenderTarget, projectsFolder?: string) => this.#change(target, 'add', projectsFolder);
 	remove = (target: DefenderTarget, projectsFolder?: string) => this.#change(target, 'remove', projectsFolder);
+
+	/**
+	 * Copies the PowerShell commands adding `target`'s exclusion, for whoever manages the PC: no
+	 * prompt, nothing changed. `false` when they could not be built (the error is told) or copied.
+	 */
+	async copyItCommands(target: DefenderTarget, projectsFolder?: string): Promise<boolean> {
+		const request = exclusionRequest(target, 'add', projectsFolder);
+		const result = await this.#runner.run(() => this.#backend.commands.defenderExclusionCommands(request));
+		if (!result.ok) return false;
+		const copied = await this.#copyText(itCommandsText(result.value));
+		if (copied) this.#notifier.success(m.settings.defender.itCommands.copied);
+		else this.#notifier.error(m.common.copyFailed);
+		return copied;
+	}
 
 	/**
 	 * `null` while another request is open: its prompt must end first. An outcome other than

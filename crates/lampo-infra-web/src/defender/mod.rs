@@ -50,8 +50,9 @@ impl DefenderScanExclusion {
         Self { helper_exe, launcher, profiles }
     }
 
-    /// The targets the helper will accept for `targets`, the folder created when adding.
-    fn prepare(&self, targets: &ScanExclusionTargets, change: ScanExclusionChange) -> PortResult<ScanExclusionTargets> {
+    /// The targets the helper will accept for `targets`; with [`FolderCreation::WhenAdding`], the
+    /// MySQL folder is created when adding.
+    fn prepare(&self, targets: &ScanExclusionTargets, change: ScanExclusionChange, creation: FolderCreation) -> PortResult<ScanExclusionTargets> {
         if targets.is_empty() {
             return Err(PortError::invalid_data("Defender exclusion", "nothing to exclude"));
         }
@@ -60,11 +61,20 @@ impl DefenderScanExclusion {
         }
         let profiles = self.profiles.profile_dirs();
         let adding = change == ScanExclusionChange::Add;
-        let folder = targets.folder.as_deref().map(|folder| prepare_folder(folder, &profiles, adding)).transpose()?;
+        let create_folder = adding && creation == FolderCreation::WhenAdding;
+        let folder = targets.folder.as_deref().map(|folder| prepare_folder(folder, &profiles, create_folder)).transpose()?;
         let projects = targets.projects.as_deref().map(|folder| validated_projects_folder(folder, &profiles, adding)).transpose()?;
         let processes = targets.processes.iter().map(|exe| executable::validated_executable(requested(exe)?, &profiles, adding).map_err(|e| refused(exe, e))).collect::<PortResult<_>>()?;
         Ok(ScanExclusionTargets { folder, processes, projects })
     }
+}
+
+/// Whether checking the targets may create the MySQL folder (as a request does before the
+/// prompt) or must leave the disk untouched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FolderCreation {
+    WhenAdding,
+    Never,
 }
 
 /// The projects folder the helper will accept for `folder`.
@@ -81,20 +91,21 @@ fn requested(path: &Path) -> PortResult<&str> {
     path.to_str().ok_or_else(|| refused(path, TargetError::Malformed))
 }
 
-/// The folder the helper will accept for `folder`, created when adding.
-fn prepare_folder(folder: &Path, profiles: &[PathBuf], adding: bool) -> PortResult<PathBuf> {
+/// The folder the helper will accept for `folder`, created first with `create`. Without it, a
+/// missing folder is accepted: adding the exclusion creates it.
+fn prepare_folder(folder: &Path, profiles: &[PathBuf], create: bool) -> PortResult<PathBuf> {
     let target = target::resolve_target(requested(folder)?, profiles).map_err(|e| refused(folder, e))?;
-    if adding {
+    if create {
         std::fs::create_dir_all(&target).map_err(|e| PortError::io(format!("creating {}", target.display()), e))?;
     }
-    target::check_no_links(&target, adding).map_err(|e| refused(folder, e))?;
+    target::check_no_links(&target, create).map_err(|e| refused(folder, e))?;
     Ok(target)
 }
 
 #[async_trait]
 impl ScanExclusionEditor for DefenderScanExclusion {
     async fn change(&self, targets: &ScanExclusionTargets, change: ScanExclusionChange) -> PortResult<ScanExclusionOutcome> {
-        let targets = self.prepare(targets, change)?;
+        let targets = self.prepare(targets, change, FolderCreation::WhenAdding)?;
         if !self.helper_exe.is_file() {
             return Err(PortError::not_found("elevated helper", self.helper_exe.display().to_string()));
         }
@@ -116,6 +127,10 @@ impl ScanExclusionEditor for DefenderScanExclusion {
 
     fn accepted_projects_folder(&self, folder: &Path) -> PortResult<PathBuf> {
         validated_projects_folder(folder, &self.profiles.profile_dirs(), true)
+    }
+
+    fn accepted_targets(&self, targets: &ScanExclusionTargets, change: ScanExclusionChange) -> PortResult<ScanExclusionTargets> {
+        self.prepare(targets, change, FolderCreation::Never)
     }
 }
 
@@ -349,6 +364,44 @@ mod tests {
         let upper = PathBuf::from(s.profile.display().to_string().to_uppercase()).join(r"Desktop\Progetti");
         assert_eq!(s.adapter.accepted_projects_folder(&upper), Ok(projects));
         assert!(s.launcher.calls.lock().unwrap().is_empty(), "never a prompt");
+    }
+
+    #[tokio::test]
+    async fn accepted_targets_are_what_a_request_sends_without_prompting_or_creating() {
+        let s = setup(LaunchOutcome::Exited(helper_exit::OK));
+        let projects = s.profile.join(r"Desktop\Progetti");
+        std::fs::create_dir_all(&projects).unwrap();
+        let upper = |path: &Path| PathBuf::from(path.display().to_string().to_uppercase());
+        let requested = ScanExclusionTargets { folder: Some(upper(&s.folder)), processes: vec![s.php.clone(), s.httpd.clone()], projects: Some(upper(&s.profile).join(r"Desktop\Progetti")) };
+        let accepted = s.adapter.accepted_targets(&requested, ScanExclusionChange::Add).unwrap();
+        assert_eq!(accepted, ScanExclusionTargets { folder: Some(s.folder.clone()), processes: vec![s.php.clone(), s.httpd.clone()], projects: Some(projects.clone()) });
+        assert!(!s.folder.exists(), "the MySQL folder is not created");
+        assert!(s.launcher.calls.lock().unwrap().is_empty(), "never a prompt");
+
+        s.adapter.change(&requested, ScanExclusionChange::Add).await.unwrap();
+        let sent = &s.calls()[0];
+        let display = |p: &PathBuf| p.display().to_string();
+        assert_eq!((sent.path.clone(), sent.projects.clone()), (accepted.folder.as_ref().map(display), accepted.projects.as_ref().map(display)), "the same spelling");
+        assert_eq!(sent.processes, accepted.processes.iter().map(display).collect::<Vec<_>>());
+    }
+
+    #[tokio::test]
+    async fn accepted_targets_refuse_what_a_request_refuses() {
+        let s = setup(LaunchOutcome::Exited(helper_exit::OK));
+        let php_cli = s.php.with_file_name("php.exe");
+        std::fs::write(&php_cli, b"").unwrap();
+        let missing_projects = s.profile.join(r"Desktop\Progetti");
+        for targets in [
+            ScanExclusionTargets::default(),
+            folder_only(&s.folder.with_file_name("mysql2")),
+            ScanExclusionTargets { processes: vec![php_cli], ..Default::default() },
+            projects_only(&s.profile.join("AppData")),
+            projects_only(&missing_projects),
+        ] {
+            let err = s.adapter.accepted_targets(&targets, ScanExclusionChange::Add).unwrap_err();
+            assert!(matches!(err, PortError::InvalidData { .. }), "{targets:?}: {err:?}");
+        }
+        assert!(s.launcher.calls.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

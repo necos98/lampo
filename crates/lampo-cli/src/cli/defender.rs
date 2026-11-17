@@ -54,6 +54,20 @@ pub enum ExclusionCommand {
     Add(ExclusionTargets),
     /// Remove the exclusions (one UAC prompt; needs --allow-elevation).
     Remove(ExclusionTargets),
+    /// Print the PowerShell commands that add the exclusions, for whoever manages this PC
+    ///
+    /// When Defender refuses the change or does not show it (exit 12: a group policy or Intune
+    /// controls its exclusions), send these lines to your IT department: one `Add-MpPreference
+    /// -ExclusionProcess '<exe>'` or `-ExclusionPath '<folder>'` per exclusion, with the exact
+    /// paths `add` would name on this PC, quoted for PowerShell. Without a selector, --php. No
+    /// UAC prompt, nothing is changed; the same checks and exit codes as `add`.
+    ///
+    /// Examples:
+    ///   lampo defender exclusion commands
+    ///   lampo defender exclusion commands --php --mysql --projects "C:\Users\me\Desktop\Progetti"
+    ///   lampo defender exclusion commands --json
+    #[command(verbatim_doc_comment)]
+    Commands(CommandTargets),
 }
 
 /// What the request names: at least one.
@@ -69,4 +83,26 @@ pub struct ExclusionTargets {
     /// A folder holding your projects; without a value, the one suggested from the registered projects.
     #[arg(long, value_name = "FOLDER", num_args = 0..=1)]
     pub projects: Option<Option<String>>,
+}
+
+/// What the commands exclude: the selectors of `add`, --php when none is named.
+#[derive(Debug, Args)]
+pub struct CommandTargets {
+    /// php-cgi.exe of every installed PHP and Apache's httpd.exe (process exclusions; the default).
+    #[arg(long)]
+    pub php: bool,
+    /// The MySQL data folder (%LOCALAPPDATA%\Lampo\mysql).
+    #[arg(long)]
+    pub mysql: bool,
+    /// A folder holding your projects; without a value, the one suggested from the registered projects.
+    #[arg(long, value_name = "FOLDER", num_args = 0..=1)]
+    pub projects: Option<Option<String>>,
+}
+
+impl CommandTargets {
+    /// The targets named, --php when none is.
+    pub fn or_php(self) -> ExclusionTargets {
+        let php = self.php || (!self.mysql && self.projects.is_none());
+        ExclusionTargets { php, mysql: self.mysql, projects: self.projects }
+    }
 }

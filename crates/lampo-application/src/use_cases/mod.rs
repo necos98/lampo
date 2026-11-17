@@ -15,6 +15,7 @@ pub mod app_info;
 pub mod auto_restart;
 pub mod claude_code;
 pub mod database;
+pub(crate) mod defender_commands;
 pub mod diagnostics;
 pub mod environment;
 pub mod external_apps;

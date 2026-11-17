@@ -756,7 +756,13 @@ export const it = {
 				refused: 'Microsoft Defender ha rifiutato la modifica: le esclusioni sono controllate da Tamper Protection o dai criteri di chi gestisce il PC (Criteri di gruppo, Intune). Nessuna modifica.',
 				'not-confirmed': 'Defender ha accettato la richiesta ma la modifica non risulta: le esclusioni sono probabilmente gestite o nascoste da criteri (Criteri di gruppo, Intune). Chiedi a chi gestisce il PC.'
 			} satisfies Record<Exclude<ScanExclusionOutcome, 'applied'>, string>,
-			last: 'Ultima richiesta'
+			last: 'Ultima richiesta',
+			itCommands: {
+				copy: 'Copia comandi per l’IT',
+				help: 'Copia i comandi PowerShell (Add-MpPreference) che aggiungono questa esclusione, con i percorsi di questo PC.',
+				note: 'Su questo PC le esclusioni di Defender sembrano gestite da chi amministra il PC (Criteri di gruppo, Intune). Copia i comandi PowerShell e inviali al reparto IT o all’amministratore di sistema: potranno aggiungere l’esclusione da lì. Lampo non modifica nulla.',
+				copied: 'Comandi copiati: inviali a chi gestisce il PC.'
+			}
 		},
 		doctor: {
 			title: 'Diagnostica',

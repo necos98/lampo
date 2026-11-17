@@ -108,7 +108,7 @@ fn declarations(cfg: &Config) -> Vec<(&'static str, Vec<Declaration>)> {
         section!("Integrations": ClaudeCodeStateDto, ClaudeCodeStatusDto, StepOutcomeDto, ClaudeCodeStepDto, ClaudeCodeActionDto),
         section!(
             "Defender exclusion": ScanExclusionChangeDto, ScanExclusionOutcomeDto, ScanExclusionResultDto, DefenderExclusionRequestDto,
-            DefenderExclusionResultDto, DefenderExclusionInfoDto
+            DefenderExclusionResultDto, DefenderExclusionInfoDto, DefenderExclusionKindDto, DefenderExclusionCommandDto
         ),
         section!("App": AppInfoDto),
         section!("Event payloads":

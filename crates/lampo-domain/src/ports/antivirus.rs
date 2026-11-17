@@ -23,4 +23,10 @@ pub trait ScanExclusionEditor: Send + Sync {
     /// rebuilds), or `InvalidData` when that would be refused. Never shows a prompt: it tells
     /// which folder may be suggested.
     fn accepted_projects_folder(&self, folder: &Path) -> PortResult<PathBuf>;
+
+    /// `targets` as [`Self::change`] would hand them to the elevated side for `change` (the
+    /// spelling it rebuilds), after the same checks, or the same error. Never shows a prompt and
+    /// changes nothing (a missing MySQL folder, which adding creates, is not an error): it tells
+    /// what someone else may exclude for the user.
+    fn accepted_targets(&self, targets: &ScanExclusionTargets, change: ScanExclusionChange) -> PortResult<ScanExclusionTargets>;
 }

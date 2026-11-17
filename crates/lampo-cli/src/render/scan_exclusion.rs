@@ -1,7 +1,7 @@
 //! `defender exclusion` and `mysql defender-exclusion`: what happened, and what the user can do
 //! about it.
 
-use lampo_application::dto::{DefenderExclusionResultDto, ScanExclusionChangeDto, ScanExclusionOutcomeDto, ScanExclusionResultDto};
+use lampo_application::dto::{DefenderExclusionCommandDto, DefenderExclusionResultDto, ScanExclusionChangeDto, ScanExclusionOutcomeDto, ScanExclusionResultDto};
 
 /// `mysql defender-exclusion`.
 pub fn scan_exclusion(r: &ScanExclusionResultDto) -> String {
@@ -21,7 +21,12 @@ pub fn scan_exclusion(r: &ScanExclusionResultDto) -> String {
 /// `defender exclusion`: every target, one per line.
 pub fn defender_exclusion(r: &DefenderExclusionResultDto) -> String {
     if let Some(problem) = problem(r.outcome) {
-        return problem.to_string();
+        return match (r.change, r.outcome) {
+            (ScanExclusionChangeDto::Add, ScanExclusionOutcomeDto::Refused | ScanExclusionOutcomeDto::NotConfirmed) => {
+                format!("{problem}\nSend the output of `lampo defender exclusion commands {}` to whoever manages this PC.", selectors(r))
+            }
+            _ => problem.to_string(),
+        };
     }
     let mut lines = vec![match r.change {
         ScanExclusionChangeDto::Add => "Microsoft Defender no longer scans:".to_string(),
@@ -31,14 +36,25 @@ pub fn defender_exclusion(r: &DefenderExclusionResultDto) -> String {
     lines.extend(r.processes.iter().map(|exe| format!("  the files opened by {exe}")));
     lines.extend(r.projects.iter().map(|folder| format!("  {folder} (your projects, with their vendor and node_modules folders)")));
     if r.change == ScanExclusionChangeDto::Add {
-        let projects = r.projects.as_ref().map(|folder| format!("--projects \"{folder}\""));
-        let selectors: Vec<&str> = [(!r.processes.is_empty()).then_some("--php"), r.folder.is_some().then_some("--mysql"), projects.as_deref()].into_iter().flatten().collect();
-        lines.push(format!("Undo it with `lampo defender exclusion remove {} --allow-elevation`.", selectors.join(" ")));
+        lines.push(format!("Undo it with `lampo defender exclusion remove {} --allow-elevation`.", selectors(r)));
         if !r.processes.is_empty() {
             lines.push("After installing another PHP version, run `lampo defender exclusion add --php --allow-elevation` again.".to_string());
         }
     }
     lines.join("\n")
+}
+
+/// The selectors naming the targets of `r` again (`--php --mysql --projects "<folder>"`).
+fn selectors(r: &DefenderExclusionResultDto) -> String {
+    let projects = r.projects.as_ref().map(|folder| format!("--projects \"{folder}\""));
+    let selectors: Vec<&str> = [(!r.processes.is_empty()).then_some("--php"), r.folder.is_some().then_some("--mysql"), projects.as_deref()].into_iter().flatten().collect();
+    selectors.join(" ")
+}
+
+/// `defender exclusion commands`: the PowerShell lines only, one per exclusion, ready to be sent
+/// or pasted.
+pub fn defender_commands(commands: &[DefenderExclusionCommandDto]) -> String {
+    commands.iter().map(|c| c.command.as_str()).collect::<Vec<_>>().join("\n")
 }
 
 /// Why the request did not apply; `None` when it did.
@@ -129,6 +145,30 @@ mod tests {
         assert!(both.contains(FOLDER) && both.contains("remove --php --mysql --allow-elevation"), "{both}");
         let mysql = defender_exclusion(&defender(ScanExclusionChangeDto::Add, Some(FOLDER), &[]));
         assert!(mysql.contains("remove --mysql --allow-elevation") && !mysql.contains("another PHP"), "{mysql}");
+    }
+
+    #[test]
+    fn commands_are_the_lines_only() {
+        use lampo_application::dto::DefenderExclusionKindDto;
+        let command = |kind, path: &str, line: &str| DefenderExclusionCommandDto { kind, path: path.into(), command: line.into() };
+        let lines = [format!("Add-MpPreference -ExclusionPath '{FOLDER}'"), format!("Add-MpPreference -ExclusionProcess '{PHP}'")];
+        let commands = [command(DefenderExclusionKindDto::Path, FOLDER, &lines[0]), command(DefenderExclusionKindDto::Process, PHP, &lines[1])];
+        assert_eq!(defender_commands(&commands), lines.join("\n"));
+        assert_eq!(defender_commands(&[]), "");
+    }
+
+    #[test]
+    fn a_refused_addition_points_to_the_commands_for_whoever_manages_the_pc() {
+        for outcome in [ScanExclusionOutcomeDto::Refused, ScanExclusionOutcomeDto::NotConfirmed] {
+            let added = defender_exclusion(&DefenderExclusionResultDto { outcome, ..defender(ScanExclusionChangeDto::Add, Some(FOLDER), &[PHP]) });
+            assert!(added.ends_with("Send the output of `lampo defender exclusion commands --php --mysql` to whoever manages this PC."), "{added}");
+            let removed = defender_exclusion(&DefenderExclusionResultDto { outcome, ..defender(ScanExclusionChangeDto::Remove, Some(FOLDER), &[PHP]) });
+            assert!(!removed.contains("exclusion commands"), "{removed}");
+        }
+        for outcome in [ScanExclusionOutcomeDto::Cancelled, ScanExclusionOutcomeDto::DefenderUnavailable] {
+            let added = defender_exclusion(&DefenderExclusionResultDto { outcome, ..defender(ScanExclusionChangeDto::Add, None, &[PHP]) });
+            assert!(!added.contains("exclusion commands"), "{outcome:?}: {added}");
+        }
     }
 
     #[test]

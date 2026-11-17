@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { DefenderExclusionRequest, DefenderExclusionResult, ScanExclusionChange, ScanExclusionOutcome } from '../api/index.js';
+import type { DefenderExclusionCommand, DefenderExclusionRequest, DefenderExclusionResult, ScanExclusionChange, ScanExclusionOutcome } from '../api/index.js';
+import type { Backend } from '../backend/ports.js';
 import { messages as m } from '../messages/index.js';
+import type { Notifier } from '../services/notifier.js';
 import { deferred, recordingNotifier, testBackend, testRunner } from '../testing/harness.js';
-import { exclusionRequest, ScanExclusionStore, type DefenderTarget } from './scanExclusion.svelte.js';
+import type { CopyText } from './logFiles.js';
+import { exclusionRequest, itCommandsText, needsItCommands, ScanExclusionStore, type DefenderTarget } from './scanExclusion.svelte.js';
 
 const FOLDER = 'C:\\Users\\dev\\AppData\\Local\\Lampo\\mysql';
 const PROCESSES = ['C:\\Users\\dev\\AppData\\Local\\Lampo\\packages\\apache-2.4\\bin\\httpd.exe', 'C:\\Users\\dev\\AppData\\Local\\Lampo\\packages\\php-8.3\\php-cgi.exe'];
@@ -17,6 +20,10 @@ const result = (target: DefenderTarget, outcome: ScanExclusionOutcome, change: S
 	projects: target === 'projects' ? PROJECTS : null
 });
 
+/** The store with `notifier`, copying through `copyText`. */
+const storeFor = (backend: Backend, notifier: Notifier = recordingNotifier(), copyText: CopyText = async () => true) =>
+	new ScanExclusionStore(backend, testRunner(notifier), notifier, copyText);
+
 /** A backend that answers every request with `outcome` for what it names. */
 const answering =
 	(outcome: ScanExclusionOutcome) =>
@@ -27,7 +34,7 @@ describe('ScanExclusionStore', () => {
 	it('loads what each option covers without changing anything', async () => {
 		const change = vi.fn();
 		const { backend } = testBackend({ changeDefenderExclusion: change });
-		const store = new ScanExclusionStore(backend, testRunner());
+		const store = storeFor(backend);
 
 		await store.load();
 
@@ -44,7 +51,7 @@ describe('ScanExclusionStore', () => {
 		const change = vi.fn(() => pending.promise);
 		const notifier = recordingNotifier();
 		const { backend } = testBackend({ changeDefenderExclusion: change });
-		const store = new ScanExclusionStore(backend, testRunner(notifier));
+		const store = storeFor(backend, notifier);
 
 		const action = store.add(target);
 		expect(store.busy).toEqual({ target, change: 'add' });
@@ -62,7 +69,7 @@ describe('ScanExclusionStore', () => {
 		const notifier = recordingNotifier();
 		const { backend } = testBackend({ changeDefenderExclusion: change });
 
-		await new ScanExclusionStore(backend, testRunner(notifier)).remove(target);
+		await storeFor(backend, notifier).remove(target);
 
 		expect(change).toHaveBeenCalledExactlyOnceWith(exclusionRequest(target, 'remove'));
 		expect(notifier.successes).toEqual([m.settings.defender[target].done.remove]);
@@ -72,7 +79,7 @@ describe('ScanExclusionStore', () => {
 		const change = vi.fn(answering('applied'));
 		const notifier = recordingNotifier();
 		const { backend } = testBackend({ changeDefenderExclusion: change });
-		const store = new ScanExclusionStore(backend, testRunner(notifier));
+		const store = storeFor(backend, notifier);
 
 		await store.add('projects', `  ${PROJECTS} `);
 		await store.remove('projects', PROJECTS);
@@ -93,7 +100,7 @@ describe('ScanExclusionStore', () => {
 
 	it('each option keeps its own last request', async () => {
 		const { backend } = testBackend({ changeDefenderExclusion: answering('applied') });
-		const store = new ScanExclusionStore(backend, testRunner());
+		const store = storeFor(backend);
 
 		await store.add('php');
 		await store.remove('mysql');
@@ -105,7 +112,7 @@ describe('ScanExclusionStore', () => {
 		const pending = deferred<DefenderExclusionResult>();
 		const change = vi.fn(() => pending.promise);
 		const { backend } = testBackend({ changeDefenderExclusion: change });
-		const store = new ScanExclusionStore(backend, testRunner());
+		const store = storeFor(backend);
 
 		const first = store.add('php');
 		expect(await store.remove('mysql')).toBeNull();
@@ -120,7 +127,7 @@ describe('ScanExclusionStore', () => {
 	it.each(['cancelled', 'defender-unavailable', 'refused', 'not-confirmed'] as const)('%s is a warning that says why nothing changed', async (outcome) => {
 		const notifier = recordingNotifier();
 		const { backend } = testBackend({ changeDefenderExclusion: answering(outcome) });
-		const store = new ScanExclusionStore(backend, testRunner(notifier));
+		const store = storeFor(backend, notifier);
 
 		const action = await store.add('php');
 
@@ -138,13 +145,86 @@ describe('ScanExclusionStore', () => {
 				throw { code: 'package-missing', message: 'no PHP or Apache package is installed: there is no php-cgi.exe or httpd.exe to exclude' };
 			}
 		});
-		const store = new ScanExclusionStore(backend, testRunner(notifier));
+		const store = storeFor(backend, notifier);
 
 		const action = await store.add('php');
 
 		expect(action?.ok).toBe(false);
 		expect(store.busy).toBeNull();
 		expect(store.last).toEqual({ php: null, mysql: null, projects: null });
+		expect(notifier.errors).toHaveLength(1);
+	});
+});
+
+describe('commands for whoever manages the PC', () => {
+	const command = (kind: DefenderExclusionCommand['kind'], path: string): DefenderExclusionCommand => ({
+		kind,
+		path,
+		command: `Add-MpPreference ${kind === 'path' ? '-ExclusionPath' : '-ExclusionProcess'} '${path}'`
+	});
+
+	it('are offered first after a refused or unconfirmed addition only', () => {
+		for (const outcome of ['refused', 'not-confirmed'] as const) {
+			expect(needsItCommands(result('php', outcome))).toBe(true);
+			expect(needsItCommands(result('php', outcome, 'remove'))).toBe(false);
+		}
+		for (const outcome of ['applied', 'cancelled', 'defender-unavailable'] as const) expect(needsItCommands(result('php', outcome))).toBe(false);
+		expect(needsItCommands(null)).toBe(false);
+	});
+
+	it('are the lines the CLI prints, one per exclusion', () => {
+		const commands = [command('path', FOLDER), ...PROCESSES.map((exe) => command('process', exe))];
+		expect(itCommandsText(commands)).toBe(commands.map((c) => c.command).join('\n'));
+		expect(itCommandsText([])).toBe('');
+	});
+
+	it.each([
+		['php', undefined, { change: 'add', php: true, mysql: false, projects: false, projectsFolder: null }],
+		['projects', ` ${PROJECTS} `, { change: 'add', php: false, mysql: false, projects: true, projectsFolder: PROJECTS }]
+	] as const)('copying %s asks for the addition’s commands and copies their text, without any change', async (target, folder, request) => {
+		const commands = [command('process', PROCESSES[0])];
+		const build = vi.fn(async () => commands);
+		const change = vi.fn();
+		const copyText = vi.fn(async () => true);
+		const notifier = recordingNotifier();
+		const { backend } = testBackend({ defenderExclusionCommands: build, changeDefenderExclusion: change });
+
+		expect(await storeFor(backend, notifier, copyText).copyItCommands(target, folder)).toBe(true);
+
+		expect(build).toHaveBeenCalledExactlyOnceWith(request);
+		expect(copyText).toHaveBeenCalledExactlyOnceWith(itCommandsText(commands));
+		expect(notifier.successes).toEqual([m.settings.defender.itCommands.copied]);
+		expect(change).not.toHaveBeenCalled();
+	});
+
+	it('the mock builds the same lines for the same request', async () => {
+		const { backend } = testBackend();
+		const commands = await backend.commands.defenderExclusionCommands(exclusionRequest('php', 'add'));
+		expect(commands).toEqual(PROCESSES.map((exe) => command('process', exe)));
+	});
+
+	it('a refused clipboard is an error', async () => {
+		const notifier = recordingNotifier();
+		const { backend } = testBackend();
+
+		expect(await storeFor(backend, notifier, async () => false).copyItCommands('mysql')).toBe(false);
+
+		expect(notifier.errors).toEqual([m.common.copyFailed]);
+		expect(notifier.successes).toEqual([]);
+	});
+
+	it('a backend refusal is told and nothing is copied', async () => {
+		const notifier = recordingNotifier();
+		const copyText = vi.fn(async () => true);
+		const { backend } = testBackend({
+			defenderExclusionCommands: async () => {
+				throw { code: 'validation', message: 'AppData and the folders in it are never excluded' };
+			}
+		});
+
+		expect(await storeFor(backend, notifier, copyText).copyItCommands('projects', 'C:\Users\dev\AppData')).toBe(false);
+
+		expect(copyText).not.toHaveBeenCalled();
 		expect(notifier.errors).toHaveLength(1);
 	});
 });

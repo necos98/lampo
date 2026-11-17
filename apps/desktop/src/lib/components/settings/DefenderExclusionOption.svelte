@@ -1,4 +1,5 @@
 <script lang="ts">
+	import Copy from '@lucide/svelte/icons/copy';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { Snippet } from 'svelte';
 
@@ -7,7 +8,7 @@
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { messages as m } from '#lib/messages/index.js';
 	import { scanExclusion } from '#lib/stores/index.js';
-	import { scanExclusionMessage, type DefenderTarget } from '#lib/stores/scanExclusion.svelte.js';
+	import { needsItCommands, scanExclusionMessage, type DefenderTarget } from '#lib/stores/scanExclusion.svelte.js';
 
 	import ConfirmDialog from '../common/ConfirmDialog.svelte';
 
@@ -34,6 +35,9 @@
 	const pending = $derived(scanExclusion.busy);
 	const disabled = $derived(pending !== null || paths.length === 0);
 	const last = $derived(scanExclusion.last[target]);
+	/** Defender refused the last addition or does not show it: the commands for whoever manages the PC come first. */
+	const managed = $derived(needsItCommands(last));
+	const copyCommands = () => void scanExclusion.copyItCommands(target, projectsFolder);
 	const label = (change: ScanExclusionChange) => {
 		const running = pending?.target === target && pending.change === change;
 		if (change === 'add') return running ? t.adding : t.add;
@@ -68,6 +72,9 @@
 	{/if}
 
 	<div class="mt-2 flex flex-wrap items-center justify-end gap-2">
+		{#if !managed}
+			<Button size="sm" variant="ghost" class="mr-auto" title={t.itCommands.help} disabled={paths.length === 0} onclick={copyCommands}><Copy />{t.itCommands.copy}</Button>
+		{/if}
 		<Button size="sm" variant="outline" {disabled} onclick={() => scanExclusion.remove(target, projectsFolder)}>{label('remove')}</Button>
 		<Button size="sm" variant="outline" {disabled} onclick={() => (confirmAdd = true)}>{label('add')}</Button>
 	</div>
@@ -76,6 +83,14 @@
 			<span class="text-muted-foreground">{t.last}:</span>
 			{scanExclusionMessage(target, last)}
 		</p>
+		{#if managed}
+			<div class="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3" role="note">
+				<p class="text-xs">{t.itCommands.note}</p>
+				<div class="mt-2 flex justify-end">
+					<Button size="sm" title={t.itCommands.help} onclick={copyCommands}><Copy />{t.itCommands.copy}</Button>
+				</div>
+			</div>
+		{/if}
 	{/if}
 
 	<ConfirmDialog

@@ -135,6 +135,9 @@ pub struct Fake {
     /// The request and context of every Defender exclusion request (`mysql defender-exclusion`
     /// is recorded as the MySQL-only request).
     pub scan_exclusion_calls: Mutex<Vec<(DefenderExclusionRequestDto, CallContext)>>,
+    /// The request of every `defender exclusion commands` (answered with `scan_exclusion_result`'s
+    /// error, if any).
+    pub scan_exclusion_command_calls: Mutex<Vec<DefenderExclusionRequestDto>>,
 }
 
 impl Fake {
@@ -176,6 +179,7 @@ impl Fake {
             open_log_result: Mutex::new(Ok(())),
             scan_exclusion_result: Mutex::new(Ok(ScanExclusionOutcomeDto::Applied)),
             scan_exclusion_calls: Mutex::new(Vec::new()),
+            scan_exclusion_command_calls: Mutex::new(Vec::new()),
         })
     }
 
@@ -417,6 +421,16 @@ impl ScanExclusionAdmin for Fake {
     async fn change_mysql(&self, change: ScanExclusionChangeDto, context: CallContext) -> AppResult<ScanExclusionResultDto> {
         let outcome = self.scan_exclusion_outcome(DefenderExclusionRequestDto::new(change, false, true), context)?;
         Ok(ScanExclusionResultDto { change, outcome, folder: MYSQL_DATA_FOLDER.into() })
+    }
+    fn commands(&self, request: DefenderExclusionRequestDto) -> AppResult<Vec<DefenderExclusionCommandDto>> {
+        self.scan_exclusion_command_calls.lock().unwrap().push(request.clone());
+        self.scan_exclusion_result.lock().unwrap().clone()?;
+        let process = |exe: &str| DefenderExclusionCommandDto { kind: DefenderExclusionKindDto::Process, path: exe.into(), command: format!("Add-MpPreference -ExclusionProcess '{exe}'") };
+        let path = |folder: &str| DefenderExclusionCommandDto { kind: DefenderExclusionKindDto::Path, path: folder.into(), command: format!("Add-MpPreference -ExclusionPath '{folder}'") };
+        let folder = request.mysql.then(|| path(MYSQL_DATA_FOLDER));
+        let projects = request.projects.then(|| path(request.projects_folder.as_deref().unwrap_or(SUGGESTED_PROJECTS_FOLDER)));
+        let processes = SERVER_EXECUTABLES.into_iter().filter(|_| request.php).map(process);
+        Ok(folder.into_iter().chain(projects).chain(processes).collect())
     }
 }
 

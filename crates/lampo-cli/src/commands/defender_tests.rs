@@ -148,3 +148,60 @@ fn both_forms_are_advertised_as_mutating_and_local() {
         assert!(entry.mutating && !entry.requires_app && entry.usage.contains("--allow-elevation"), "{entry:?}");
     }
 }
+
+fn command_requests(fake: &Fake) -> Vec<DefenderExclusionRequestDto> {
+    fake.scan_exclusion_command_calls.lock().unwrap().clone()
+}
+
+#[tokio::test]
+async fn commands_print_one_powershell_line_per_exclusion_without_prompting() {
+    let fake = Fake::new();
+    let (code, out, err) = run_cli(&fake, &["defender", "exclusion", "commands"]).await;
+    assert_eq!((code, err.as_str()), (0, ""));
+    let expected: Vec<String> = SERVER_EXECUTABLES.iter().map(|exe| format!("Add-MpPreference -ExclusionProcess '{exe}'")).collect();
+    assert_eq!(out.lines().collect::<Vec<_>>(), expected, "only the lines, ready to be sent");
+    assert_eq!(command_requests(&fake), vec![request(ScanExclusionChangeDto::Add, true, false)], "--php without a selector");
+    assert!(fake.scan_exclusion_calls.lock().unwrap().is_empty(), "nothing is changed");
+    assert_eq!(fake.ensure_calls.load(Ordering::SeqCst), 0, "the app is never started");
+}
+
+#[tokio::test]
+async fn commands_take_the_selectors_of_add() {
+    let fake = Fake::new();
+    let (code, out, _) = run_cli(&fake, &["defender", "exclusion", "commands", "--mysql", "--projects", r"..\Progetti"]).await;
+    assert_eq!(code, 0);
+    assert_eq!(out.lines().collect::<Vec<_>>(), [format!("Add-MpPreference -ExclusionPath '{MYSQL_DATA_FOLDER}'"), r"Add-MpPreference -ExclusionPath 'C:\work\Progetti'".to_string()]);
+    run_cli(&fake, &["defender", "exclusion", "commands", "--php", "--projects"]).await;
+    let given = DefenderExclusionRequestDto { mysql: true, ..projects(ScanExclusionChangeDto::Add, Some(r"C:\work\Progetti")) };
+    let suggested = DefenderExclusionRequestDto { php: true, ..projects(ScanExclusionChangeDto::Add, None) };
+    assert_eq!(command_requests(&fake), vec![given, suggested], "the requests `add` would make");
+}
+
+#[tokio::test]
+async fn commands_json_is_the_structured_list() {
+    let fake = Fake::new();
+    let (code, out, _) = run_cli(&fake, &["defender", "exclusion", "commands", "--mysql", "--json"]).await;
+    assert_eq!(code, 0);
+    let command = format!("Add-MpPreference -ExclusionPath '{MYSQL_DATA_FOLDER}'");
+    assert_eq!(parse(&out), json!([{ "kind": "path", "path": MYSQL_DATA_FOLDER, "command": command }]));
+}
+
+#[tokio::test]
+async fn commands_fail_as_add_would() {
+    let fake = Fake::new();
+    *fake.scan_exclusion_result.lock().unwrap() = Err(AppError::new(ErrorCode::PackageMissing, "no PHP or Apache package is installed"));
+    let (code, out, _) = run_cli(&fake, &["defender", "exclusion", "commands", "--json"]).await;
+    assert_eq!(code, 10);
+    assert_eq!(parse(&out)["error"]["code"], "package-missing");
+    *fake.scan_exclusion_result.lock().unwrap() = Err(AppError::new(ErrorCode::Validation, "AppData and the folders in it are never excluded"));
+    let (code, _, err) = run_cli(&fake, &["defender", "exclusion", "commands", "--projects", r"C:\Users\me\AppData"]).await;
+    assert_eq!(code, 4);
+    assert!(err.contains("AppData"), "{err}");
+}
+
+#[test]
+fn commands_accept_no_other_flag() {
+    for args in [&["lampo", "defender", "exclusion", "commands", "--path", r"C:\x"][..], &["lampo", "defender", "exclusion", "commands", "--remove"][..]] {
+        assert!(crate::cli::build_command().try_get_matches_from(args).is_err(), "{args:?}");
+    }
+}

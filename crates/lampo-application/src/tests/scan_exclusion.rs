@@ -29,6 +29,7 @@ const ACCEPTED_DEPTH: usize = 6;
 struct FakeEditor {
     result: PortResult<ScanExclusionOutcome>,
     calls: Mutex<Vec<(ScanExclusionTargets, ScanExclusionChange)>>,
+    checks: Mutex<Vec<(ScanExclusionTargets, ScanExclusionChange)>>,
     refused: Mutex<Vec<PathBuf>>,
 }
 
@@ -53,6 +54,19 @@ impl ScanExclusionEditor for FakeEditor {
         let accepted = folder.starts_with(r"C:\Users\me") && folder.components().count() >= ACCEPTED_DEPTH && !self.refused.lock().unwrap().iter().any(|r| r == folder);
         accepted.then(|| folder.to_path_buf()).ok_or_else(|| PortError::invalid_data(folder.display().to_string(), "refused"))
     }
+
+    /// The targets with the adapter's spelling (lower case, to tell it from the requested one),
+    /// or the fixed error; the checks are recorded, never as requests.
+    fn accepted_targets(&self, targets: &ScanExclusionTargets, change: ScanExclusionChange) -> PortResult<ScanExclusionTargets> {
+        self.checks.lock().unwrap().push((targets.clone(), change));
+        self.result.clone()?;
+        let spelled = |path: &PathBuf| PathBuf::from(path.display().to_string().to_lowercase());
+        Ok(ScanExclusionTargets {
+            folder: targets.folder.as_ref().map(spelled),
+            processes: targets.processes.iter().map(spelled).collect(),
+            projects: targets.projects.as_ref().map(spelled),
+        })
+    }
 }
 
 struct Setup {
@@ -63,7 +77,7 @@ struct Setup {
 }
 
 fn setup(result: PortResult<ScanExclusionOutcome>) -> Setup {
-    let editor = Arc::new(FakeEditor { result, calls: Mutex::new(Vec::new()), refused: Mutex::new(Vec::new()) });
+    let editor = Arc::new(FakeEditor { result, calls: Mutex::new(Vec::new()), checks: Mutex::new(Vec::new()), refused: Mutex::new(Vec::new()) });
     let installed = Arc::new(MemInstalled::default());
     let projects = Arc::new(MemProjects::default());
     let paths = LampoPaths::new(r"C:\Users\me\AppData\Roaming\Lampo", r"C:\Users\me\AppData\Local\Lampo");
@@ -303,4 +317,60 @@ async fn projects_without_a_folder_to_suggest_never_prompts() {
     let stray = DefenderExclusionRequestDto { projects_folder: Some(PROJECTS.into()), ..DefenderExclusionRequestDto::new(ScanExclusionChangeDto::Add, false, true) };
     assert_eq!(s.use_case.change(stray, gui()).await.unwrap_err().code, ErrorCode::Validation, "a folder without `projects`");
     assert!(s.editor.calls().is_empty());
+}
+
+fn commands_request(php: bool, mysql: bool, projects: bool) -> DefenderExclusionRequestDto {
+    DefenderExclusionRequestDto { projects, ..request(ScanExclusionChangeDto::Add, php, mysql) }
+}
+
+#[tokio::test]
+async fn commands_name_what_adding_would_send_without_a_prompt() {
+    let s = setup(Ok(ScanExclusionOutcome::Applied));
+    install_servers(&s.installed);
+    register_projects(&s.projects, &[r"C:\Users\me\Desktop\Progetti\shop"]);
+    let commands = s.use_case.commands(commands_request(true, true, true)).unwrap();
+    assert!(s.editor.calls().is_empty(), "nothing is changed, no prompt");
+
+    s.use_case.change(commands_request(true, true, true), gui()).await.unwrap();
+    let checks = s.editor.checks.lock().unwrap().clone();
+    assert_eq!(checks, s.editor.calls(), "the targets adding sends, checked by the adapter the same way");
+    let path = |p: &str| p.to_lowercase();
+    let mut expected = vec![
+        (DefenderExclusionKindDto::Path, path(MYSQL_FOLDER), format!("Add-MpPreference -ExclusionPath '{}'", path(MYSQL_FOLDER))),
+        (DefenderExclusionKindDto::Path, path(PROJECTS), format!("Add-MpPreference -ExclusionPath '{}'", path(PROJECTS))),
+    ];
+    expected.extend(SERVERS.map(|exe| (DefenderExclusionKindDto::Process, path(exe), format!("Add-MpPreference -ExclusionProcess '{}'", path(exe)))));
+    let commands: Vec<_> = commands.into_iter().map(|c| (c.kind, c.path, c.command)).collect();
+    assert_eq!(commands, expected, "the adapter's spelling, one command per target");
+}
+
+#[tokio::test]
+async fn commands_quote_the_given_projects_folder() {
+    let s = setup(Ok(ScanExclusionOutcome::Applied));
+    let request = DefenderExclusionRequestDto { projects_folder: Some(r"c:/users/me/d'angelo progetti/".into()), ..commands_request(false, false, true) };
+    let commands = s.use_case.commands(request).unwrap();
+    assert_eq!(commands.iter().map(|c| c.command.as_str()).collect::<Vec<_>>(), [r"Add-MpPreference -ExclusionPath 'c:\users\me\d''angelo progetti'"]);
+    assert_eq!(commands[0].path, r"c:\users\me\d'angelo progetti");
+}
+
+#[tokio::test]
+async fn commands_refuse_what_adding_refuses() {
+    let s = setup(Ok(ScanExclusionOutcome::Applied));
+    register_projects(&s.projects, &[r"C:\Users\me\Desktop\shop"]);
+    assert_eq!(s.use_case.commands(commands_request(false, false, false)).unwrap_err().code, ErrorCode::Validation, "nothing named");
+    assert_eq!(s.use_case.commands(commands_request(true, false, false)).unwrap_err().code, ErrorCode::PackageMissing, "no PHP or Apache");
+    assert_eq!(s.use_case.commands(commands_request(false, false, true)).unwrap_err().code, ErrorCode::Validation, "no folder to suggest");
+    let stray = DefenderExclusionRequestDto { projects_folder: Some(PROJECTS.into()), ..commands_request(false, true, false) };
+    assert_eq!(s.use_case.commands(stray).unwrap_err().code, ErrorCode::Validation, "a folder without `projects`");
+
+    let s = setup(Err(PortError::invalid_data(MYSQL_FOLDER, "a junction is in the way")));
+    let err = s.use_case.commands(commands_request(false, true, false)).unwrap_err();
+    assert_eq!((err.code, err.message.contains("junction")), (ErrorCode::Validation, true), "{}", err.message);
+    assert!(s.editor.calls().is_empty());
+}
+
+#[test]
+fn a_command_on_the_wire() {
+    let command = DefenderExclusionCommandDto { kind: DefenderExclusionKindDto::Process, path: SERVERS[0].into(), command: format!("Add-MpPreference -ExclusionProcess '{}'", SERVERS[0]) };
+    assert_eq!(serde_json::to_value(&command).unwrap(), serde_json::json!({ "kind": "process", "path": SERVERS[0], "command": command.command }));
 }

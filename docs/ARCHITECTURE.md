@@ -238,6 +238,20 @@ executables and the projects folder); `DefenderScanExclusion` (`lampo_infra_web:
 <folder>] [--projects <folder>] [--process <exe>]...` once. Both the GUI and the CLI run it in their own process (the CLI never asks the
 app), so the prompt belongs to the app window or to the terminal.
 
+When a policy controls Defender's exclusions (`Refused`, `NotConfirmed`: group policy, Intune),
+`lampo defender exclusion commands [--php] [--mysql] [--projects [<folder>]] [--json]` (`--php`
+without a selector) and the panel's «Copia comandi per l'IT» button give the user the
+`Add-MpPreference -ExclusionProcess|-ExclusionPath '<path>'` lines to send to whoever manages the
+PC. `DefenderExclusion::commands` builds the targets as `change` does (same function, same
+`Validation`/`PackageMissing` errors) and passes them to
+`ScanExclusionEditor::accepted_targets`, which runs the adapter's checks of a request without a
+prompt and without creating the MySQL folder (a missing one is accepted: adding creates it), and
+returns the spelling the helper would receive. `use_cases::defender_commands` formats them: one
+line per target in the helper's order, each path a PowerShell single-quoted literal with every
+single-quote character doubled, the typographic ones (U+2018–U+201B) included, since PowerShell
+reads those as quotes too; a test runs Windows PowerShell's parser on the result. The GUI copies
+the same text the CLI prints (the lines joined by `\n`).
+
 The helper must not become a way to exclude any path or program, so in this mode
 (`defender::helper`, `defender::target`, `defender::executable`, `defender::projects`,
 `defender::request`):

@@ -219,6 +219,15 @@ quindi Lampo mostra solo l'esito dell'ultima richiesta. Per controllarle, da un 
 amministratore: `(Get-MpPreference).ExclusionProcess` e `(Get-MpPreference).ExclusionPath`. La
 funzione è disponibile solo con la cartella dati standard (non con `LAMPO_HOME`).
 
+Sui PC aziendali le esclusioni di Defender sono spesso gestite dall'IT: se la richiesta finisce con
+«rifiutata» o «non confermata», `lampo defender exclusion commands` (con gli stessi `--php`,
+`--mysql`, `--projects [<cartella>]` di `add`; senza nessuno vale `--php`) stampa i comandi
+PowerShell da inoltrare a chi gestisce il PC, uno per esclusione, con i percorsi reali di questo
+PC: `Add-MpPreference -ExclusionProcess '<eseguibile>'` o `-ExclusionPath '<cartella>'` (`--json`
+dà l'elenco strutturato). Non chiede la conferma UAC e non modifica nulla; i percorsi sono gli
+stessi che userebbe `add` e passano gli stessi controlli. Nella GUI è il pulsante «Copia comandi per
+l'IT» di ogni opzione, in evidenza dopo un esito rifiutato o non confermato.
+
 Il disinstallatore non rimuove le esclusioni (dati e pacchetti restano su disco): toglile prima con
 `lampo defender exclusion remove --php --mysql --allow-elevation` (più `--projects "<cartella>"`
 se l'avevi aggiunta; o dalla GUI), oppure dopo, da un PowerShell amministratore aperto con il tuo

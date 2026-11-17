@@ -189,4 +189,7 @@ impl ScanExclusionAdmin for DefenderExclusion {
     async fn change_mysql(&self, change: ScanExclusionChangeDto, context: CallContext) -> AppResult<ScanExclusionResultDto> {
         DefenderExclusion::change_mysql(self, change, context).await
     }
+    fn commands(&self, request: DefenderExclusionRequestDto) -> AppResult<Vec<DefenderExclusionCommandDto>> {
+        DefenderExclusion::commands(self, request)
+    }
 }

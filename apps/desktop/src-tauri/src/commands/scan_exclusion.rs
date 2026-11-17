@@ -1,8 +1,9 @@
-//! The optional Microsoft Defender exclusions (Settings): the MySQL data folder and the PHP/Apache
-//! server processes. Each change shows one UAC prompt owned by the app window; only an explicit
-//! click asks for it.
+//! The optional Microsoft Defender exclusions (Settings): the MySQL data folder, the PHP/Apache
+//! server processes and a projects folder, and their PowerShell commands for whoever manages the
+//! PC. Each change shows one UAC prompt owned by the app window; only an explicit click asks for
+//! it.
 
-use lampo_application::dto::{DefenderExclusionInfoDto, DefenderExclusionRequestDto, DefenderExclusionResultDto};
+use lampo_application::dto::{DefenderExclusionCommandDto, DefenderExclusionInfoDto, DefenderExclusionRequestDto, DefenderExclusionResultDto};
 use lampo_application::{AppResult, CallContext};
 use tauri::State;
 
@@ -18,4 +19,11 @@ pub fn defender_exclusion_info(state: State<'_, AppState>) -> AppResult<Defender
 #[tauri::command]
 pub async fn change_defender_exclusion(state: State<'_, AppState>, request: DefenderExclusionRequestDto) -> AppResult<DefenderExclusionResultDto> {
     state.scan_exclusion.change(request, CallContext::GUI).await
+}
+
+/// The PowerShell commands of `request`, for whoever manages the PC when Defender refuses the
+/// change: no prompt, nothing changed.
+#[tauri::command]
+pub fn defender_exclusion_commands(state: State<'_, AppState>, request: DefenderExclusionRequestDto) -> AppResult<Vec<DefenderExclusionCommandDto>> {
+    state.scan_exclusion.commands(request)
 }

@@ -1065,6 +1065,22 @@ processes: Array<string>,
  */
 projectsFolder: string | null, };
 
+/**
+ * What one Defender exclusion excludes.
+ */
+export type DefenderExclusionKind = "process" | "path";
+
+/**
+ * One exclusion of a request as a PowerShell command, for whoever manages the PC (group policy,
+ * Intune) when Defender refuses Lampo's request: the exact path a request would name.
+ */
+export type DefenderExclusionCommand = { kind: DefenderExclusionKind, path: string, 
+/**
+ * `Add-MpPreference -ExclusionProcess '<path>'` (or `Remove-MpPreference`, `-ExclusionPath`),
+ * one line, the path quoted for PowerShell.
+ */
+command: string, };
+
 // --- App ---
 
 export type AppInfo = { version: string, configDir: string, dataDir: string, shimDir: string, controlProtocolVersion: number, };

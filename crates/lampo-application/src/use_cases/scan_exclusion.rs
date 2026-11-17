@@ -1,4 +1,4 @@
-//! The optional Microsoft Defender exclusions (`lampo defender exclusion add|remove --php
+//! The optional Microsoft Defender exclusions (`lampo defender exclusion add|remove|commands --php
 //! --mysql --projects`, `lampo mysql defender-exclusion`, Settings):
 //!
 //! * `mysql`: the folder holding every MySQL instance's data (`<data root>\mysql`);
@@ -17,6 +17,10 @@
 //! one UAC prompt whatever it names, so a call that may not prompt (the CLI without
 //! `--allow-elevation`) is refused before anything happens. The executables are those installed
 //! when the request is made: a PHP installed later needs a new request.
+//!
+//! When a policy controls Defender's exclusions (group policy, Intune), `commands` gives the
+//! `Add-MpPreference` lines of the same targets, for whoever manages the PC; it prompts for
+//! nothing and changes nothing.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -28,9 +32,12 @@ use lampo_domain::project::ProjectRoot;
 use lampo_domain::scan_exclusion::{ScanExclusionChange, ScanExclusionOutcome, ScanExclusionTargets};
 use lampo_domain::service::ServiceKind;
 
+use super::defender_commands;
 use super::support::validation;
 use crate::context::{CallContext, ElevationPolicy};
-use crate::dto::{DefenderExclusionInfoDto, DefenderExclusionRequestDto, DefenderExclusionResultDto, ScanExclusionChangeDto, ScanExclusionOutcomeDto, ScanExclusionResultDto};
+use crate::dto::{
+    DefenderExclusionCommandDto, DefenderExclusionInfoDto, DefenderExclusionRequestDto, DefenderExclusionResultDto, ScanExclusionChangeDto, ScanExclusionOutcomeDto, ScanExclusionResultDto,
+};
 use crate::error::{AppError, AppResult, ErrorCode};
 
 /// The server executable of each package kind the `php` part names.
@@ -105,22 +112,12 @@ impl DefenderExclusion {
     /// prompt, `PackageMissing` for `php` without any PHP or Apache installed; the outcomes the
     /// user can act on are results, not errors.
     pub async fn change(&self, request: DefenderExclusionRequestDto, context: CallContext) -> AppResult<DefenderExclusionResultDto> {
-        if !request.php && !request.mysql && !request.projects {
-            return Err(validation("name what to exclude: --php, --mysql, --projects or more of them"));
-        }
-        if request.projects_folder.is_some() && !request.projects {
-            return Err(validation("a projects folder needs `projects`"));
-        }
+        check_request(&request)?;
         if context.elevation == ElevationPolicy::Deny {
             return Err(AppError::new(ErrorCode::ElevationRequired, "changing the Microsoft Defender exclusions shows a UAC prompt: re-run with --allow-elevation"));
         }
         let _busy = self.busy.lock().await;
-        let processes = if request.php { self.server_executables()? } else { Vec::new() };
-        if request.php && processes.is_empty() {
-            return Err(AppError::new(ErrorCode::PackageMissing, "no PHP or Apache package is installed: there is no php-cgi.exe or httpd.exe to exclude"));
-        }
-        let projects = if request.projects { Some(self.projects_folder(request.projects_folder.as_deref())?) } else { None };
-        let targets = ScanExclusionTargets { folder: request.mysql.then(|| self.folder()), processes, projects };
+        let targets = self.targets(&request)?;
         let outcome = self.editor.change(&targets, change_from_dto(request.change)).await?;
         Ok(DefenderExclusionResultDto {
             change: request.change,
@@ -131,11 +128,43 @@ impl DefenderExclusion {
         })
     }
 
+    /// The PowerShell commands making the change `request` names (`lampo defender exclusion
+    /// commands`, Settings), for whoever manages a PC where Defender refuses Lampo's request: the
+    /// targets [`Self::change`] would send, after the same checks and with the same errors, but
+    /// with neither a prompt nor any change to the system.
+    pub fn commands(&self, request: DefenderExclusionRequestDto) -> AppResult<Vec<DefenderExclusionCommandDto>> {
+        check_request(&request)?;
+        let change = change_from_dto(request.change);
+        let targets = self.editor.accepted_targets(&self.targets(&request)?, change)?;
+        Ok(defender_commands::exclusion_commands(&targets, change))
+    }
+
+    /// The targets `request` names now. `PackageMissing` for `php` without any PHP or Apache.
+    fn targets(&self, request: &DefenderExclusionRequestDto) -> AppResult<ScanExclusionTargets> {
+        let processes = if request.php { self.server_executables()? } else { Vec::new() };
+        if request.php && processes.is_empty() {
+            return Err(AppError::new(ErrorCode::PackageMissing, "no PHP or Apache package is installed: there is no php-cgi.exe or httpd.exe to exclude"));
+        }
+        let projects = if request.projects { Some(self.projects_folder(request.projects_folder.as_deref())?) } else { None };
+        Ok(ScanExclusionTargets { folder: request.mysql.then(|| self.folder()), processes, projects })
+    }
+
     /// The MySQL-only form of [`Self::change`].
     pub async fn change_mysql(&self, change: ScanExclusionChangeDto, context: CallContext) -> AppResult<ScanExclusionResultDto> {
         let result = self.change(DefenderExclusionRequestDto::new(change, false, true), context).await?;
         Ok(ScanExclusionResultDto { change, outcome: result.outcome, folder: display(&self.folder()) })
     }
+}
+
+/// `Validation` when `request` names nothing, or a projects folder without `projects`.
+fn check_request(request: &DefenderExclusionRequestDto) -> AppResult<()> {
+    if !request.php && !request.mysql && !request.projects {
+        return Err(validation("name what to exclude: --php, --mysql, --projects or more of them"));
+    }
+    if request.projects_folder.is_some() && !request.projects {
+        return Err(validation("a projects folder needs `projects`"));
+    }
+    Ok(())
 }
 
 /// The folders that may hold every project, deepest first: the common ancestor of the projects'
