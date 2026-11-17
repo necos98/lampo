@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use lampo_application::control::ControlRequest;
 use lampo_application::dto::*;
 use lampo_application::events::ProgressDto;
+use lampo_application::use_cases::LogTarget;
 use lampo_application::{AppError, AppResult, CallContext, ErrorCode};
 use serde_json::{Value, json};
 
@@ -123,6 +124,12 @@ pub struct Fake {
     pub open_result: Mutex<Option<AppResult<Value>>>,
     /// The project files that do not load, in the listings (default: none).
     pub unreadable_projects: Mutex<Vec<UnreadableProjectDto>>,
+    /// What `list` returns, as wire JSON (default: [`project_json`]).
+    pub projects: Mutex<Vec<Value>>,
+    /// The source and target of every `logs --open`.
+    pub opened_logs: Mutex<Vec<(String, LogTarget)>>,
+    /// What opening a log answers (default: success).
+    pub open_log_result: Mutex<AppResult<()>>,
 }
 
 impl Fake {
@@ -159,6 +166,9 @@ impl Fake {
             opened: Mutex::new(Vec::new()),
             open_result: Mutex::new(None),
             unreadable_projects: Mutex::new(Vec::new()),
+            projects: Mutex::new(vec![project_json()]),
+            opened_logs: Mutex::new(Vec::new()),
+            open_log_result: Mutex::new(Ok(())),
         })
     }
 
@@ -188,6 +198,7 @@ impl Fake {
             detection: self.clone(),
             worktrees: self.clone(),
             logs: self.clone(),
+            log_opener: self.clone(),
             packages: self.clone(),
             php_extensions: self.clone(),
             toolchain: self.clone(),
@@ -215,6 +226,10 @@ impl SiteLookup for Fake {
 impl ProjectReader for Fake {
     fn summaries(&self) -> AppResult<ProjectSummaryListDto> {
         Ok(ProjectSummaryListDto { projects: vec![dto(summary_json())], unreadable: self.unreadable_projects.lock().unwrap().clone() })
+    }
+    fn list(&self) -> AppResult<ProjectListDto> {
+        let projects = self.projects.lock().unwrap().iter().cloned().map(dto).collect();
+        Ok(ProjectListDto { projects, unreadable: self.unreadable_projects.lock().unwrap().clone() })
     }
     fn get(&self, id: &str) -> AppResult<ProjectDto> {
         if id == "shop" { Ok(dto(project_json())) } else { Err(AppError::not_found("project", id)) }
@@ -248,6 +263,13 @@ impl LogReader for Fake {
     fn read_from(&self, _: &str, offset: u64) -> AppResult<LogLinesDto> {
         self.follow_offsets.lock().unwrap().push(offset);
         Ok(self.follow_reads.lock().unwrap().pop_front().unwrap_or_else(|| dto(json!({"source": "apache", "file": "f", "lines": [], "nextOffset": offset}))))
+    }
+}
+
+impl LogOpener for Fake {
+    fn open(&self, source: &str, target: LogTarget) -> AppResult<()> {
+        self.opened_logs.lock().unwrap().push((source.to_string(), target));
+        self.open_log_result.lock().unwrap().clone()
     }
 }
 

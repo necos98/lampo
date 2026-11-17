@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use lampo_application::control::ControlRequest;
 use lampo_application::dto::*;
 use lampo_application::events::ProgressDto;
+use lampo_application::use_cases::LogTarget;
 use lampo_application::{AppResult, CallContext};
 
 /// Site resolution (`--project` / `LAMPO_PROJECT` / cwd / git worktree / default).
@@ -18,6 +19,8 @@ pub trait SiteLookup: Send + Sync {
 pub trait ProjectReader: Send + Sync {
     /// The compact rows, plus the project files that do not load.
     fn summaries(&self) -> AppResult<ProjectSummaryListDto>;
+    /// Every project in full (folder state included), plus the files that do not load.
+    fn list(&self) -> AppResult<ProjectListDto>;
     fn get(&self, project_id: &str) -> AppResult<ProjectDto>;
 }
 
@@ -35,6 +38,13 @@ pub trait LogReader: Send + Sync {
     fn sources(&self, site: Option<&str>) -> AppResult<Vec<LogSourceDto>>;
     fn tail(&self, request: &LogTailRequest) -> AppResult<LogLinesDto>;
     fn read_from(&self, source: &str, offset: u64) -> AppResult<LogLinesDto>;
+}
+
+/// Starts a desktop app of the user on a log's file or folder (`logs --open`); runs on this
+/// machine, never in the app.
+pub trait LogOpener: Send + Sync {
+    /// `source`: `apache`, `php:shop`, ... (site shorthands already expanded).
+    fn open(&self, source: &str, target: LogTarget) -> AppResult<()>;
 }
 
 #[async_trait]

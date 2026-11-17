@@ -9,8 +9,10 @@ use crate::exit_code::ExitCode;
 
 mod desktop;
 mod introspection;
+mod logs;
 pub use desktop::OpenArgs;
 pub use introspection::{CompletionShell, CompletionsArgs, WhichArgs};
+pub use logs::{LogLevelArg, LogsArgs};
 
 const ABOUT: &str = "Lampo: local PHP environments for Windows (CLI for coding agents and terminals)";
 
@@ -94,7 +96,8 @@ pub enum Command {
     Restart(ServicesArgs),
     /// Stop every service and exit the Lampo app (never starts it; a no-op when not running).
     Quit,
-    /// Read service and site logs; `--follow` streams until Ctrl+C.
+    /// Read service and site logs (`--level` keeps warnings or errors, `--follow` streams until
+    /// Ctrl+C), or open a log file or its folder (`--open`, `--open-folder`).
     Logs(LogsArgs),
     /// Downloadable packages (PHP, MySQL, Redis, extensions...).
     #[command(subcommand)]
@@ -234,15 +237,28 @@ pub enum ProjectCommand {
     ///   lampo project new --git https://github.com/acme/shop.git --in D:\sites
     ///   lampo project new --laravel shop --starter-kit react --php 8.4 --activate
     New(ProjectNewArgs),
-    /// Serve the project.
+    /// Serve the project, or every project with `--all`.
+    ///
+    /// `--all` activates the inactive projects one at a time, as «Attiva tutti» in the app:
+    /// projects whose folder is missing are skipped, a refused project does not stop the others,
+    /// and the exit code is not zero when one was refused (the result lists them).
     Activate {
         /// Project id (default: resolved from the current folder).
         id: Option<String>,
+        /// Every project instead of one.
+        #[arg(long, conflicts_with = "id")]
+        all: bool,
     },
-    /// Stop serving the project.
+    /// Stop serving the project, or every project with `--all`.
+    ///
+    /// `--all` deactivates the active projects one at a time, as «Disattiva tutti» in the app,
+    /// with the same rules as `project activate --all`.
     Deactivate {
         /// Project id (default: resolved from the current folder).
         id: Option<String>,
+        /// Every project instead of one.
+        #[arg(long, conflicts_with = "id")]
+        all: bool,
     },
     /// Switch the project's PHP minor (e.g. `8.3`). Same as `lampo project set --php`
     ///
@@ -582,23 +598,6 @@ pub struct WorktreePruneArgs {
 pub struct ServicesArgs {
     /// Services: `apache`, `redis`, `mysql-8.4`, ... (default: all).
     pub services: Vec<String>,
-}
-
-#[derive(Debug, Args)]
-pub struct LogsArgs {
-    /// `apache`, `apache-error`, `mysql-8.4`, `mysql-8.4-error`, `redis`, `access`, `error`,
-    /// `php` (the last three for the resolved site, or `access:<site>` ...). Default: list
-    /// the available sources.
-    pub source: Option<String>,
-    /// Number of last lines to print.
-    #[arg(long, short = 'n', default_value_t = 100)]
-    pub tail: usize,
-    /// Only lines since: `30s`, `10m`, `2h`, `1d` or a Unix timestamp in milliseconds.
-    #[arg(long)]
-    pub since: Option<String>,
-    /// Keep printing new lines until Ctrl+C (JSON: one `LogLineDto` per line, NDJSON).
-    #[arg(long, short = 'f')]
-    pub follow: bool,
 }
 
 #[derive(Debug, Subcommand)]

@@ -68,6 +68,7 @@ pub struct CliContext {
     pub detection: Arc<dyn ProjectDetection>,
     pub worktrees: Arc<dyn WorktreeReader>,
     pub logs: Arc<dyn LogReader>,
+    pub log_opener: Arc<dyn LogOpener>,
     pub packages: Arc<dyn PackageReader>,
     pub php_extensions: Arc<dyn PhpExtensionReader>,
     pub toolchain: Arc<dyn ToolchainReader>,

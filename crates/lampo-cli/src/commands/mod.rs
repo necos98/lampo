@@ -8,7 +8,9 @@ mod db;
 mod desktop;
 mod diagnostics;
 mod introspection;
+mod logs;
 mod packages;
+mod project_bulk;
 mod project_import;
 mod projects;
 mod services;
@@ -20,6 +22,10 @@ mod worktrees;
 mod desktop_tests;
 #[cfg(test)]
 mod introspection_tests;
+#[cfg(test)]
+mod logs_tests;
+#[cfg(test)]
+mod project_bulk_tests;
 #[cfg(test)]
 mod project_env_tests;
 #[cfg(test)]
@@ -107,7 +113,7 @@ pub async fn run(cli: Cli, ctx: &CliContext, io: &Io) -> AppResult<i32> {
         Command::Down(a) => services::control(&cmd, services::Action::Down, a).await,
         Command::Restart(a) => services::control(&cmd, services::Action::Restart, a).await,
         Command::Quit => services::quit(&cmd).await,
-        Command::Logs(a) => services::logs(&cmd, a).await,
+        Command::Logs(a) => logs::logs(&cmd, a).await,
         Command::Package(c) => packages::run(&cmd, c).await,
         Command::Db(c) => db::run(&cmd, c).await,
         Command::Exec(a) => toolchain::exec(&cmd, a),

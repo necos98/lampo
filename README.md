@@ -89,6 +89,7 @@ lampo project set --ext intl --addon xdebug --ini memory_limit=512M   # modifica
 lampo project set --address api.shop.localhost --no-address 127.0.0.1:8101   # indirizzi
 lampo project rename "Shop Legacy"    # nome visualizzato (l'id resta)
 lampo project set --mysql-credentials project   # utente MySQL dedicato (poi aggiorna il .env)
+lampo project deactivate --all        # disattiva tutti i progetti (o activate --all)
 lampo project remove shop --yes       # la toglie da Lampo: cartella e database restano
 lampo project import shop.lampo.toml  # importa un progetto esportato (senza direttive Apache né chiavi php.ini rischiose)
 lampo package extensions              # estensioni incluse nel PHP del progetto (per --ext)
@@ -101,6 +102,8 @@ lampo exec -- composer install        # comando con il PHP e il Composer del pro
 lampo which php                       # quale PHP (o composer, mysql...) userebbe lo shim qui, e perché
 lampo open --code                     # apre il sito in VS Code (o --explorer, --terminal, --browser)
 lampo logs error -f                   # log degli errori del sito, in tempo reale
+lampo logs php --level errors         # solo gli errori (o --level warnings: avvisi ed errori)
+lampo logs php --open-folder          # apre la cartella del log (o --open: il file)
 lampo doctor                          # diagnostica (exit code 14 se trova problemi)
 lampo completions powershell | Out-String | Invoke-Expression   # completamento dei comandi
 ```

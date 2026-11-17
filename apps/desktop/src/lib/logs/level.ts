@@ -1,3 +1,6 @@
+// The same rules classify lines for `lampo logs --level` (crates/lampo-domain/src/log_level.rs):
+// change both together, their tests share the same cases.
+
 /** Severity a log line is highlighted with; `null` for ordinary lines. */
 export type LogLevel = 'error' | 'warn' | null;
 

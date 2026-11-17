@@ -498,7 +498,7 @@ pub fn agent_context(ctx: &AgentContextDto) -> String {
             out.push_str(&format!("  {:<12} {}:{}{ui}\n", s.label, s.host, s.port));
         }
     }
-    out.push_str("\n## Logs (read with `lampo logs <source> [--tail N] [--follow]`)\n");
+    out.push_str("\n## Logs (read with `lampo logs <source> [--tail N] [--level warnings|errors] [--follow]`)\n");
     for l in &ctx.logs {
         out.push_str(&format!("  {:<22} {}{}\n", l.id, l.file, if l.exists { "" } else { "  (not created yet)" }));
     }

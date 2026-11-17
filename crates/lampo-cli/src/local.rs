@@ -20,6 +20,9 @@ impl ProjectReader for ProjectQueries {
     fn summaries(&self) -> AppResult<ProjectSummaryListDto> {
         ProjectQueries::summaries(self)
     }
+    fn list(&self) -> AppResult<ProjectListDto> {
+        ProjectQueries::list(self)
+    }
     fn get(&self, project_id: &str) -> AppResult<ProjectDto> {
         ProjectQueries::get(self, project_id)
     }
@@ -46,6 +49,12 @@ impl LogReader for LogQueries {
     }
     fn read_from(&self, source: &str, offset: u64) -> AppResult<LogLinesDto> {
         LogQueries::read_from(self, source, offset)
+    }
+}
+
+impl LogOpener for OpenLog {
+    fn open(&self, source: &str, target: LogTarget) -> AppResult<()> {
+        self.execute(source, target)
     }
 }
 

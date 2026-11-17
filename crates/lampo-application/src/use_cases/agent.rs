@@ -234,8 +234,14 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
             true,
             true,
         ),
-        c("lampo project activate", "lampo project activate [<id>]", "Activate a project (serve it).", true, true),
-        c("lampo project deactivate", "lampo project deactivate [<id>]", "Deactivate a project.", true, true),
+        c(
+            "lampo project activate",
+            "lampo project activate [<id> | --all]",
+            "Activate a project (serve it), or every inactive one with --all (missing folders skipped, refusals listed).",
+            true,
+            true,
+        ),
+        c("lampo project deactivate", "lampo project deactivate [<id> | --all]", "Deactivate a project, or every active one with --all.", true, true),
         c("lampo project set-php", "lampo project set-php <minor> [<id>]", "Switch the project's PHP minor.", true, true),
         c(
             "lampo project set",
@@ -261,7 +267,13 @@ pub fn cli_command_catalog() -> Vec<CliCommandDto> {
         c("lampo down", "lampo down [<service>...]", "Stop services.", true, true),
         c("lampo restart", "lampo restart [<service>...]", "Restart services.", true, true),
         c("lampo quit", "lampo quit", "Stop every service and exit the Lampo app (does not start it).", true, false),
-        c("lampo logs", "lampo logs [<source>] [--tail N] [--since 10m] [--follow]", "Read Apache/PHP/MySQL logs.", false, false),
+        c(
+            "lampo logs",
+            "lampo logs [<source>] [--tail N] [--since 10m] [--level all|warnings|errors] [--follow] [--open|--open-folder]",
+            "Read Apache/PHP/MySQL logs (--level warnings/errors keeps only those), or open a log file or its folder.",
+            false,
+            false,
+        ),
         c("lampo package list", "lampo package list [--kind <k>] [--installed] [--json]", "List catalog or installed packages.", false, false),
         c("lampo package install", "lampo package install <kind> [<version|series>]", "Download and install a package.", true, true),
         c(

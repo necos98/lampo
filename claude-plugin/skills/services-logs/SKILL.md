@@ -60,6 +60,7 @@ lampo logs access -n 20
 lampo logs apache-error -n 50
 lampo logs mysql-8.4-error -n 80
 lampo logs php:shop@fix-login --tail 30
+lampo logs php --tail 200 --level errors
 ```
 
 `lampo logs` alone lists the sources and files of the resolved site. Site sources: `access`,
@@ -67,7 +68,9 @@ lampo logs php:shop@fix-login --tail 30
 errors), `php` (PHP's own error log: warnings, fatals, uncaught exceptions); add `:<site>` for
 another site. Service sources: `apache`, `apache-error`, `mysql-<series>`,
 `mysql-<series>-error`, `redis`, `mailpit`. `--follow` (`-f`) streams until Ctrl+C: avoid it in agent runs,
-use `--tail` / `--since` instead. Framework logs live in the project (Laravel:
+use `--tail` / `--since` instead. `--level errors` (or `warnings`: warnings and errors) keeps
+only those among the `--tail` lines, with the rules of the app's log viewer. `--open` and
+`--open-folder` open the log file or its folder in the user's apps: only when the user asks. Framework logs live in the project (Laravel:
 `storage\logs\laravel.log`): read them directly.
 
 ## Doctor

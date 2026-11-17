@@ -80,6 +80,7 @@ pub fn build() -> AppResult<CliContext> {
     });
 
     let settings = Arc::new(SettingsQuery::new(settings_repo.clone(), services.clone()));
+    let logs = Arc::new(LogQueries::new(Arc::new(FileLogReader), projects_repo.clone(), settings_repo.clone(), services.clone(), paths.clone()));
 
     Ok(CliContext {
         env: CliEnv::from_process(),
@@ -112,7 +113,9 @@ pub fn build() -> AppResult<CliContext> {
             launcher: Arc::new(WindowsExternalAppLauncher),
         })),
         toolchain: Arc::new(ToolchainQuery::new(resolver, paths.clone())),
-        logs: Arc::new(LogQueries::new(Arc::new(FileLogReader), projects_repo.clone(), settings_repo.clone(), services.clone(), paths.clone())),
+        logs: logs.clone(),
+        // `logs --open`: the user's apps, started from this process (the app need not run).
+        log_opener: Arc::new(OpenLog::new(logs, fs.clone(), Arc::new(WindowsExternalAppLauncher))),
         doctor: Arc::new(Doctor::new(DoctorDeps {
             projects: projects_repo.clone(),
             worktrees: worktrees_repo.clone(),

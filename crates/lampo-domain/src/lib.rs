@@ -24,6 +24,7 @@ pub mod error;
 pub mod events;
 pub mod hostname;
 pub mod hosts;
+pub mod log_level;
 pub mod logs;
 pub mod mysql;
 pub mod package;

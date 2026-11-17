@@ -42,8 +42,10 @@ pub async fn run(c: &Cmd<'_>, command: ProjectCommand) -> AppResult<i32> {
             }
         }
         ProjectCommand::New(args) => new_project(c, args).await?,
-        ProjectCommand::Activate { id } => set_active(c, id, true).await?,
-        ProjectCommand::Deactivate { id } => set_active(c, id, false).await?,
+        ProjectCommand::Activate { all: true, .. } => return super::project_bulk::set_all_active(c, true).await,
+        ProjectCommand::Deactivate { all: true, .. } => return super::project_bulk::set_all_active(c, false).await,
+        ProjectCommand::Activate { id, .. } => set_active(c, id, true).await?,
+        ProjectCommand::Deactivate { id, .. } => set_active(c, id, false).await?,
         ProjectCommand::SetPhp { php_version, id } => {
             reject_swapped_set_php_args(&php_version, id.as_deref())?;
             let project_id = c.project_id(id.as_ref())?;
