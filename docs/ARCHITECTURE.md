@@ -405,6 +405,24 @@ hosts `localhost` and `127.0.0.1` (TCP clients may match either), `CREATE USER I
 then create). Statements carrying a password are written to a user-only temporary file
 (`SecretTempFile`) that `mysql` reads on its standard input, never `--execute=`.
 
+**PHP before 7.4 on MySQL 8.** `mysqlnd` before PHP 7.4 cannot speak `caching_sha2_password`,
+MySQL 8's default (error 2054 at runtime). `lampo_domain::mysql::auth::MysqlAuthPlugin::for_client`
+gives the plugin an account used by a PHP minor must have on a series: `None` on 5.7 (its default,
+`mysql_native_password`, suits every PHP), `Native` for PHP < 7.4 on 8.x, `CachingSha2` otherwise.
+The plan carries it per dedicated account (`ProjectAccount::auth`, applied as `CREATE USER` /
+`ALTER USER … IDENTIFIED WITH <plugin> BY …`, so a PHP switch back to 7.4+ restores the default)
+and sets `native_root` when a project on `root` needs it:
+`MysqlAccountAdmin::use_native_password_for_root` then lists root's hosts with their plugin and runs `ALTER USER … IDENTIFIED WITH
+mysql_native_password BY <stored password or ''>` for the ones not on it (only `ALTER USER`, a
+second run does nothing; root is never switched back). Since the plan is applied after every sync,
+create, `set-php` and a service change all trigger it. MySQL 8.4 ships the plugin disabled, so
+`MysqlRunner::render_my_ini` writes `mysql_native_password=ON` for the series that need it
+(`MysqlSeries::needs_native_password_enabled`: 8.4+ within 8.x; 9.x removed the plugin, there
+MySQL 5.7 is the only way). The combination is reported, never refused: `ProjectDto::warnings`
+(code `legacy-php-mysql-auth`, computed whenever a project is shown, rendered as `warning:` by the
+CLI and as a toast after a GUI save) and the doctor's `mysql-auth` check (`Warning`), both naming
+`--service mysql@5.7` as the alternative.
+
 **Shown credentials.** `DatabaseConnection` names its account (`project_account`); the
 application fills the password for display (`ConnectionPasswords`, implemented by
 `MysqlPasswords`, which also generates a project's password the first time it is asked): the

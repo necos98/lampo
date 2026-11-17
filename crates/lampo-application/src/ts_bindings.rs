@@ -84,7 +84,7 @@ fn declarations(cfg: &Config) -> Vec<(&'static str, Vec<Declaration>)> {
         section!("Errors": ErrorCode, AppError),
         section!("Projects":
             SiteAddressDto, AddressingDto, TlsModeDto, MysqlCredentialsDto, ProjectEnvironmentDto, ServiceUseDto, AddressSuggestionsDto,
-            DatabaseConnectionDto, MailConnectionDto, ProjectDto, UnreadableProjectDto, ProjectListDto, ProjectSummaryDto,
+            DatabaseConnectionDto, MailConnectionDto, ProjectWarningCodeDto, ProjectWarningDto, ProjectDto, UnreadableProjectDto, ProjectListDto, ProjectSummaryDto,
             CreateProjectRequest, DatabaseSetupStatusDto, DatabaseSetupDto, CreateProjectResultDto, DeleteProjectResultDto,
             UpdateProjectRequest, SetProjectActiveRequest, SetProjectPhpRequest, RelinkProjectRequest, ExportProjectRequest,
             ImportProjectRequest, ImportProjectResultDto, DetectionDto, DetectedAppDto,

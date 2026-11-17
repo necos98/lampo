@@ -12,6 +12,7 @@ use crate::version::{PackageVersion, VersionSeries};
 use accounts::{MysqlCredentials, MysqlUserName};
 
 pub mod accounts;
+pub mod auth;
 pub mod credentials;
 
 /// A MySQL `<major>.<minor>` series (`8.4`, `5.7`). Each series has its own data directory and port.
@@ -70,6 +71,18 @@ impl MysqlSeries {
     /// (e.g. `mysqlx=OFF` is 8.0+). The config renderer branches on this.
     pub fn is_legacy(self) -> bool {
         self.major < 8
+    }
+
+    /// Whether new accounts authenticate with `caching_sha2_password` (8.0 and later), which PHP
+    /// before 7.4 cannot speak (see [`auth`]).
+    pub fn defaults_to_caching_sha2(self) -> bool {
+        self.major >= 8
+    }
+
+    /// Whether `mysql_native_password` ships disabled, so `my.ini` must turn it on: 8.4 (before
+    /// 8.4 it is always on; MySQL 9 removed it, so there only MySQL 5.7 serves PHP before 7.4).
+    pub fn needs_native_password_enabled(self) -> bool {
+        self.major == 8 && self.minor >= 4
     }
 }
 

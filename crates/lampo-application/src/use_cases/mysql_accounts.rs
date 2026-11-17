@@ -104,6 +104,8 @@ impl ConnectionPasswords for MysqlPasswords {
 pub struct Provisioned {
     /// Root got its password now (the migration of an instance created without one).
     pub root_secured: bool,
+    /// Root was switched to `mysql_native_password` now, for a PHP before 7.4 using it.
+    pub root_on_native_password: bool,
     pub project_accounts: usize,
 }
 
@@ -119,18 +121,21 @@ impl MysqlAccounts {
     }
 
     /// Brings the instance at `endpoint` (running) to `plan`: root's password first when the plan
-    /// allows it (the project accounts are then managed as root with it), then the project
-    /// accounts.
+    /// allows it (the project accounts are then managed as root with it), else root on
+    /// `mysql_native_password` when the plan needs it, then the project accounts.
     pub async fn provision(&self, endpoint: &MysqlEndpoint, plan: &InstanceAccounts) -> AppResult<Provisioned> {
         let mut done = Provisioned { project_accounts: plan.accounts.len(), ..Default::default() };
         if plan.secure_root {
             let password = self.passwords.root_password_or_new(&endpoint.series.service_id())?;
             done.root_secured = self.admin.secure_root(endpoint, &password).await? == RootPasswordChange::Applied;
         }
+        if plan.native_root {
+            done.root_on_native_password = self.admin.use_native_password_for_root(endpoint).await?;
+        }
         let grants = plan
             .accounts
             .iter()
-            .map(|a| Ok(ProjectAccountGrant { user: a.user.clone(), password: self.passwords.project_password(&a.project)?, databases: a.databases.clone() }))
+            .map(|a| Ok(ProjectAccountGrant { user: a.user.clone(), password: self.passwords.project_password(&a.project)?, databases: a.databases.clone(), auth: a.auth }))
             .collect::<AppResult<Vec<_>>>()?;
         self.admin.sync_project_accounts(endpoint, &grants).await?;
         Ok(done)

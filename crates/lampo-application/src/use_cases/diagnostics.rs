@@ -5,6 +5,7 @@
 //! [`standard_checks`] is the one list both composition roots register (open-closed: a new
 //! check is a new type added there).
 
+mod mysql_auth_check;
 mod services_check;
 
 use std::collections::BTreeMap;
@@ -33,6 +34,7 @@ use super::support::all_sites;
 use crate::dto::{CheckStatus, DoctorCheckDto, DoctorReportDto, PortConflictDto, ServiceStatusDto, VcRuntimeIssueDto};
 use crate::error::AppResult;
 
+pub use mysql_auth_check::MysqlAuthCheck;
 pub use services_check::ServicesCheck;
 
 /// What every check may look at, loaded once per run.
@@ -124,6 +126,7 @@ pub fn standard_checks(deps: StandardChecksDeps) -> Vec<Arc<dyn DoctorCheck>> {
         Arc::new(HostsBlockCheck { hosts: deps.hosts }),
         Arc::new(PackagesCheck { services: deps.services }),
         Arc::new(ServicesCheck),
+        Arc::new(MysqlAuthCheck),
         Arc::new(FoldersCheck { fs: deps.fs.clone() }),
         Arc::new(StaleWorktreesCheck { fs: deps.fs }),
         Arc::new(AppCheck),

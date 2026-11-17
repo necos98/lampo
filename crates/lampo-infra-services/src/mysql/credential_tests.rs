@@ -137,7 +137,7 @@ async fn a_start_that_gives_up_falls_back_to_mysqladmin_shutdown_on_its_own_list
     assert_eq!(commands[0].args.last().map(String::as_str), Some("shutdown"));
 }
 
-fn free_port() -> Port {
+pub(super) fn free_port() -> Port {
     Port::new(std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port()).unwrap()
 }
 
@@ -221,7 +221,7 @@ async fn root_password_admin_and_shutdown_authenticate_with_the_stored_password(
 }
 
 /// `statement` run by `mysql.exe` as `user` with `password` (none: `None`), through an option file.
-async fn run_as(commands: &dyn CommandRunner, endpoint: &MysqlEndpoint, user: &str, password: Option<&str>, statement: &str) -> CommandOutput {
+pub(super) async fn run_as(commands: &dyn CommandRunner, endpoint: &MysqlEndpoint, user: &str, password: Option<&str>, statement: &str) -> CommandOutput {
     let option_file = password.map(|p| ClientOptionFile::for_password(&MysqlPassword::new(p).unwrap()).unwrap());
     let mut args = client_args(endpoint.port, user, option_file.as_ref());
     args.push(format!("--execute={statement}"));
@@ -281,6 +281,7 @@ async fn root_gets_a_password_and_project_accounts_only_their_databases() {
         user: user.clone(),
         password: MysqlPassword::new("Sh0pPassw0rd").unwrap(),
         databases: databases.iter().map(|d| DatabaseName::new(d).unwrap()).collect(),
+        auth: None,
     };
     let stale = ProjectAccountGrant { user: MysqlUserName::for_project(&ProjectId::new("gone").unwrap()), ..grant(&["other"]) };
     admin.sync_project_accounts(&endpoint, &[grant(&["shop"]), stale]).await.unwrap();

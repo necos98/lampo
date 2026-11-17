@@ -63,6 +63,7 @@ function project(id: string, name: string, root: string, host: string, e: T.Proj
 		originPreset: null,
 		worktrees: [],
 		notices: [],
+		warnings: [],
 		...over
 	};
 }

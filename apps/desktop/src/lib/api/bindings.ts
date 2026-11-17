@@ -135,6 +135,20 @@ smtpPort: number,
  */
 webUrl: string, };
 
+/**
+ * Why a project warning is raised, for a front-end that words it itself.
+ */
+export type ProjectWarningCode = "legacy-php-mysql-auth";
+
+/**
+ * A warning about a project's configuration.
+ */
+export type ProjectWarning = { code: ProjectWarningCode, 
+/**
+ * English text, for the CLI and a code the front-end does not know.
+ */
+message: string, };
+
 export type Project = { id: string, name: string, root: string, 
 /**
  * `false` when the folder was moved/deleted (offer "relink").
@@ -168,7 +182,12 @@ worktrees: Array<WorktreeEnvironment>,
  * What a save has to tell about the saved project (`bcmath is built into PHP 8.3, nothing
  * to enable`); always empty outside a save's answer.
  */
-notices: Array<string>, };
+notices: Array<string>, 
+/**
+ * What may keep the project from working as configured (PHP before 7.4 on MySQL 8.4),
+ * whenever the project is shown. Absent (older apps) = none.
+ */
+warnings: Array<ProjectWarning>, };
 
 /**
  * A project file that does not load (malformed, or edited into invalid values). The project is
@@ -280,7 +299,12 @@ worktrees: Array<WorktreeEnvironment>,
  * What a save has to tell about the saved project (`bcmath is built into PHP 8.3, nothing
  * to enable`); always empty outside a save's answer.
  */
-notices: Array<string>, };
+notices: Array<string>, 
+/**
+ * What may keep the project from working as configured (PHP before 7.4 on MySQL 8.4),
+ * whenever the project is shown. Absent (older apps) = none.
+ */
+warnings: Array<ProjectWarning>, };
 
 /**
  * Result of removing a project: what was kept on purpose and is no longer reachable from Lampo.
@@ -367,7 +391,12 @@ worktrees: Array<WorktreeEnvironment>,
  * What a save has to tell about the saved project (`bcmath is built into PHP 8.3, nothing
  * to enable`); always empty outside a save's answer.
  */
-notices: Array<string>, };
+notices: Array<string>, 
+/**
+ * What may keep the project from working as configured (PHP before 7.4 on MySQL 8.4),
+ * whenever the project is shown. Absent (older apps) = none.
+ */
+warnings: Array<ProjectWarning>, };
 
 /**
  * Result of analysing a folder before creating a project.
@@ -844,7 +873,7 @@ export type CheckStatus = "ok" | "warning" | "error";
 
 /**
  * One `doctor` check. `id` is stable (`vc-runtime`, `ports`, `path-shadowing`, `shims-on-path`,
- * `hosts-block`, `packages`, `services`, `stale-worktrees`, `folders`, `app`).
+ * `hosts-block`, `packages`, `services`, `mysql-auth`, `stale-worktrees`, `folders`, `app`).
  */
 export type DoctorCheck = { id: string, status: CheckStatus, message: string, 
 /**

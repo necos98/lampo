@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use crate::error::PortResult;
 use crate::mysql::DatabaseName;
 use crate::mysql::accounts::MysqlUserName;
+use crate::mysql::auth::MysqlAuthPlugin;
 use crate::mysql::credentials::MysqlPassword;
 use crate::ports::services::MysqlEndpoint;
 use crate::project::ProjectId;
@@ -49,6 +50,8 @@ pub struct ProjectAccountGrant {
     pub password: MysqlPassword,
     /// Every privilege on these databases and none elsewhere.
     pub databases: BTreeSet<DatabaseName>,
+    /// The plugin it authenticates with; `None` keeps the server's default.
+    pub auth: Option<MysqlAuthPlugin>,
 }
 
 /// Account administration on a running instance, as its root. Passwords travel to the server in
@@ -62,8 +65,13 @@ pub trait MysqlAccountAdmin: Send + Sync {
     async fn secure_root(&self, endpoint: &MysqlEndpoint, password: &MysqlPassword) -> PortResult<RootPasswordChange>;
 
     /// Makes the instance's project accounts exactly `accounts` (connecting as root with its
-    /// stored password, if any): each created or given its password, its privileges replaced by
-    /// all privileges on its databases; the accounts named like project accounts and not listed
-    /// are dropped.
+    /// stored password, if any): each created or given its password and plugin, its privileges
+    /// replaced by all privileges on its databases; the accounts named like project accounts and
+    /// not listed are dropped.
     async fn sync_project_accounts(&self, endpoint: &MysqlEndpoint, accounts: &[ProjectAccountGrant]) -> PortResult<()>;
+
+    /// Switches every `root` account of the instance not on `mysql_native_password` to it,
+    /// keeping root's password (its stored one, or none); `true` when one was switched. Only
+    /// `ALTER USER`: nothing else changes, and a second call does nothing.
+    async fn use_native_password_for_root(&self, endpoint: &MysqlEndpoint) -> PortResult<bool>;
 }

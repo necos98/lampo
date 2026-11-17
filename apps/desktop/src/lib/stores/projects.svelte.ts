@@ -12,6 +12,7 @@ import type {
 import type { Backend } from '../backend/ports.js';
 import { messages as m } from '../messages/index.js';
 import { bulkActivationTargets, setEachActive, type BulkActivation } from '../projects/bulkActivation.js';
+import { projectWarningsText } from '../projects/warnings.js';
 import { Resource } from './resource.svelte.js';
 import type { CommandRunner, Outcome } from './runner.js';
 
@@ -114,23 +115,28 @@ export class ProjectsStore {
 		this.list.patch((list) => ({ ...list, projects: list.projects.map((p) => (p.id === id ? { ...p, active } : p)) }));
 	}
 
-	/** The project is created even when its database is not: that is a warning, not a failure. */
+	/**
+	 * The project is created even when its database is not: that is a warning, not a failure, and
+	 * so are the project's own warnings (PHP before 7.4 on MySQL 8.4).
+	 */
 	create(request: CreateProjectRequest) {
 		return this.#runner.run(() => this.#backend.commands.createProject(request), {
 			success: (r) => (r.databaseSetup?.status === 'created' ? m.projects.createdWithDatabase(r.databaseSetup.name) : m.projects.created),
 			warning: (r) => {
 				const setup = r.databaseSetup;
-				return setup && (setup.status === 'package-missing' || setup.status === 'failed') ? m.projects.createdWithoutDatabase(setup.name, setup.message ?? m.common.unknownError) : null;
+				const database = setup && (setup.status === 'package-missing' || setup.status === 'failed') ? m.projects.createdWithoutDatabase(setup.name, setup.message ?? m.common.unknownError) : null;
+				const texts = [database, projectWarningsText(r)].filter((t) => t !== null);
+				return texts.length ? texts.join(' ') : null;
 			}
 		});
 	}
 
 	update(request: UpdateProjectRequest) {
-		return this.#runner.run(() => this.#backend.commands.updateProject(request), { success: m.projects.saved });
+		return this.#runner.run(() => this.#backend.commands.updateProject(request), { success: m.projects.saved, warning: projectWarningsText });
 	}
 
 	setPhp(projectId: string, phpVersion: string) {
-		return this.#runner.run(() => this.#backend.commands.setProjectPhp({ projectId, phpVersion }));
+		return this.#runner.run(() => this.#backend.commands.setProjectPhp({ projectId, phpVersion }), { warning: projectWarningsText });
 	}
 
 	remove(projectId: string) {

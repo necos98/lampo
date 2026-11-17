@@ -72,6 +72,9 @@ impl ApplyEnvironment {
         if done.root_secured {
             tracing::info!(service = %id, "root now has a random password, stored encrypted for the current user");
         }
+        if done.root_on_native_password {
+            tracing::info!(service = %id, "root now authenticates with mysql_native_password, for a project on PHP before 7.4");
+        }
         state.accounts.insert(id.clone(), plan);
         Ok(())
     }

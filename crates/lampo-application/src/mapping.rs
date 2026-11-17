@@ -7,6 +7,7 @@ use lampo_domain::address::{Addressing, SiteAddress};
 use lampo_domain::hostname::{Hostname, Tld};
 use lampo_domain::mysql::DatabaseConnection;
 use lampo_domain::mysql::accounts::MysqlCredentials;
+use lampo_domain::mysql::auth::legacy_php_auth_warning;
 use lampo_domain::package::{PackageId, PackageKind};
 use lampo_domain::php::{ExtensionName, PhpMinor, php_ini_overrides};
 use lampo_domain::project::{ApacheDirectives, ProjectEnvVars, ProjectEnvironment, PublicDir, TlsMode};
@@ -99,6 +100,11 @@ pub fn credentials_from_dto(dto: MysqlCredentialsDto) -> MysqlCredentials {
         MysqlCredentialsDto::Root => MysqlCredentials::Root,
         MysqlCredentialsDto::Project => MysqlCredentials::Project,
     }
+}
+
+/// What may keep a project with `env` from working as configured.
+pub fn project_warnings(env: &ProjectEnvironment) -> Vec<ProjectWarningDto> {
+    legacy_php_auth_warning(env).map(|message| ProjectWarningDto { code: ProjectWarningCodeDto::LegacyPhpMysqlAuth, message }).into_iter().collect()
 }
 
 pub fn tls_to_dto(t: TlsMode) -> TlsModeDto {

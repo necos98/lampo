@@ -114,8 +114,18 @@ export function createMockBackend({ fresh }: Options): Backend {
 		projects = projects.map((p) => (p.id === next.id ? next : p));
 		return attachWorktrees(clone(next));
 	};
+	/** Like the backend: PHP before 7.4 cannot authenticate to MySQL 8 with its default plugin. */
+	const warningsOf = (e: T.ProjectEnvironment): T.ProjectWarning[] => {
+		const mysql = mysqlOf(e);
+		const [major, minor] = e.phpVersion.split('.').map(Number);
+		const legacyPhp = major < 7 || (major === 7 && minor < 4);
+		return mysql && Number(mysql.split('.')[0]) >= 8 && legacyPhp
+			? [{ code: 'legacy-php-mysql-auth', message: `PHP ${e.phpVersion} cannot use MySQL ${mysql}'s default authentication (caching_sha2_password)` }]
+			: [];
+	};
 	const rebuild = (p: T.Project): T.Project => ({
 		...p,
+		warnings: warningsOf(p.environment),
 		url: urlsFor(p.addresses)[0] ?? '',
 		urls: urlsFor(p.addresses),
 		documentRoot: p.environment.publicDir ? `${p.root}\\${p.environment.publicDir}` : p.root,
@@ -293,7 +303,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 			const byMode: Record<T.Addressing, T.SiteAddress[]> = { standard: suggested.standard, 'hosts-only': suggested.hostsOnly, 'no-elevation': suggested.noElevation };
 			// Like the backend: no explicit mode means the `default_addressing` setting.
 			const addresses = r.addresses ?? byMode[r.addressing ?? settings.defaultAddressing];
-			const next = rebuild({ id, name, root: r.root, folderExists: true, addresses, url: '', urls: [], documentRoot: '', environment, databaseName: mysqlOf(environment) ? id.replace(/-/g, '_') : null, database: null, mysqlCredentials: settings.mysqlProjectCredentials ? 'project' : 'root', tls: 'disabled', active: r.activate ?? true, originPreset: preset.id, worktrees: [], notices: [] });
+			const next = rebuild({ id, name, root: r.root, folderExists: true, addresses, url: '', urls: [], documentRoot: '', environment, databaseName: mysqlOf(environment) ? id.replace(/-/g, '_') : null, database: null, mysqlCredentials: settings.mysqlProjectCredentials ? 'project' : 'root', tls: 'disabled', active: r.activate ?? true, originPreset: preset.id, worktrees: [], notices: [], warnings: [] });
 			projects = [...projects, next];
 			if (hasHostname(next)) hostsInSync = false;
 			syncProject(id);

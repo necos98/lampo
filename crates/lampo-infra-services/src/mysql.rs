@@ -274,6 +274,13 @@ impl MysqlRunner {
                  loose-innodb_log_writer_threads=OFF\n",
             );
         }
+        if series.needs_native_password_enabled() {
+            ini.push_str(
+                "# PHP before 7.4 cannot speak caching_sha2_password: Lampo puts the accounts of\n\
+                 # those projects on mysql_native_password, which 8.4 ships disabled (loopback only).\n\
+                 mysql_native_password=ON\n",
+            );
+        }
         ini.push_str(&format!("\n[client]\nhost=127.0.0.1\nport={}\nuser=root\ndefault-character-set=utf8mb4\n", launch.port));
         ini
     }
@@ -345,6 +352,8 @@ impl ServiceRunner for MysqlRunner {
 
 #[cfg(test)]
 mod credential_tests;
+#[cfg(test)]
+mod legacy_auth_tests;
 
 #[cfg(test)]
 mod tests {
@@ -386,6 +395,8 @@ mod tests {
         assert!(current.contains("mysqlx=OFF\n"));
         assert!(current.contains("disable-log-bin\n"));
         assert!(!current.contains("query_cache"), "removed in 8.0");
+        assert!(current.contains("\nmysql_native_password=ON\n"), "8.4 ships it disabled");
+        assert!(!legacy.contains("mysql_native_password"), "5.7 always has it");
     }
 
     #[test]

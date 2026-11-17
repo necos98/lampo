@@ -10,6 +10,7 @@ mod external_apps;
 mod log_files;
 mod misc;
 mod mysql_accounts;
+mod mysql_legacy_auth;
 mod packages;
 mod php_extension_names;
 mod project_saves;

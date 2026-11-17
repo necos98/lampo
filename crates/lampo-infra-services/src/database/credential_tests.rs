@@ -14,7 +14,7 @@ use lampo_domain::PortResult;
 use super::MysqlCliAdmin;
 use super::tests::{FakeRunner, endpoint};
 
-struct StoredRootPassword;
+pub(super) struct StoredRootPassword;
 impl MysqlRootPasswordReader for StoredRootPassword {
     fn root_password(&self, instance: &ServiceId) -> PortResult<Option<MysqlPassword>> {
         assert_eq!(instance.to_string(), "mysql-8.4", "the endpoint's instance");

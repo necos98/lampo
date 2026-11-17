@@ -116,6 +116,30 @@ pub struct ProjectDto {
     /// to enable`); always empty outside a save's answer.
     #[serde(default)]
     pub notices: Vec<String>,
+    /// What may keep the project from working as configured (PHP before 7.4 on MySQL 8.4),
+    /// whenever the project is shown. Absent (older apps) = none.
+    #[serde(default)]
+    pub warnings: Vec<ProjectWarningDto>,
+}
+
+/// Why a project warning is raised, for a front-end that words it itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ProjectWarningCode"))]
+#[serde(rename_all = "kebab-case")]
+pub enum ProjectWarningCodeDto {
+    /// The project's PHP cannot use its MySQL series' default authentication: its account is
+    /// moved to `mysql_native_password`, and MySQL 5.7 is the alternative.
+    LegacyPhpMysqlAuth,
+}
+
+/// A warning about a project's configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ProjectWarning"))]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectWarningDto {
+    pub code: ProjectWarningCodeDto,
+    /// English text, for the CLI and a code the front-end does not know.
+    pub message: String,
 }
 
 /// A project file that does not load (malformed, or edited into invalid values). The project is

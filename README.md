@@ -137,6 +137,18 @@ dedicato per i nuovi progetti** (`lampo settings set --project-credentials off`)
 progetti creati in seguito; un progetto lasciato su root dopo che root ha ricevuto la password usa
 quella password, mostrata nei suoi dettagli di connessione.
 
+**PHP 7.3 o precedente con MySQL 8.4.** Il PHP fino alla 7.3 non conosce `caching_sha2_password`,
+l'autenticazione predefinita di MySQL 8, e fallisce con l'errore 2054 («The server requested
+authentication method unknown to the client»). Per questi progetti Lampo passa l'utente con cui si
+collega l'applicazione (l'utente dedicato, o root per un progetto ancora su root) a
+`mysql_native_password`, mantenendo la password, e il `my.ini` generato per MySQL 8.4 attiva quel
+plugin (`mysql_native_password=ON`; l'istanza ascolta solo su 127.0.0.1). Succede alla creazione, al
+cambio di PHP e al cambio di servizio; tornando a PHP 7.4 o successivo l'utente dedicato torna a
+`caching_sha2_password` (root resta su `mysql_native_password`). La risposta di `lampo project
+create`, `lampo project set-php` e `lampo project set` mostra un `warning:` e `lampo doctor` un
+avviso (`mysql-auth`); se la connessione non riesce comunque, sposta il progetto su MySQL 5.7:
+`lampo project set shop --service mysql@5.7`.
+
 ## Integrazione Claude Code
 
 In Impostazioni › Integrazioni › Claude Code, **Installa** registra in Claude Code (solo per il

@@ -14,6 +14,7 @@ use lampo_domain::events::DomainEvent;
 use lampo_domain::hostname::Tld;
 use lampo_domain::hosts::HostsBlock;
 use lampo_domain::logs::{LogChunk, LogLine, LogQuery};
+use lampo_domain::mysql::auth::MysqlAuthPlugin;
 use lampo_domain::mysql::credentials::MysqlPassword;
 use lampo_domain::mysql::{DatabaseName, MysqlSeries};
 use lampo_domain::package::{CatalogChannel, CatalogEntry, DownloadUrl, DownloadedFile, InstalledPackage, PackageId, PackageKind, PackagePayload, Sha256Digest};
@@ -1049,8 +1050,9 @@ impl MysqlPasswordGenerator for CountingPasswords {
     }
 }
 
-/// Records `secure-root:<port>:<password>` and `accounts:<port>:<user>=<db>+<db>;…` calls; root
-/// starts without a password and keeps the one it is given.
+/// Records `secure-root:<port>:<password>`, `native-root:<port>` and
+/// `accounts:<port>:<user>[@native]=<db>+<db>;…` calls (`@native`: on `mysql_native_password`);
+/// root starts without a password and keeps the one it is given.
 #[derive(Default)]
 pub struct FakeMysqlAccounts {
     pub calls: Mutex<Vec<String>>,
@@ -1084,9 +1086,20 @@ impl MysqlAccountAdmin for FakeMysqlAccounts {
     }
     async fn sync_project_accounts(&self, endpoint: &MysqlEndpoint, accounts: &[ProjectAccountGrant]) -> PortResult<()> {
         self.fail()?;
-        let listed: Vec<String> = accounts.iter().map(|a| format!("{}={}", a.user, a.databases.iter().map(DatabaseName::as_str).collect::<Vec<_>>().join("+"))).collect();
+        let listed: Vec<String> = accounts
+            .iter()
+            .map(|a| {
+                let native = if a.auth == Some(MysqlAuthPlugin::Native) { "@native" } else { "" };
+                format!("{}{native}={}", a.user, a.databases.iter().map(DatabaseName::as_str).collect::<Vec<_>>().join("+"))
+            })
+            .collect();
         lock(&self.calls).push(format!("accounts:{}:{}", endpoint.port, listed.join(";")));
         Ok(())
+    }
+    async fn use_native_password_for_root(&self, endpoint: &MysqlEndpoint) -> PortResult<bool> {
+        self.fail()?;
+        lock(&self.calls).push(format!("native-root:{}", endpoint.port));
+        Ok(true)
     }
 }
 

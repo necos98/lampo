@@ -27,7 +27,7 @@ use super::sync_outcome::first_failure_other_than;
 use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
-use crate::mapping::{address_to_dto, connection_to_dto, credentials_to_dto, environment_to_dto, mail_to_dto, tls_to_dto};
+use crate::mapping::{address_to_dto, connection_to_dto, credentials_to_dto, environment_to_dto, mail_to_dto, project_warnings, tls_to_dto};
 
 // ---------------------------------------------------------------------------------------------
 // Identifiers and lookups
@@ -265,6 +265,7 @@ pub(crate) fn project_dto(
         origin_preset: project.origin_preset.as_ref().map(|p| p.to_string()),
         worktrees: worktrees.iter().filter(|w| w.parent == project.id).map(|w| worktree_dto(w, project, settings, fs, passwords)).collect(),
         notices: Vec::new(),
+        warnings: project_warnings(&project.environment),
     }
 }
 

@@ -206,6 +206,11 @@ export const it = {
 		createdWithDatabase: (db: string) => `Progetto creato. Database «${db}» creato.`,
 		createdWithoutDatabase: (db: string, reason: string) => `Progetto creato, ma il database «${db}» non è stato creato: ${reason}`,
 		saved: 'Progetto salvato.',
+		/** Per codice (`ProjectWarningCode`): mostrati al posto della conferma di salvataggio. */
+		warnings: {
+			legacyPhpMysqlAuth: (php: string, mysql: string) =>
+				`PHP ${php} non supporta l’autenticazione predefinita di MySQL ${mysql} (caching_sha2_password, da PHP 7.4): Lampo passa l’account MySQL del progetto a mysql_native_password. Se la connessione fallisce ancora (errore 2054), usa MySQL 5.7 per questo progetto.`
+		},
 		deleted: 'Progetto rimosso da Lampo.',
 		deletedWithOrphanedDatabases: (dbs: string) => `Progetto rimosso da Lampo. I database dei suoi ambienti worktree restano in MySQL: ${dbs}`,
 		relinked: 'Cartella ricollegata.',
@@ -700,6 +705,7 @@ export const it = {
 				'hosts-block': 'File hosts',
 				packages: 'Pacchetti richiesti',
 				services: 'Servizi',
+				'mysql-auth': 'Autenticazione MySQL',
 				'stale-worktrees': 'Ambienti worktree orfani',
 				folders: 'Cartelle dei progetti'
 			} as Record<string, string>,
@@ -716,6 +722,10 @@ export const it = {
 					ok: 'I servizi che servono ai progetti sono in esecuzione.',
 					warning: 'Un servizio che serve ai progetti è fermo, oppure il suo stato non si può leggere.',
 					error: 'Un servizio che serve ai progetti si è chiuso con un errore.'
+				},
+				'mysql-auth': {
+					ok: 'Il PHP di ogni progetto si autentica al suo MySQL.',
+					warning: 'Un progetto con PHP precedente al 7.4 usa MySQL 8.4: Lampo ne passa l’account a mysql_native_password; in alternativa usa MySQL 5.7.'
 				},
 				folders: { ok: 'Tutte le cartelle dei progetti esistono.', warning: 'Alcune cartelle di progetto non esistono più.' },
 				'stale-worktrees': { ok: 'Nessun ambiente worktree orfano.', warning: 'Ci sono ambienti worktree la cui cartella non esiste più.' }

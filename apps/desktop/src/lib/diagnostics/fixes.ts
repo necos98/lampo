@@ -22,6 +22,7 @@ const COMMAND_FIXES: Partial<Record<string, FixCommand>> = {
 const PAGE_FIXES: Partial<Record<string, NavId>> = {
 	packages: 'packages',
 	folders: 'projects',
+	'mysql-auth': 'projects',
 	ports: 'services'
 };
 

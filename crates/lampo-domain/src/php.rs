@@ -32,6 +32,9 @@ impl PhpMinor {
     pub const LATEST_KNOWN: PhpMinor = PhpMinor { major: 8, minor: 4 };
     /// The oldest PHP the Laravel Installer runs on (`laravel/installer` requires `^8.2`).
     pub const LARAVEL_INSTALLER_MIN: PhpMinor = PhpMinor { major: 8, minor: 2 };
+    /// The oldest PHP whose `mysqlnd` speaks MySQL 8's `caching_sha2_password`
+    /// (see [`crate::mysql::auth`]).
+    pub const MYSQL_CACHING_SHA2_MIN: PhpMinor = PhpMinor { major: 7, minor: 4 };
 
     pub fn new(major: u8, minor: u8) -> Result<Self, DomainError> {
         let ok = match major {

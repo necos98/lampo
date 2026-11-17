@@ -13,6 +13,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::claude_code::fnv32;
+use crate::mysql::auth::MysqlAuthPlugin;
 use crate::mysql::{DatabaseName, MysqlSeries};
 use crate::project::{Project, ProjectId};
 use crate::worktree::WorktreeEnvironment;
@@ -86,6 +87,9 @@ pub struct ProjectAccount {
     /// The project's database and the own databases of its worktree environments: the only
     /// ones the account may use (a database that does not exist yet can be created by it).
     pub databases: BTreeSet<DatabaseName>,
+    /// The plugin the account authenticates with, for the project's PHP
+    /// ([`MysqlAuthPlugin::for_client`]); `None` keeps the server default (5.7).
+    pub auth: Option<MysqlAuthPlugin>,
 }
 
 /// The accounts one instance needs for the registered projects.
@@ -96,6 +100,10 @@ pub struct InstanceAccounts {
     /// `true` when no project on the instance uses [`MysqlCredentials::Root`]: root may get a
     /// password. Once set it is never removed (a project switched back to root then uses it).
     pub secure_root: bool,
+    /// `true` when a project on [`MysqlCredentials::Root`] runs a PHP that needs
+    /// `mysql_native_password` on this series: root is switched to it, keeping its password.
+    /// Never switched back (every client speaks it, and Lampo's `my.ini` keeps it enabled).
+    pub native_root: bool,
 }
 
 impl InstanceAccounts {
@@ -103,14 +111,18 @@ impl InstanceAccounts {
     /// project's `.env` still names its account) and their worktree environments.
     pub fn plan(series: MysqlSeries, projects: &[Project], worktrees: &[WorktreeEnvironment]) -> Self {
         let on_instance = projects.iter().filter(|p| p.environment.mysql() == Some(series));
-        let mut plan = Self { accounts: Vec::new(), secure_root: true };
+        let mut plan = Self { accounts: Vec::new(), secure_root: true, native_root: false };
         for project in on_instance {
+            let auth = MysqlAuthPlugin::for_client(series, project.environment.php);
             match project.mysql_credentials {
-                MysqlCredentials::Root => plan.secure_root = false,
+                MysqlCredentials::Root => {
+                    plan.secure_root = false;
+                    plan.native_root |= auth == Some(MysqlAuthPlugin::Native);
+                }
                 MysqlCredentials::Project => {
                     let own = worktrees.iter().filter(|w| w.parent == project.id).filter_map(WorktreeEnvironment::owned_database);
                     let databases = project.database().into_iter().chain(own).cloned().collect();
-                    plan.accounts.push(ProjectAccount { project: project.id.clone(), user: MysqlUserName::for_project(&project.id), databases });
+                    plan.accounts.push(ProjectAccount { project: project.id.clone(), user: MysqlUserName::for_project(&project.id), databases, auth });
                 }
             }
         }
@@ -196,11 +208,43 @@ mod tests {
         assert!(current.secure_root);
         assert_eq!(current.accounts.len(), 1);
         let old = InstanceAccounts::plan(MysqlSeries::LEGACY_5_7, &projects, &[]);
-        assert_eq!(old, InstanceAccounts { accounts: Vec::new(), secure_root: false });
+        assert_eq!(old, InstanceAccounts { accounts: Vec::new(), secure_root: false, native_root: false });
     }
 
     #[test]
     fn an_instance_without_projects_secures_root() {
-        assert_eq!(InstanceAccounts::plan(MysqlSeries::DEFAULT, &[], &[]), InstanceAccounts { accounts: Vec::new(), secure_root: true });
+        assert_eq!(InstanceAccounts::plan(MysqlSeries::DEFAULT, &[], &[]), InstanceAccounts { accounts: Vec::new(), secure_root: true, native_root: false });
+    }
+
+    fn on_php(mut p: Project, php: &str) -> Project {
+        p.environment.php = crate::php::PhpMinor::parse(php).unwrap();
+        p
+    }
+
+    #[test]
+    fn old_php_gets_native_password_accounts_on_mysql_8_only() {
+        let projects = [on_php(dedicated("legacy"), "7.2"), dedicated("shop")];
+        let plan = InstanceAccounts::plan(MysqlSeries::DEFAULT, &projects, &[]);
+        let auth: Vec<(&str, Option<MysqlAuthPlugin>)> = plan.accounts.iter().map(|a| (a.user.as_str(), a.auth)).collect();
+        assert_eq!(auth, [("lampo_legacy", Some(MysqlAuthPlugin::Native)), ("lampo_shop", Some(MysqlAuthPlugin::CachingSha2))]);
+        assert!(!plan.native_root, "no project uses root");
+
+        let mut on_5_7 = on_php(dedicated("legacy"), "7.2");
+        on_5_7.environment.set_mysql(Some(MysqlSeries::LEGACY_5_7));
+        let old = InstanceAccounts::plan(MysqlSeries::LEGACY_5_7, &[on_5_7], &[]);
+        assert_eq!(old.accounts[0].auth, None, "5.7 keeps its default");
+    }
+
+    #[test]
+    fn root_goes_native_only_for_an_old_php_project_on_root() {
+        let modern_root = project("modern", r"C:\sites\modern");
+        let plan = InstanceAccounts::plan(MysqlSeries::DEFAULT, std::slice::from_ref(&modern_root), &[]);
+        assert!(!plan.native_root && !plan.secure_root);
+        let legacy_root = on_php(project("legacy", r"C:\sites\legacy"), "7.3");
+        let plan = InstanceAccounts::plan(MysqlSeries::DEFAULT, &[modern_root, legacy_root.clone()], &[]);
+        assert!(plan.native_root && !plan.secure_root);
+        let mut legacy_5_7 = legacy_root;
+        legacy_5_7.environment.set_mysql(Some(MysqlSeries::LEGACY_5_7));
+        assert!(!InstanceAccounts::plan(MysqlSeries::LEGACY_5_7, &[legacy_5_7], &[]).native_root);
     }
 }

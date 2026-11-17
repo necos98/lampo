@@ -816,6 +816,23 @@ async fn project_set_prints_the_notices_of_the_save() {
 }
 
 #[tokio::test]
+async fn php_switch_and_project_set_print_the_warnings_of_the_project() {
+    let fake = Fake::new();
+    let mut saved = project_json();
+    let message = "PHP 7.2 cannot use MySQL 8.4's default authentication (caching_sha2_password, PHP 7.4+): move the project to MySQL 5.7 (`--service mysql@5.7`)";
+    saved["warnings"] = serde_json::json!([{ "code": "legacy-php-mysql-auth", "message": message }]);
+    for args in [&["project", "set-php", "7.2", "shop"][..], &["project", "set", "--php", "7.2"]] {
+        fake.reply(Ok(saved.clone()));
+        let (code, out, _) = run_cli(&fake, args).await;
+        assert_eq!(code, 0, "a warning is not an error: {out}");
+        assert!(out.contains(&format!("warning:   {message}")), "{args:?}: {out}");
+    }
+    fake.reply(Ok(saved));
+    let (_, out, _) = run_cli(&fake, &["project", "set", "--php", "7.2", "--json"]).await;
+    assert_eq!(parse(&out)["warnings"][0]["code"], "legacy-php-mysql-auth");
+}
+
+#[tokio::test]
 async fn project_set_errors_keep_their_exit_codes() {
     let fake = Fake::new();
     let (code, out, _) = run_cli(&fake, &["project", "set", "--ini", "memory_limit", "--json"]).await;

@@ -177,6 +177,9 @@ pub fn project(p: &ProjectDto) -> String {
     for notice in &p.notices {
         out.push_str(&format!("  note:      {notice}\n"));
     }
+    for warning in &p.warnings {
+        out.push_str(&format!("  warning:   {}\n", warning.message));
+    }
     out
 }
 

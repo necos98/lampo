@@ -10,7 +10,7 @@ pub enum CheckStatus {
 }
 
 /// One `doctor` check. `id` is stable (`vc-runtime`, `ports`, `path-shadowing`, `shims-on-path`,
-/// `hosts-block`, `packages`, `services`, `stale-worktrees`, `folders`, `app`).
+/// `hosts-block`, `packages`, `services`, `mysql-auth`, `stale-worktrees`, `folders`, `app`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DoctorCheck"))]
 #[serde(rename_all = "camelCase")]
