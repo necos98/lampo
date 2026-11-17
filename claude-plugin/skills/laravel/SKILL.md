@@ -43,8 +43,8 @@ DB_PASSWORD=<database.password>
 ```
 
 `DB_USERNAME` and `DB_PASSWORD` are the `database.user` and `database.password` of `agent
-context --json` (a new project has its own account `lampo_<id>` with a random password; only a
-project still on root has `root` and an empty password): copy them, never guess.
+context --json` (a new project has its own account `lampo_<id>` with a random password; a
+project still on root has `root`, with an empty or random password): copy them, never guess.
 
 - `APP_URL` = the `url` of the site (in a worktree environment, its `http://127.0.0.1:<port>`);
   it matters for generated links, `asset()`, mail links, Sanctum/Fortify (`SANCTUM_STATEFUL_DOMAINS`
@@ -102,17 +102,20 @@ php artisan schedule:work
 
 ## Tests with a dedicated database
 
-Never let `RefreshDatabase` or `migrate:fresh` run against the development database. Create a
-test database once (allowed):
+Never let `RefreshDatabase` or `migrate:fresh` run against the development database. The
+project's account (`lampo_<id>`) reaches only its own database and its worktrees' databases:
+`lampo db create shop_testing` makes a database it cannot use (`[1044] Access denied`); any
+second database the app connects to has the same limit. Options, in order:
 
-```powershell
-lampo db create shop_testing
-```
+- SQLite in memory (`DB_CONNECTION=sqlite`, `DB_DATABASE=:memory:` in `phpunit.xml`): keep it if
+  already configured, use it when the tests allow.
+- A worktree environment with its own database (`lampo:worktrees`), when that fits.
+- A separate MySQL test database: needs the project on root. Ask the user first, then
+  `lampo project set shop --mysql-credentials root` and `lampo db create shop_testing`; copy
+  `database.user` / `database.password` from `lampo agent context --json` into `.env` and into
+  `.env.testing` or `phpunit.xml` (`DB_DATABASE=shop_testing`, `DB_CONNECTION` `mysql`).
 
-and point the tests at it, in `phpunit.xml` (`<env name="DB_DATABASE" value="shop_testing"/>`,
-with `DB_CONNECTION` `mysql`) or in `.env.testing` (a copy of `.env` with
-`DB_DATABASE=shop_testing`). Many projects test on SQLite in memory
-(`DB_CONNECTION=sqlite`, `DB_DATABASE=:memory:`): keep that if it is already configured. Then:
+Then:
 
 ```powershell
 php artisan test
@@ -120,8 +123,8 @@ php artisan test --filter=LoginTest
 lampo exec -- vendor\bin\pest --parallel
 ```
 
-Parallel testing creates `shop_testing_test_1`, `_2`... databases on the same MySQL; the root
-user may create them.
+Parallel testing creates `shop_testing_test_1`, `_2`... databases: only root can, so it fails
+with the project's account (use SQLite in memory, or move the project to root as above).
 
 ## Front-end (Vite, npm)
 

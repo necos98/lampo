@@ -18,10 +18,11 @@ lampo agent context --json
 
 `database` holds `mysqlVersion`, `host` (127.0.0.1), `port` (3306 for 8.4 by default; another
 series has its own port, see `services`), `user`, `password` and `database`. A new project has
-its own account `lampo_<id>` (all privileges on its databases, nothing elsewhere) with a random
-password; `lampo project info` shows the same. Always copy `user` and `password` from here:
-root with an empty password holds only for older projects still on root, and root gets a random
-password once no project of the instance uses it (never copy it anywhere). Inside a worktree environment with its own database these are that database's values. Use
+its own account `lampo_<id>` (privileges only on its database and its worktrees' databases) with
+a random password; `lampo project info` shows the same. Always copy `user` and `password` from
+here, never guess: a project still on root gets root's password (empty, or random once no other
+project uses root), shown here too. Do not reuse it for another project or look for it elsewhere.
+Inside a worktree environment with its own database these are that database's values. Use
 `127.0.0.1`, not `localhost` (on Windows `localhost` may resolve to IPv6 first).
 
 ## The `mysql` client
@@ -30,7 +31,8 @@ The `mysql` shim runs the site's client with `--host=127.0.0.1 --port=<the serie
 --user=<the project's user> --default-character-set=utf8mb4` and **selects the site's database**
 (in a worktree environment with its own database, that one). Your options come after these
 defaults, so they win. It connects as the project's account, so it cannot reach other
-databases: use `lampo db create` / `lampo db import <dump> <name>` for those (they run as root).
+databases, not even ones made with `lampo db create` / `lampo db import <dump> <name>` (they run
+as root and grant that account nothing): `Access denied ... [1044]`.
 Outside any project (the default PHP) no database is selected. While the site's database does
 not exist yet the shim connects without one and prints `lampo-shim: database '<db>' does not
 exist yet, connecting without a default database` on stderr.
@@ -40,7 +42,6 @@ mysql -e "SHOW TABLES"
 mysql -N -B -e "SELECT id, email FROM users ORDER BY id LIMIT 5"
 mysql --vertical -e "SHOW CREATE TABLE users"
 mysql --table -e "SELECT status, COUNT(*) FROM orders GROUP BY status"
-mysql -D my_shop_testing -e "SHOW TABLES"
 mysql --database= -e "SHOW DATABASES"
 ```
 
@@ -52,7 +53,8 @@ mysql --database= -e "SHOW DATABASES"
   `\\` (add `-r` to print them raw). Without `-N` the first line is the header. `--vertical`
   (`-E`) prints one `column: value` line per field, best for wide rows; `--table` (`-t`) an
   aligned grid to show the user. Output is UTF-8.
-- **Another database**: `-D <name>`, `--database=<name>` or a name as the last argument. **No
+- **Another database** (only one the account can reach: the project's own or a worktree's):
+  `-D <name>`, `--database=<name>` or a name as the last argument. **No
   database** (`SHOW DATABASES`, `CREATE DATABASE`, the site's database does not exist yet):
   `--database=` with nothing after `=`. Do not write `-D ""`: Windows PowerShell drops the
   empty argument and `-D` then swallows the next one. To create a database prefer
@@ -118,7 +120,7 @@ All `lampo db` commands act on the resolved site's MySQL instance and go through
 ```powershell
 lampo db list
 lampo db create
-lampo db create my_shop_testing
+lampo db create my_shop_archive
 lampo db export backup.sql
 lampo db export C:\backups\shop.sql my_shop
 lampo db export C:\backups\shop.sql.gz my_shop
@@ -187,10 +189,8 @@ again with --compat <server>`. The failed import already ran part of the dump: t
 apply (ask, then drop and import again with the flag). Never add `--compat` by default, and do
 not work around a failure with `mysql --init-command=… -e "source …"`: use the flag.
 
-Dump caveats:
-
-- `--databases` dumps: see the `USE` / `CREATE DATABASE` refusal above. MariaDB dumps may use
-  syntax `--compat` does not fix (`lampo:migrate`). Exit 12: the mysql client failed.
+Caveats: `--databases` dumps (see the `USE` / `CREATE DATABASE` refusal above); MariaDB syntax
+`--compat` does not fix (`lampo:migrate`). Exit 12: the mysql client failed.
 
 ### Drop: always ask first
 
@@ -204,15 +204,15 @@ Deleting a Lampo project never drops its database.
 
 ## A separate database for tests
 
-Create it once (allowed), then point the test environment at it, for example
-`DB_DATABASE=my_shop_testing` in `.env.testing` or `phpunit.xml` (see `lampo:laravel`):
-
-```powershell
-lampo db create my_shop_testing
-```
-
-Never run tests that wipe the database (`RefreshDatabase`, `migrate:fresh`) against the main
-development database unless the user agrees.
+`lampo db create` grants the project's account nothing: an app (tests, parallel testing, a
+second connection) cannot use a database made that way (`[1044] Access denied`). Prefer SQLite
+in memory, or a worktree database (below, `lampo:worktrees`). Otherwise the project must move
+to root: ask the user first (its account changes), then `lampo project set my-shop
+--mysql-credentials root` and `lampo db create my_shop_testing`; copy `user` and `password` from
+`lampo agent context --json` into `.env` and `.env.testing` / `phpunit.xml`
+(`DB_DATABASE=my_shop_testing`). Root can also create parallel-testing databases. Never run
+tests that wipe the database (`RefreshDatabase`, `migrate:fresh`) against the main development
+database unless the user agrees.
 
 ## Worktree database modes
 
