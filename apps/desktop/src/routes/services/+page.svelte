@@ -18,7 +18,7 @@
 	const t = m.services;
 	const list = $derived(services.list.data ?? []);
 	const conflicts = $derived(diagnostics.doctor.data?.portConflicts ?? []);
-	const anyBusy = $derived(Object.keys(services.busy).length > 0);
+	const anyBusy = $derived(services.anyBusy);
 	/** The port of the conflict a toast's «Vedi conflitto» points at. */
 	const highlighted = $derived(conflictPortParam(page.url.searchParams.get('conflict')));
 

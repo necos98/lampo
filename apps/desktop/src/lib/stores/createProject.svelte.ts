@@ -107,6 +107,8 @@ export class CreateProjectFlow {
 	#folderNameTouched = false;
 	#stopListening: (() => void) | null = null;
 	#detach: (() => void) | null = null;
+	/** The screen was left: a «Riprova» still on screen must not start this visit's setup again. */
+	#disposed = false;
 
 	/** `defaultAddressing` reads the `default_addressing` setting (`undefined` while not loaded). */
 	constructor(
@@ -195,9 +197,9 @@ export class CreateProjectFlow {
 		};
 	}
 
-	/** Starts the setup task; its end continues into detection (success) or the failure view. */
+	/** Starts the setup task; its end continues into detection (success) or the failure view. Does nothing once disposed. */
 	async startScaffold(): Promise<void> {
-		if (!this.canStart) return;
+		if (this.#disposed || !this.canStart) return;
 		const request = this.request();
 		this.starting = true;
 		this.scaffoldError = null;
@@ -318,6 +320,7 @@ export class CreateProjectFlow {
 
 	/** Call when leaving the screen: stops following the task and lets the session announce its end. */
 	dispose(): void {
+		this.#disposed = true;
 		this.#stopListening?.();
 		this.#stopListening = null;
 		this.#detach?.();

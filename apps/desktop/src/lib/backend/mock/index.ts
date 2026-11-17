@@ -19,6 +19,26 @@ function fail(code: AppError['code'], message: string, details?: unknown): never
 	throw { code, message, details } satisfies AppError;
 }
 
+/** `not-found` with the details the backend sends (`AppError::not_found`). */
+function notFoundError(entity: string, id: string): AppError {
+	return { code: 'not-found', message: `${entity} \`${id}\` not found`, details: { entity, id } };
+}
+
+/** Throws {@link notFoundError}. */
+function notFound(entity: string, id: string): never {
+	throw notFoundError(entity, id);
+}
+
+/** `pkg` is the last build of its series that `usedBy` need (the backend's uninstall check). */
+function packageInUseError(pkg: string, usedBy: string[]): AppError {
+	return { code: 'conflict', message: `${pkg} is in use by ${usedBy.join(', ')}`, details: { package: pkg, usedBy } };
+}
+
+/** `package-missing` naming the package, as the backend's `package_missing`. */
+function packageMissing(pkg: string): never {
+	return fail('package-missing', `${pkg} is not installed`, { package: pkg });
+}
+
 /** An absolute Windows folder; one whose path contains "missing" simulates a deleted folder. */
 function folderExists(path: string): boolean {
 	return /^[a-z]:\\/i.test(path.trim()) && !/missing/i.test(path);
@@ -93,6 +113,18 @@ export function createMockBackend({ fresh }: Options): Backend {
 	const syncWorktrees = (projectId: string) => emitter.emit<T.WorktreesChangedPayload>('worktrees-changed', { projectId });
 	const syncPackages = () => emitter.emit<void>('packages-changed', undefined as never);
 
+	/** Who needs the installed package `id` (the `usedBy` of the package list). */
+	const usedByOf = (id: T.PackageId): string[] => {
+		if (id.kind === 'php') return projects.filter((p) => id.version.startsWith(`${p.environment.phpVersion}.`) && p.active).map((p) => p.id);
+		if (id.kind === 'mysql') return id.version.startsWith('8.4') ? ['system'] : projects.filter((p) => mysqlOf(p.environment) === '5.7').map((p) => p.id);
+		return ['system'];
+	};
+	/** Like the backend's uninstall check: the users of `id` when no other installed build of its series serves them. */
+	const uninstallBlockers = (id: T.PackageId): string[] => {
+		const sameSeries = (i: T.PackageId) => i.kind === id.kind && i.phpVersion === id.phpVersion && seriesOf(i.version) === seriesOf(id.version);
+		return installed.some((i) => sameSeries(i) && packageKey(i) !== packageKey(id)) ? [] : usedByOf(id);
+	};
+
 	const isInstalled = (p: T.PackageId) => installed.some((i) => packageKey(i) === packageKey(p));
 	const withInstalledFlag = (e: T.CatalogEntry): T.CatalogEntry => ({ ...e, installed: isInstalled(e.id) });
 	/** Like the backend: projects using Mailpit get its SMTP endpoint and web UI. */
@@ -103,7 +135,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 	};
 	const attachWorktrees = (p: T.Project): T.Project => ({ ...p, mail: mailOf(p), worktrees: worktrees.filter((w) => w.projectId === p.id) });
 
-	const find = (id: string) => projects.find((p) => p.id === id) ?? fail('not-found', `project ${id}`);
+	const find = (id: string) => projects.find((p) => p.id === id) ?? notFound('project', id);
 	/** Like the app's `OpenProjectIn`: Explorer, the terminal and VS Code need the folder to exist. */
 	const openIn = async (id: string) => {
 		await sleep(150);
@@ -218,7 +250,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 	// ---- services ------------------------------------------------------------------------------
 
 	function setService(name: string, patch: Partial<T.ServiceStatus>) {
-		const cur = services.get(name) ?? fail('not-found', name);
+		const cur = services.get(name) ?? notFound('service', name);
 		const next = { ...cur, ...patch };
 		services.set(name, next);
 		emitter.emit<T.ServiceStatusPayload>('service-status', { service: name, kind: next.kind, state: next.state as T.ServiceStatusPayload['state'], pid: next.pid, port: next.port, message: next.message });
@@ -344,8 +376,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 				return startLogTask({ kind: 'scaffold-project', request: r }, [{ subject: 'git clone', lines: failing ? failedLines : lines }], { failWith });
 			}
 			const php = source.phpVersion ?? '8.4';
-			if (!installed.some((i) => i.kind === 'php' && i.version.startsWith(`${php}.`))) fail('package-missing', `PHP ${php} is not installed`);
-			if (!installed.some((i) => i.kind === 'composer')) fail('package-missing', 'Composer is not installed');
+			if (!installed.some((i) => i.kind === 'php' && i.version.startsWith(`${php}.`))) packageMissing(`PHP ${php}`);
+			if (!installed.some((i) => i.kind === 'composer')) packageMissing('Composer');
 			const kit = source.starterKit && source.starterKit !== 'none' ? `laravel/${source.starterKit}-starter-kit` : 'laravel/laravel';
 			return startLogTask({ kind: 'scaffold-project', request: r }, [
 				{ subject: 'laravel-installer', lines: ['> composer update (Laravel Installer)', 'Loading composer repositories with package information', 'Updating dependencies', 'Nothing to modify in lock file', 'Generating autoload files'] },
@@ -444,7 +476,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 		},
 		deletePreset: async (id) => {
 			const i = presets.findIndex((p) => p.id === id && !p.builtin);
-			if (i < 0) fail('not-found', id);
+			if (i < 0) notFound('preset', id);
 			presets.splice(i, 1);
 		},
 
@@ -462,7 +494,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 				id: clone(id),
 				series: seriesOf(id.version),
 				path: `C:\\Users\\dev\\AppData\\Local\\Lampo\\packages\\${packageKey(id)}`,
-				usedBy: id.kind === 'php' ? projects.filter((p) => id.version.startsWith(`${p.environment.phpVersion}.`) && p.active).map((p) => p.id) : id.kind === 'mysql' ? (id.version.startsWith('8.4') ? ['system'] : projects.filter((p) => mysqlOf(p.environment) === '5.7').map((p) => p.id)) : ['system']
+				usedBy: usedByOf(id)
 			}));
 		},
 		checkPackageUpdates: async () => {
@@ -473,7 +505,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 			await sleep(80);
 			const series = r.series ?? null;
 			const wanted = catalog.filter((e) => e.id.kind === r.kind && (r.phpVersion ?? null) === e.id.phpVersion && (r.version ? e.id.version === r.version : series ? e.id.version.startsWith(`${series}.`) : true));
-			const target = wanted.sort((a, b) => b.id.version.localeCompare(a.id.version, undefined, { numeric: true }))[0] ?? fail('not-found', `${r.kind} ${r.version ?? series ?? ''}`);
+			const target = wanted.sort((a, b) => b.id.version.localeCompare(a.id.version, undefined, { numeric: true }))[0] ?? notFound('package', `${r.kind} ${r.version ?? series ?? ''}`.trim());
 			const subject = packageKey(target.id);
 			return startTask({ kind: 'install-package', request: r }, [subject], {
 				onSuccess: () => {
@@ -487,8 +519,12 @@ export function createMockBackend({ fresh }: Options): Backend {
 		uninstallPackage: async (id) => {
 			await sleep(80);
 			const subject = packageKey(id);
+			// The backend checks within the task: a refusal is the task's failure, not the command's.
+			const usedBy = uninstallBlockers(id);
+			const failWith = !isInstalled(id) ? notFoundError('package', subject) : usedBy.length ? packageInUseError(subject, usedBy) : undefined;
 			const steps = [{ subject, lines: ['Riallineamento di Apache e dei servizi', `Rimozione dei file di ${subject}`] }];
 			return startLogTask({ kind: 'uninstall-package', id }, steps, {
+				failWith,
 				onSuccess: () => {
 					installed = installed.filter((i) => packageKey(i) !== subject);
 					syncPackages();
@@ -536,7 +572,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 		listRunningTasks: async () => [...running.values()].map(clone),
 		listPhpExtensions: async (phpVersion) => {
 			await sleep(120);
-			if (!installed.some((i) => i.kind === 'php' && i.version.startsWith(`${phpVersion}.`))) fail('package-missing', `PHP ${phpVersion} is not installed`);
+			if (!installed.some((i) => i.kind === 'php' && i.version.startsWith(`${phpVersion}.`))) packageMissing(`PHP ${phpVersion}`);
 			// What the official Windows builds ship in `ext\` (older minors lack a few).
 			const names = ['bz2', 'curl', 'dba', 'enchant', 'exif', 'ffi', 'fileinfo', 'ftp', 'gd', 'gettext', 'gmp', 'imap', 'intl', 'ldap', 'mbstring', 'mysqli', 'odbc', 'opcache', 'openssl', 'pdo_firebird', 'pdo_mysql', 'pdo_odbc', 'pdo_pgsql', 'pdo_sqlite', 'pgsql', 'shmop', 'snmp', 'soap', 'sockets', 'sodium', 'sqlite3', 'sysvshm', 'tidy', 'xsl', 'zip'];
 			const old = Number(phpVersion.split('.')[0]) < 8;
@@ -595,7 +631,7 @@ export function createMockBackend({ fresh }: Options): Backend {
 		},
 		removeWorktree: async ({ target, dropDatabase }) => {
 			await sleep(400);
-			const w = worktrees.find((x) => x.site === target || x.root === target) ?? fail('not-found', target);
+			const w = worktrees.find((x) => x.site === target || x.root === target) ?? notFound('worktree environment', target);
 			worktrees = worktrees.filter((x) => x !== w);
 			syncWorktrees(w.projectId);
 			syncProject(w.projectId);

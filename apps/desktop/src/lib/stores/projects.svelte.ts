@@ -102,7 +102,7 @@ export class ProjectsStore {
 				}),
 			{
 				success: (r) => (active ? m.projects.bulkActivated(r.changed.length) : m.projects.bulkDeactivated(r.changed.length)),
-				warning: (r) => (r.failed.length ? m.projects.bulkFailed(r.failed.map((f) => this.get(f.id)?.name ?? f.id).join(', ')) : null)
+				warning: (r) => (r.failed.length ? m.projects.bulkFailed(r.failed.map((f) => this.get(f.id)?.name ?? f.id).join(', '), r.changed.length > 0) : null)
 			}
 		);
 		this.bulkToggling = false;

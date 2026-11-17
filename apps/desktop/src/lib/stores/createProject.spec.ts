@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Addressing } from '../api/index.js';
 import { SCAFFOLD_CHOICES_KEY } from '../projects/scaffoldChoices.js';
-import { testBackend, testRunner, type TestBackend } from '../testing/harness.js';
+import { recordingNotifier, testBackend, testRunner, type RecordingNotifier, type TestBackend } from '../testing/harness.js';
 import { CreateProjectFlow, compareMinor, folderNameFromRepoUrl, folderNameProblem, laravelNameIsValid } from './createProject.svelte.js';
 import { ProjectsStore } from './projects.svelte.js';
 import { ScaffoldSession } from './scaffoldSession.js';
@@ -19,6 +19,8 @@ interface Screen {
 	session: ScaffoldSession;
 	projects: ProjectsStore;
 	readyElsewhere: ReturnType<typeof vi.fn>;
+	/** What the flows told the user (their error toasts, with «Riprova»). */
+	notifier: RecordingNotifier;
 	flow(): CreateProjectFlow;
 }
 
@@ -33,12 +35,13 @@ async function screen(commands: Parameters<typeof testBackend>[0] = {}): Promise
 	const session = new ScaffoldSession(tasks, readyElsewhere);
 	stops.push(await session.start());
 	const projects = new ProjectsStore(env.backend, testRunner());
+	const notifier = recordingNotifier();
 	const flow = () => {
-		const created = new CreateProjectFlow(env.backend, projects, testRunner(), tasks, session, () => undefined as Addressing | undefined);
+		const created = new CreateProjectFlow(env.backend, projects, testRunner(notifier), tasks, session, () => undefined as Addressing | undefined);
 		stops.push(() => created.dispose());
 		return created;
 	};
-	return { env, tasks, session, projects, readyElsewhere, flow };
+	return { env, tasks, session, projects, readyElsewhere, notifier, flow };
 }
 
 /** Lets the pending detection (mock backend sleeps) and the promise chains settle. */
@@ -379,6 +382,54 @@ describe('CreateProjectFlow steps of a new project', () => {
 		await flow.startScaffold();
 		await flow.cancelScaffold();
 		expect(cancelTask).toHaveBeenCalledWith(TASK_ID);
+	});
+});
+
+describe('CreateProjectFlow «Riprova» of a setup that did not start', () => {
+	/** A screen whose first start is refused and the next ones accepted. */
+	async function refusedOnce() {
+		let calls = 0;
+		const s = await screen({
+			scaffoldProject: async () => {
+				calls++;
+				if (calls === 1) throw { code: 'process-failed', message: 'composer failed' };
+				return { taskId: TASK_ID };
+			}
+		});
+		return { ...s, calls: () => calls };
+	}
+
+	it('starts the setup again while the screen is shown', async () => {
+		const { flow: makeFlow, notifier, session, calls } = await refusedOnce();
+		const flow = makeFlow();
+		fillLaravel(flow);
+		await flow.startScaffold();
+		expect(flow.scaffoldError?.code).toBe('process-failed');
+
+		notifier.errorNotices[0]?.action?.run();
+		await settle();
+
+		expect(calls()).toBe(2);
+		expect(flow.phase).toBe('running');
+		expect(session.request?.folderName).toBe('shop2');
+	});
+
+	it('does nothing once the screen was left', async () => {
+		const { flow: makeFlow, env, notifier, session, readyElsewhere, calls } = await refusedOnce();
+		const flow = makeFlow();
+		fillLaravel(flow);
+		await flow.startScaffold();
+		flow.dispose();
+
+		notifier.errorNotices[0]?.action?.run();
+		await settle();
+		env.finish(TASK_ID, { status: 'succeeded' });
+		await settle();
+
+		expect(calls()).toBe(1);
+		expect(session.request).toBeNull();
+		expect(readyElsewhere).not.toHaveBeenCalled();
+		expect(flow.phase).toBe('form');
 	});
 });
 

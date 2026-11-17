@@ -64,10 +64,38 @@ pub(crate) fn package_missing(package: impl std::fmt::Display) -> AppError {
     AppError::new(ErrorCode::PackageMissing, format!("{package} is not installed")).with_details(package_details(&package))
 }
 
-/// `part` of an installed `package` (e.g. its command line) is missing.
-pub(crate) fn package_part_missing(package: impl std::fmt::Display, part: &str) -> AppError {
+/// A part an installed package may lack, named in `details.part` so the GUI tells it from a
+/// package that is not installed at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PackagePart {
+    /// PHP's command line (`php.exe`).
+    CommandLine,
+    /// MySQL's clients (`mysql.exe`, `mysqldump.exe`).
+    Clients,
+}
+
+impl PackagePart {
+    /// Stable key sent in `details.part`.
+    fn key(self) -> &'static str {
+        match self {
+            Self::CommandLine => "cli",
+            Self::Clients => "clients",
+        }
+    }
+
+    /// English name, for the message the CLI prints.
+    fn label(self) -> &'static str {
+        match self {
+            Self::CommandLine => "command line",
+            Self::Clients => "clients",
+        }
+    }
+}
+
+/// `part` of an installed `package` is missing; `details` name both for the GUI.
+pub(crate) fn package_part_missing(package: impl std::fmt::Display, part: PackagePart) -> AppError {
     let package = package.to_string();
-    AppError::new(ErrorCode::PackageMissing, format!("{package} is installed without its {part}")).with_details(package_details(&package))
+    AppError::new(ErrorCode::PackageMissing, format!("{package} is installed without its {}", part.label())).with_details(serde_json::json!({ "package": package, "part": part.key() }))
 }
 
 /// `details` naming the package an error is about (`details.package`).
@@ -282,7 +310,7 @@ pub(crate) fn mysql_endpoint(installed: &dyn InstalledPackageRegistry, settings:
 pub(crate) fn mysql_endpoint_in(packages: &[InstalledPackage], settings: &Settings, catalog: &ServiceCatalog, series: MysqlSeries) -> AppResult<MysqlEndpoint> {
     let port = settings.mysql_port(series).ok_or_else(|| DomainError::UnknownMysqlSeries(series.to_string()))?;
     let package = newest_of(packages, &PackageKind::MYSQL, Some(series.as_series()), None).ok_or_else(|| package_missing(format!("MySQL {series}")))?;
-    let client_dir = package.entry(EntryRole::ClientDir).ok_or_else(|| package_part_missing(format!("MySQL {series}"), "clients"))?.to_path_buf();
+    let client_dir = package.entry(EntryRole::ClientDir).ok_or_else(|| package_part_missing(format!("MySQL {series}"), PackagePart::Clients))?.to_path_buf();
     let user = catalog.client_user(&ServiceKind::MYSQL).ok_or_else(|| AppError::internal("the MySQL service kind names no client user"))?;
     Ok(MysqlEndpoint { series, client_dir, port, user: user.to_string() })
 }
@@ -327,4 +355,26 @@ pub(crate) async fn sync_without_elevation(env: &dyn EnvironmentSync, sites: Opt
         tracing::info!("hosts file left unchanged: {}", e.message);
     }
     first_failure_other_than(e, ErrorCode::ElevationRequired).map_or(Ok(()), Err)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_part_names_the_package_and_the_part() {
+        let err = package_part_missing("PHP 8.3", PackagePart::CommandLine);
+
+        assert_eq!(err.code, ErrorCode::PackageMissing);
+        assert_eq!(err.message, "PHP 8.3 is installed without its command line", "the CLI keeps the English text");
+        assert_eq!(err.details, Some(serde_json::json!({ "package": "PHP 8.3", "part": "cli" })));
+    }
+
+    #[test]
+    fn missing_mysql_clients_are_a_missing_part() {
+        let err = package_part_missing("MySQL 8.4", PackagePart::Clients);
+
+        assert_eq!(err.message, "MySQL 8.4 is installed without its clients");
+        assert_eq!(err.details, Some(serde_json::json!({ "package": "MySQL 8.4", "part": "clients" })));
+    }
 }

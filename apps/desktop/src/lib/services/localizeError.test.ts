@@ -44,6 +44,18 @@ describe('localizeError', () => {
 		assert.equal(localizeError(error('package-missing', { package: '  ' }), m), m.errors['package-missing'], 'a blank name is ignored');
 	});
 
+	test('package-missing on an installed package names the part it lacks', () => {
+		assert.equal(localizeError(error('package-missing', { package: 'PHP 8.3', part: 'cli' }), m), 'PHP 8.3 è installato senza la riga di comando (php.exe): reinstallalo dalla pagina Pacchetti.');
+		assert.equal(localizeError(error('package-missing', { package: 'MySQL 8.4', part: 'clients' }), m), 'MySQL 8.4 è installato senza i client (mysql.exe): reinstallalo dalla pagina Pacchetti.');
+		assert.equal(
+			localizeError(error('package-missing', { package: 'Redis 7.4', part: 'server' }), m),
+			'Redis 7.4 è installato ma incompleto: reinstallalo dalla pagina Pacchetti.',
+			'an unknown part is still no «non è installato»'
+		);
+		assert.equal(localizeError(error('package-missing', { package: 'PHP 8.3', part: 'toString' }), m), m.errorDetails.packageIncomplete('PHP 8.3'), 'inherited properties are not texts');
+		assert.equal(localizeError(error('package-missing', { part: 'cli' }), m), m.errors['package-missing'], 'a part without its package keeps the generic text');
+	});
+
 	test('a package still in use lists who uses it', () => {
 		assert.equal(localizeError(error('conflict', { package: 'php-8.3.14', usedBy: ['blog', 'shop'] }), m), 'php-8.3.14 è in uso da blog, shop.');
 		assert.equal(localizeError(error('conflict', { package: 'php-8.3.14', usedBy: [] }), m), m.errors.conflict);

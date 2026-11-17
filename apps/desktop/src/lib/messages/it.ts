@@ -170,7 +170,9 @@ export const it = {
 		deactivateAllBody: (n: number) => `${n === 1 ? '1 progetto attivo non verrà più servito' : `${n} progetti attivi non verranno più serviti`} da Apache. Cartelle e database restano intatti.`,
 		bulkActivated: (n: number) => (n === 1 ? '1 progetto attivato.' : `${n} progetti attivati.`),
 		bulkDeactivated: (n: number) => (n === 1 ? '1 progetto disattivato.' : `${n} progetti disattivati.`),
-		bulkFailed: (names: string) => `Stato non cambiato per: ${names}. Gli altri progetti sono stati aggiornati.`,
+		/** `othersUpdated`: at least one project of the same run did change. */
+		bulkFailed: (names: string, othersUpdated: boolean) =>
+			`Stato non cambiato per: ${names}. ${othersUpdated ? 'Gli altri progetti sono stati aggiornati.' : 'Nessun progetto è stato aggiornato.'}`,
 		relink: 'Ricollega cartella',
 		relinkHelp: 'Scegli la nuova posizione della cartella del progetto.',
 		folderMissing: 'La cartella del progetto non esiste più.',
@@ -813,6 +815,12 @@ export const it = {
 		},
 		notFound: (entity: string, id: string) => `${entity} «${id}» non esiste.`,
 		packageMissing: (pkg: string) => `${pkg} non è installato: installalo dalla pagina Pacchetti.`,
+		/** `details.part` (from the backend) → text for an installed package that lacks it. */
+		partMissing: {
+			cli: (pkg: string) => `${pkg} è installato senza la riga di comando (php.exe): reinstallalo dalla pagina Pacchetti.`,
+			clients: (pkg: string) => `${pkg} è installato senza i client (mysql.exe): reinstallalo dalla pagina Pacchetti.`
+		},
+		packageIncomplete: (pkg: string) => `${pkg} è installato ma incompleto: reinstallalo dalla pagina Pacchetti.`,
 		addonMissing: (addon: string, php: string) => `${addon} per PHP ${php} non è installato: installalo dalla pagina Pacchetti.`,
 		runtimeMissing: (pkg: string, redistributable: string) => `${pkg} richiede ${redistributable}, che non è installato.`,
 		/** `details.tool` → text. */

@@ -70,8 +70,15 @@ function packageMissingText(d: Details, t: ErrorMessages['errorDetails']): strin
 	if (pkg === null) return null;
 	const redistributable = text(d.redistributable);
 	if (redistributable !== null) return t.runtimeMissing(pkg, redistributable);
+	const part = text(d.part);
+	if (part !== null) return partMissingText(pkg, part, t);
 	const php = text(d.php);
 	return php !== null ? t.addonMissing(pkg, php) : t.packageMissing(pkg);
+}
+
+/** `pkg` is installed but lacks `part`; a part this GUI does not know yet still says «incompleto». */
+function partMissingText(pkg: string, part: string, t: ErrorMessages['errorDetails']): string {
+	return Object.hasOwn(t.partMissing, part) ? t.partMissing[part as keyof typeof t.partMissing](pkg) : t.packageIncomplete(pkg);
 }
 
 function asDetails(details: unknown): Details {

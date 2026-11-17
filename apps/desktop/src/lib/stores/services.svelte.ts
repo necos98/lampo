@@ -29,8 +29,18 @@ export class ServicesStore {
 		return (this.list.data ?? []).some((s) => s.state === 'running' || s.state === 'starting');
 	}
 
-	/** Whether `action` may run on `names` now: none has an action in flight, except a start that a stop gives up. */
+	/** Some service has a user-triggered action in flight. */
+	get anyBusy(): boolean {
+		return Object.keys(this.busy).length > 0;
+	}
+
+	/**
+	 * Whether `action` may run on `names` now: none has an action in flight, except a start that a
+	 * stop gives up. An empty `names` (every service, as `act` reads it) waits for nothing in flight,
+	 * as the «tutti» buttons of the services page do.
+	 */
 	canAct(action: ServiceAction, names: string[]): boolean {
+		if (names.length === 0) return !this.anyBusy;
 		return names.every((n) => this.busy[n] === undefined || (action === 'stop' && this.busy[n] === 'start'));
 	}
 
@@ -42,7 +52,8 @@ export class ServicesStore {
 		const call = action === 'start' ? cmd.startServices : action === 'stop' ? cmd.stopServices : cmd.restartServices;
 		const result = await this.#runner.run(() => call({ services }), {
 			success: services.length ? undefined : m.services.done[action],
-			retry: () => this.act(action, services),
+			// The toast outlives the action: a «Riprova» while the services are busy again does nothing.
+			retry: () => (this.canAct(action, services) ? this.act(action, services) : undefined),
 			serviceLogs: () => this.#failedAmong(names)
 		});
 		// A stop that overtook this action (giving up its start) owns the flag now.

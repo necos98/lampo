@@ -2,7 +2,7 @@ import type { TaskOutcome, TaskProgressPayload } from '../api/index.js';
 import type { Backend } from '../backend/ports.js';
 import { createMockBackend } from '../backend/mock/index.js';
 import { MockEmitter } from '../backend/mock/emitter.js';
-import type { Notifier } from '../services/notifier.js';
+import type { ErrorNotice, Notifier } from '../services/notifier.js';
 import { CommandRunner } from '../stores/runner.js';
 
 /** The mock backend with an event bus the test drives by hand (the mock's own one is private). */
@@ -23,19 +23,32 @@ export function testBackend(overrides: Partial<Backend['commands']> = {}): TestB
 }
 
 /** A notifier that only remembers what it was told. */
-export function recordingNotifier(): Notifier & { errors: string[] } {
-	const errors: string[] = [];
+export interface RecordingNotifier extends Notifier {
+	successes: string[];
+	infos: string[];
+	warnings: string[];
+	errors: string[];
+	/** The buttons of each error, in the order of `errors`. */
+	errorNotices: ErrorNotice[];
+}
+
+export function recordingNotifier(): RecordingNotifier {
+	const recorded: Omit<RecordingNotifier, keyof Notifier> = { successes: [], infos: [], warnings: [], errors: [], errorNotices: [] };
 	return {
-		errors,
-		success: () => {},
-		info: () => {},
-		warning: () => {},
-		error: (message) => void errors.push(message)
+		...recorded,
+		success: (message) => void recorded.successes.push(message),
+		info: (message) => void recorded.infos.push(message),
+		warning: (message) => void recorded.warnings.push(message),
+		error: (message, notice = {}) => {
+			recorded.errors.push(message);
+			recorded.errorNotices.push(notice);
+		}
 	};
 }
 
-export function testRunner(notifier: Notifier = recordingNotifier()): CommandRunner {
-	return new CommandRunner(notifier, () => {}, () => {});
+/** `onElevationRequired` is told when an operation hands a change to the elevation flow. */
+export function testRunner(notifier: Notifier = recordingNotifier(), onElevationRequired: () => void = () => {}): CommandRunner {
+	return new CommandRunner(notifier, onElevationRequired, () => {});
 }
 
 /** An operation that stays pending until it is settled by hand. */
