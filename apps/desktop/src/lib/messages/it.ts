@@ -691,24 +691,45 @@ export const it = {
 		},
 		defender: {
 			title: 'Microsoft Defender',
-			help: 'Le suite di test riscrivono di continuo i file dei database MySQL e Defender li analizza a ogni scrittura, rallentandole. Puoi escludere dall’analisi la sola cartella dei dati MySQL di Lampo: mai i pacchetti, i programmi o il resto dei dati.',
-			risk: 'Il compromesso: un file dannoso salvato in quella cartella non verrebbe analizzato lì (lo è comunque quando viene copiato o eseguito altrove). Ogni modifica chiede la conferma di amministratore (UAC).',
+			help: 'L’analisi in tempo reale di Defender rallenta Lampo: puoi escludere dall’analisi i server PHP e Apache e i dati MySQL di Lampo, mai i tuoi progetti, i pacchetti o il resto dei dati. Ogni modifica chiede la conferma di amministratore (UAC); puoi togliere un’esclusione quando vuoi.',
 			unknownState: 'Senza diritti di amministratore Lampo non può leggere le esclusioni di Defender: qui vedi solo l’esito dell’ultima richiesta fatta da questa finestra.',
-			folder: 'Cartella',
+			recommended: 'Consigliata',
 			add: 'Aggiungi esclusione',
 			adding: 'Aggiunta…',
 			remove: 'Rimuovi esclusione',
 			removing: 'Rimozione…',
-			confirmAdd: {
-				title: 'Escludere i dati MySQL da Microsoft Defender?',
-				body: (folder: string) =>
-					`Defender smetterà di analizzare ${folder}, dove stanno i dati di tutte le istanze MySQL. Un file dannoso salvato lì non verrebbe analizzato in quella cartella. Windows chiederà la conferma di amministratore; puoi togliere l’esclusione quando vuoi.`,
-				confirm: 'Escludi'
+			php: {
+				title: 'Processi PHP e Apache',
+				help: 'Rimedio alla lentezza della prima visita di un sito (anche 8-24 secondi): Defender analizza ogni file PHP la prima volta che viene letto, e di nuovo dopo ogni aggiornamento delle definizioni, riavvio o modifica. Con l’esclusione dei processi non analizza più i file aperti da PHP e Apache, per tutti i progetti, senza escludere nessuna cartella di sorgenti.',
+				risk: 'Il compromesso: un file dannoso letto da PHP o Apache non verrebbe analizzato in quel momento (lo è comunque quando un altro programma lo scrive, lo copia o lo esegue). Sono esclusi solo gli eseguibili installati ora: dopo aver installato un’altra versione di PHP, aggiungi di nuovo l’esclusione.',
+				targets: 'Eseguibili',
+				none: 'Nessun PHP o Apache installato: non c’è nessun eseguibile da escludere.',
+				confirmAdd: {
+					title: 'Escludere PHP e Apache da Microsoft Defender?',
+					body: 'Defender smetterà di analizzare i file aperti dagli eseguibili elencati: php-cgi.exe di ogni PHP installato e httpd.exe di Apache. Un file dannoso letto da questi processi non verrebbe analizzato in quel momento. Windows chiederà la conferma di amministratore; puoi togliere l’esclusione quando vuoi.',
+					confirm: 'Escludi'
+				},
+				done: {
+					add: 'Esclusione aggiunta: Defender non analizza più i file aperti da PHP e Apache.',
+					remove: 'Esclusione rimossa: Defender analizza di nuovo i file aperti da PHP e Apache.'
+				} satisfies Record<ScanExclusionChange, string>
 			},
-			done: {
-				add: 'Esclusione aggiunta: Defender non analizza più i dati MySQL.',
-				remove: 'Esclusione rimossa: Defender analizza di nuovo i dati MySQL.'
-			} satisfies Record<ScanExclusionChange, string>,
+			mysql: {
+				title: 'Dati MySQL',
+				help: 'Le suite di test riscrivono di continuo i file dei database MySQL e Defender li analizza a ogni scrittura, rallentandole. Puoi escludere dall’analisi la sola cartella dei dati MySQL di Lampo.',
+				risk: 'Il compromesso: un file dannoso salvato in quella cartella non verrebbe analizzato lì (lo è comunque quando viene copiato o eseguito altrove).',
+				targets: 'Cartella',
+				confirmAdd: {
+					title: 'Escludere i dati MySQL da Microsoft Defender?',
+					body: (folder: string) =>
+						`Defender smetterà di analizzare ${folder}, dove stanno i dati di tutte le istanze MySQL. Un file dannoso salvato lì non verrebbe analizzato in quella cartella. Windows chiederà la conferma di amministratore; puoi togliere l’esclusione quando vuoi.`,
+					confirm: 'Escludi'
+				},
+				done: {
+					add: 'Esclusione aggiunta: Defender non analizza più i dati MySQL.',
+					remove: 'Esclusione rimossa: Defender analizza di nuovo i dati MySQL.'
+				} satisfies Record<ScanExclusionChange, string>
+			},
 			outcome: {
 				cancelled: 'Conferma di amministratore annullata: nessuna modifica.',
 				'defender-unavailable': 'Microsoft Defender non è installato o non è l’antivirus attivo (c’è un altro antivirus, o è disattivato): nessuna modifica. Un altro antivirus ha le sue esclusioni.',

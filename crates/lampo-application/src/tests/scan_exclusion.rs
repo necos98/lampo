@@ -100,7 +100,6 @@ async fn info_lists_what_each_part_covers() {
     assert_eq!(s.use_case.info().unwrap(), DefenderExclusionInfoDto { folder: MYSQL_FOLDER.into(), processes: Vec::new() });
     install_servers(&s.installed);
     assert_eq!(s.use_case.info().unwrap().processes, SERVERS.map(String::from).to_vec());
-    assert_eq!(s.use_case.mysql_info().folder, MYSQL_FOLDER);
 }
 
 #[tokio::test]

@@ -1008,11 +1008,6 @@ export type ScanExclusionResult = { change: ScanExclusionChange, outcome: ScanEx
 folder: string, };
 
 /**
- * What the exclusion would cover, shown before the user asks for it.
- */
-export type ScanExclusionInfo = { folder: string, };
-
-/**
  * Which of Lampo's files one request changes, all through one UAC prompt. At least one.
  */
 export type DefenderExclusionRequest = { change: ScanExclusionChange, 

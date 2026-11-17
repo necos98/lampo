@@ -23,9 +23,7 @@ use lampo_domain::scan_exclusion::{ScanExclusionChange, ScanExclusionOutcome, Sc
 use lampo_domain::service::ServiceKind;
 
 use crate::context::{CallContext, ElevationPolicy};
-use crate::dto::{
-    DefenderExclusionInfoDto, DefenderExclusionRequestDto, DefenderExclusionResultDto, ScanExclusionChangeDto, ScanExclusionInfoDto, ScanExclusionOutcomeDto, ScanExclusionResultDto,
-};
+use crate::dto::{DefenderExclusionInfoDto, DefenderExclusionRequestDto, DefenderExclusionResultDto, ScanExclusionChangeDto, ScanExclusionOutcomeDto, ScanExclusionResultDto};
 use crate::error::{AppError, AppResult, ErrorCode};
 
 /// The server executable of each package kind the `php` part names.
@@ -65,11 +63,6 @@ impl DefenderExclusion {
     /// What `mysql` and `php` would cover now.
     pub fn info(&self) -> AppResult<DefenderExclusionInfoDto> {
         Ok(DefenderExclusionInfoDto { folder: display(&self.folder()), processes: self.server_executables()?.iter().map(|p| display(p)).collect() })
-    }
-
-    /// The MySQL-only form of [`Self::info`].
-    pub fn mysql_info(&self) -> ScanExclusionInfoDto {
-        ScanExclusionInfoDto { folder: display(&self.folder()) }
     }
 
     /// Asks Defender to add or remove the exclusions `request` names, in one UAC prompt.

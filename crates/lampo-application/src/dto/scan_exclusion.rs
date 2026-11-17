@@ -41,14 +41,6 @@ pub struct ScanExclusionResultDto {
     pub folder: String,
 }
 
-/// What the exclusion would cover, shown before the user asks for it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(test, derive(ts_rs::TS), ts(rename = "ScanExclusionInfo"))]
-#[serde(rename_all = "camelCase")]
-pub struct ScanExclusionInfoDto {
-    pub folder: String,
-}
-
 /// Which of Lampo's files one request changes, all through one UAC prompt. At least one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(test, derive(ts_rs::TS), ts(rename = "DefenderExclusionRequest"))]

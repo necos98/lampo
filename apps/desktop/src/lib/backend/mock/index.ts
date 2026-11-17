@@ -782,13 +782,8 @@ export function createMockBackend({ fresh }: Options): Backend {
 			const steps = [step('detect-claude', claudeCode.claudeVersion), step('remove-plugin'), step('remove-marketplace'), step('remove-files', claudeCode.pluginDir)];
 			return { ok: true, steps, status: clone(claudeCode) };
 		},
-		mysqlScanExclusionInfo: async () => ({ folder: mysqlDataFolder }),
-		// The browser has no UAC prompt nor Defender: every change is confirmed.
-		changeMysqlScanExclusion: async (change) => {
-			await sleep(1200);
-			return { change, outcome: 'applied', folder: mysqlDataFolder };
-		},
 		defenderExclusionInfo: async () => ({ folder: mysqlDataFolder, processes: [...serverExecutables] }),
+		// The browser has no UAC prompt nor Defender: every change is confirmed.
 		changeDefenderExclusion: async ({ change, php, mysql }) => {
 			await sleep(1200);
 			return { change, outcome: 'applied', folder: mysql ? mysqlDataFolder : null, processes: php ? [...serverExecutables] : [] };
