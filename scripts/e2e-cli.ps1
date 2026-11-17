@@ -154,7 +154,7 @@ Check ($shims.installed) "shims installed in $($shims.shimDir)"
 Check ((Get-Command php).Source -eq (Join-Path $shimDir 'php.exe')) 'php resolves to the shim in this shell'
 # The shim folder carries a copy of the CLI too, which finds the app through app-location.txt.
 $cliCopy = Join-Path $shimDir 'lampo.exe'
-Check ((Get-Command lampo).Source -eq $cliCopy) 'lampo resolves to the CLI copy in the shim folder'
+Check ((Get-Command lampo -CommandType Application | Select-Object -First 1).Source -eq $cliCopy) 'lampo resolves to the CLI copy in the shim folder'
 Check ((Get-Content (Join-Path $DataRoot 'data\app-location.txt') -TotalCount 1) -eq $BinDir) 'the app recorded its folder in app-location.txt'
 $copyShims = & $cliCopy shims status --json | ConvertFrom-Json
 Check ($LASTEXITCODE -eq 0 -and $copyShims.installed) 'the CLI copy finds the app folder (shims status from the shim folder)'
