@@ -73,7 +73,9 @@ mod tests {
         let started = Instant::now();
         let stop = stop_processes(vec![sleeper.pid()], |_| true, Duration::from_millis(200));
         assert_eq!(stop, LastResortStop { found: 1, signalled: 1, still_running: 1 });
-        assert!(started.elapsed() >= Duration::from_millis(200));
+        // WaitForSingleObject times out on the system timer tick (~15.6 ms) and can return a tick
+        // earlier than Instant measures: the margin keeps the check independent of that granularity.
+        assert!(started.elapsed() >= Duration::from_millis(150));
     }
 
     #[test]
