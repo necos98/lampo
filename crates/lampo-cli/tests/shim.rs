@@ -41,10 +41,14 @@ impl Sandbox {
     /// A Lampo home with one project served by the test tool installed as `php.exe`.
     fn new(with_php: bool) -> Self {
         let dir = tempfile::tempdir().unwrap();
-        let home = dir.path().join("home");
-        let shim_dir = dir.path().join("shims");
-        let project = dir.path().join("work").join("shop");
-        let php_dir = dir.path().join("php");
+        // The long form of the temp folder: on CI runners TEMP is an 8.3 path (`RUNNER~1`), while
+        // the final path of a junction is always the long one and would match no registered root.
+        let base = std::fs::canonicalize(dir.path()).unwrap();
+        let base = PathBuf::from(base.to_str().unwrap().trim_start_matches(r"\\?\"));
+        let home = base.join("home");
+        let shim_dir = base.join("shims");
+        let project = base.join("work").join("shop");
+        let php_dir = base.join("php");
         for d in [&shim_dir, &project, &php_dir, &home.join("data").join("bin"), &home.join("config")] {
             std::fs::create_dir_all(d).unwrap();
         }
