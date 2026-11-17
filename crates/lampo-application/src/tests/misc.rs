@@ -667,7 +667,7 @@ async fn control_dispatcher_refuses_mutations_while_shutting_down() {
     let w = World::with_basics();
     w.project("shop", "C:\\sites\\shop", false);
     w.hosts_in_sync();
-    let shutdown = Shutdown::new(w.runners(), w.services.clone(), w.settings.clone());
+    let shutdown = w.shutdown();
     let quit = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let d = dispatcher(&w, quit.clone(), shutdown.gate());
     shutdown.run().await.unwrap();

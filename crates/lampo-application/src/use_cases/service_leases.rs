@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use lampo_domain::service::ServiceId;
+use lampo_domain::tcp_port::Port;
 use tokio::sync::Notify;
 
 /// How many leases a service has, and whether a sync postponed a change for it.
@@ -28,10 +29,11 @@ impl ServiceLeases {
         self.held.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    /// One more lease of `service`, released when the returned guard is dropped.
-    pub fn acquire(self: &Arc<Self>, service: ServiceId) -> ServiceLease {
+    /// One more lease of `service`, running on `port`, released when the returned guard is
+    /// dropped.
+    pub fn acquire(self: &Arc<Self>, service: ServiceId, port: Port) -> ServiceLease {
         self.held().entry(service.clone()).or_default().count += 1;
-        ServiceLease { leases: Arc::clone(self), service }
+        ServiceLease { leases: Arc::clone(self), service, port }
     }
 
     /// `true` when `service` is leased.
@@ -79,6 +81,15 @@ impl ServiceLeases {
 pub struct ServiceLease {
     leases: Arc<ServiceLeases>,
     service: ServiceId,
+    port: Port,
+}
+
+impl ServiceLease {
+    /// The port the leased instance runs on: the one it was started with, which differs from
+    /// the settings while a sync waits for the leases to end to restart it onto a new one.
+    pub fn port(&self) -> Port {
+        self.port
+    }
 }
 
 impl Drop for ServiceLease {
@@ -89,7 +100,7 @@ impl Drop for ServiceLease {
 
 impl std::fmt::Debug for ServiceLease {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ServiceLease").field("service", &self.service).finish()
+        f.debug_struct("ServiceLease").field("service", &self.service).field("port", &self.port).finish()
     }
 }
 
@@ -98,12 +109,14 @@ mod tests {
     use super::*;
     use crate::testing::mysql_id;
 
+    const PORT: Port = Port::of(3306);
+
     #[test]
     fn a_service_is_leased_until_its_last_lease_is_dropped() {
         let leases = Arc::new(ServiceLeases::default());
         let id = mysql_id("8.4");
-        let first = leases.acquire(id.clone());
-        let second = leases.acquire(id.clone());
+        let first = leases.acquire(id.clone(), PORT);
+        let second = leases.acquire(id.clone(), PORT);
         drop(first);
         assert!(leases.is_leased(&id));
         drop(second);
@@ -115,7 +128,7 @@ mod tests {
     async fn releasing_a_deferred_service_signals_once() {
         let leases = Arc::new(ServiceLeases::default());
         let id = mysql_id("8.4");
-        let lease = leases.acquire(id.clone());
+        let lease = leases.acquire(id.clone(), PORT);
         assert!(leases.defer(&id));
         drop(lease);
         // The permit was stored: this completes without waiting.

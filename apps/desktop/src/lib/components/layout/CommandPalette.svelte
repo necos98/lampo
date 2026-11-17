@@ -18,7 +18,7 @@
 		['ArrowUp', -1]
 	]);
 
-	/** The same operations as the pages; a project or service already being changed is left alone. */
+	/** The same operations as the pages; a project or service already being changed is left alone (a stop may still give up a start). */
 	const actions: PaletteActions = {
 		navigate: (href) => void goto(href),
 		newProject: () => void goto(NEW_PROJECT_HREF),
@@ -26,7 +26,7 @@
 			if (!projects.toggling[id]) void projects.setActive(id, active);
 		},
 		actOnServices: (action, names) => {
-			if (!names.some((name) => services.busy[name])) void services.act(action, names);
+			if (services.canAct(action, names)) void services.act(action, names);
 		},
 		showHelp: () => onhelp()
 	};

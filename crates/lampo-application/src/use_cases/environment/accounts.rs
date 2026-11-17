@@ -63,7 +63,11 @@ impl ApplyEnvironment {
         if state.accounts.get(id) == Some(&plan) {
             return Ok(());
         }
-        let endpoint = mysql_endpoint_in(registry.installed, registry.settings, &self.deps.services, series)?;
+        let mut endpoint = mysql_endpoint_in(registry.installed, registry.settings, &self.deps.services, series)?;
+        // Where it runs: a restart onto the port the settings name may wait for a lease to end.
+        if let Some(launch) = state.launches.get(id) {
+            endpoint.port = launch.port;
+        }
         let done = self.deps.mysql_accounts.provision(&endpoint, &plan).await?;
         if done.root_secured {
             tracing::info!(service = %id, "root now has a random password, stored encrypted for the current user");

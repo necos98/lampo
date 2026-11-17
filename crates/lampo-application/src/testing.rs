@@ -461,10 +461,20 @@ pub struct FakeRunner {
     pub states: Mutex<HashMap<ServiceId, ServiceState>>,
     pub calls: Mutex<Vec<String>>,
     pub launches: Mutex<Vec<ServiceLaunch>>,
+    /// While set, `start` stays `Starting` until a `stop` makes it give up (`Cancelled`), like
+    /// a long MySQL recovery interrupted by the user or by the shutdown.
+    pub hold_starts: AtomicBool,
+    give_up_start: tokio::sync::Notify,
 }
 impl FakeRunner {
     pub fn new(kind: ServiceKind) -> Arc<Self> {
-        Arc::new(Self { kind, states: Mutex::default(), calls: Mutex::default(), launches: Mutex::default() })
+        Arc::new(Self { kind, states: Mutex::default(), calls: Mutex::default(), launches: Mutex::default(), hold_starts: AtomicBool::new(false), give_up_start: tokio::sync::Notify::new() })
+    }
+    /// Completes once `id` is starting (a held start reached the runner).
+    pub async fn until_starting(&self, id: &ServiceId) {
+        while self.state(id) != ServiceState::Starting {
+            tokio::task::yield_now().await;
+        }
     }
     pub fn calls(&self) -> Vec<String> {
         lock(&self.calls).clone()
@@ -491,11 +501,19 @@ impl ServiceRunner for FakeRunner {
     async fn start(&self, launch: &ServiceLaunch) -> PortResult<()> {
         lock(&self.calls).push(format!("start:{}", launch.service));
         lock(&self.launches).push(launch.clone());
+        if self.hold_starts.load(Ordering::SeqCst) {
+            self.set(&launch.service, ServiceState::Starting);
+            self.give_up_start.notified().await;
+            return Err(PortError::Cancelled);
+        }
         self.set(&launch.service, ServiceState::Running);
         Ok(())
     }
     async fn stop(&self, service: &ServiceId) -> PortResult<()> {
         lock(&self.calls).push(format!("stop:{service}"));
+        if self.state(service) == ServiceState::Starting {
+            self.give_up_start.notify_one();
+        }
         self.set(service, ServiceState::Stopped);
         Ok(())
     }
@@ -1087,6 +1105,8 @@ pub struct World {
     pub secrets: Arc<MemMysqlPasswords>,
     /// The passwords over `secrets` (generated as `generated-<n>`).
     pub passwords: Arc<MysqlPasswords>,
+    /// The shutdown gate `env` checks, closed by [`Self::shutdown`].
+    pub gate: Arc<ShutdownGate>,
 }
 
 impl World {
@@ -1119,6 +1139,7 @@ impl World {
         let mysql_accounts = Arc::new(FakeMysqlAccounts::default());
         let secrets = Arc::new(MemMysqlPasswords::default());
         let passwords = Arc::new(MysqlPasswords::with_store(secrets.clone(), Arc::new(CountingPasswords::default())));
+        let gate = Arc::new(ShutdownGate::default());
         let mut runners: Vec<Arc<dyn ServiceRunner>> = vec![apache.clone(), mysql.clone(), redis.clone(), mailpit.clone()];
         runners.extend(extra_runners);
         let env = Arc::new(ApplyEnvironment::new(ApplyEnvironmentDeps {
@@ -1138,6 +1159,7 @@ impl World {
             paths: paths.clone(),
             events: events.clone(),
             mysql_accounts: Arc::new(MysqlAccounts::new(mysql_accounts.clone(), passwords.clone())),
+            gate: gate.clone(),
         }));
         let service_control = Arc::new(ServiceControl::new(ServiceControlDeps { runners, catalog: services.clone(), settings: settings.clone(), lifecycle: env.clone(), env: env.clone() }));
         let allocator = Arc::new(LoopbackPortAllocator::new(projects.clone(), worktrees.clone(), settings.clone(), ports.clone()));
@@ -1170,6 +1192,7 @@ impl World {
             mysql_accounts,
             secrets,
             passwords,
+            gate,
         }
     }
 
@@ -1345,6 +1368,11 @@ impl World {
 
     pub fn runners(&self) -> Vec<Arc<dyn ServiceRunner>> {
         vec![self.apache.clone(), self.mysql.clone(), self.redis.clone(), self.mailpit.clone()]
+    }
+
+    /// The app exit of this world, closing the gate its `env` checks.
+    pub fn shutdown(&self) -> Shutdown {
+        Shutdown::new(self.runners(), self.services.clone(), self.settings.clone(), self.gate.clone())
     }
 
     pub fn all_calls(&self) -> Vec<String> {

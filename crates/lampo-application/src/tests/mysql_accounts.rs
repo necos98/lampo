@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use lampo_domain::mysql::accounts::MysqlCredentials;
-use lampo_domain::ports::{ProjectRepository, WorktreeRepository};
+use lampo_domain::ports::{ProjectRepository, SettingsRepository, WorktreeRepository};
 use lampo_domain::project::{ProjectId, ProjectRoot};
 use lampo_domain::service::ServiceKind;
 use lampo_domain::tcp_port::Port;
@@ -193,4 +193,24 @@ async fn the_setting_for_new_projects_needs_no_sync() {
     assert!(!result.settings.mysql_project_credentials);
     assert_eq!(result.changes.iter().map(|c| (c.setting.as_str(), c.from.as_str(), c.to.as_str())).collect::<Vec<_>>(), [("project-credentials", "on", "off")]);
     assert!(result.sync.started.is_empty(), "only projects created later are affected");
+}
+
+/// While a lease postpones the restart onto a new port, the accounts are applied where the
+/// instance still runs.
+#[tokio::test]
+async fn the_accounts_reach_the_instance_on_its_port_while_its_restart_waits() {
+    let w = World::with_basics();
+    dedicated(&w, "shop");
+    w.hosts_in_sync();
+    w.env.sync(&cli()).await.unwrap();
+    let _lease = w.service_control.ensure_running(mysql_id("8.4")).await.unwrap();
+    let mut settings = w.settings.load().unwrap();
+    settings.services[0].port = Port::of(3316);
+    w.settings.save(&settings).unwrap();
+    dedicated(&w, "blog");
+    w.hosts_in_sync();
+
+    let report = w.env.sync(&cli()).await.unwrap();
+    assert!(report.restarted.is_empty(), "{report:?}");
+    assert_eq!(w.mysql_accounts.calls().last().map(String::as_str), Some("accounts:3306:lampo_blog=blog;lampo_shop=shop"));
 }

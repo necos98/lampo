@@ -631,7 +631,7 @@ async fn startup_waits_for_first_run_and_shutdown_stops_everything() {
     Startup::new(w.env.clone(), w.settings.clone(), w.shim_setup(), Arc::new(FakeAppLocation::default())).run().await.unwrap();
     assert_eq!(w.mysql.calls(), ["prepare:mysql-8.4", "start:mysql-8.4"]);
 
-    Shutdown::new(w.runners(), w.services.clone(), w.settings.clone()).run().await.unwrap();
+    w.shutdown().run().await.unwrap();
     assert_eq!(w.mysql.calls().last().unwrap(), "stop:mysql-8.4");
 }
 
@@ -692,7 +692,7 @@ async fn shutdown_stops_custom_mysql_series_too() {
     w.settings.0.lock().unwrap().services.push(ServiceInstanceSettings::new(custom.service_id(), Port::of(3308), false));
     w.mysql.set(&custom.service_id(), ServiceState::Running);
     w.apache.set(&ServiceId::apache(), ServiceState::Running);
-    Shutdown::new(w.runners(), w.services.clone(), w.settings.clone()).run().await.unwrap();
+    w.shutdown().run().await.unwrap();
     assert_eq!(w.mysql.calls(), ["stop:mysql-8.0"]);
     assert_eq!(w.apache.calls(), ["stop:apache"], "Apache first");
 }

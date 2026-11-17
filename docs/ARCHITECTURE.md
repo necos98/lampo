@@ -276,17 +276,26 @@ tray's "Esci" and an update run `Shutdown` themselves; at the end of the Windows
 (`apps/desktop/src-tauri/src/session_end.rs`, `orderly_exit.rs`); `RunEvent::Exit` runs the same
 stop once (a no-op after a quit). Whatever is still running then, and on a panic of the main
 thread, gets a last-resort `MYSQLShutdown<pid>` request with a short wait
-(`lampo_infra_services::stop_mysql_servers`, synchronous, no app state needed).
+(`lampo_infra_services::stop_mysql_servers`, synchronous, no app state needed). `Shutdown` first
+closes the `ShutdownGate`, which `ApplyEnvironment` shares: from then on no sync (one already
+running, the startup one, the one applying a postponed change) and no single-service call starts
+or restarts a service (`app-unavailable`).
 
 Inside the app, `ApplyEnvironment` is the single owner of the service lifecycle: full syncs and
 single-service starts, restarts and stops (`lampo up/down/restart <service>`, database
 operations) share its lock and its record of each service's launch, so a service started
-outside a sync is still restarted when its configuration changes. A database operation (import,
+outside a sync is still restarted when its configuration changes. A stop does not wait for a
+start still waiting for readiness (a MySQL recovery can take up to an hour): it tells the
+runner to give that start up before taking the lock (the start ends `cancelled`, a warning in a
+sync), and the GUI keeps «Ferma» enabled while a service starts. A database operation (import,
 export, worktree database clone) holds a lease on its MySQL instance: while it runs, a sync
 postpones stopping or restarting that instance (with a warning) and a manual stop or restart is
-a `conflict`; the postponed change is applied once the last lease is released. A sync that fails
-returns its first failure, with every failure in `details.errors` (`[{code, message}]`); the
-CLI adds the `--allow-elevation` hint when one of them is `elevation-required`.
+a `conflict`; the postponed change is applied once the last lease is released. The lease names
+the port the instance runs on, so other database operations meanwhile reach it there and not on
+a new port the settings name. A sync that fails returns its first failure, with every failure
+in `details.errors` (`[{code, message, details?}]`); the CLI adds the `--allow-elevation` hint
+when one of them is `elevation-required`. The syncs that never prompt for elevation (worktree
+environments, postponed changes) ignore a pending hosts change but return any other failure.
 
 A running service that exits without being asked to (not a stop, not a start that fails) is a
 crash: its runner publishes `ServiceCrashed`, and with the `auto_restart_services` setting on

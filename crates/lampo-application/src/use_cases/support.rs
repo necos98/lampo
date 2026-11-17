@@ -21,6 +21,9 @@ use super::allocation::SiteSnapshot;
 use super::environment::EnvironmentSync;
 use super::mysql_accounts::ConnectionPasswords;
 use super::service_catalog::{ServiceCatalog, SiteMysqlClient};
+use super::service_leases::ServiceLease;
+use super::services::ServiceEnsurer;
+use super::sync_outcome::first_failure_other_than;
 use crate::context::{CallContext, ElevationPolicy};
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -283,25 +286,44 @@ pub(crate) fn mysql_endpoint_in(packages: &[InstalledPackage], settings: &Settin
     Ok(MysqlEndpoint { series, client_dir, port, user: user.to_string() })
 }
 
+/// `endpoint` on the port the leased instance runs on: the settings may name a new one while a
+/// sync waits for the leases to end to restart the instance onto it.
+pub(crate) fn leased_endpoint(endpoint: MysqlEndpoint, lease: &ServiceLease) -> MysqlEndpoint {
+    MysqlEndpoint { port: lease.port(), ..endpoint }
+}
+
+/// Starts the MySQL `series` instance if needed and leases it (no sync restarts it while the
+/// lease lives), with its [`leased_endpoint`]. The endpoint is checked first: a missing package
+/// fails before anything starts.
+pub(crate) async fn lease_mysql(
+    services: &dyn ServiceEnsurer,
+    installed: &dyn InstalledPackageRegistry,
+    settings: &Settings,
+    catalog: &ServiceCatalog,
+    series: MysqlSeries,
+) -> AppResult<(MysqlEndpoint, ServiceLease)> {
+    let endpoint = mysql_endpoint(installed, settings, catalog, series)?;
+    let lease = services.ensure_running(series.service_id()).await?;
+    Ok((leased_endpoint(endpoint, &lease), lease))
+}
+
 // ---------------------------------------------------------------------------------------------
 // Environment sync
 // ---------------------------------------------------------------------------------------------
 
 /// Syncs without ever prompting for elevation, and does not fail because an *unrelated* hosts
 /// change is pending (worktree environments never touch the hosts file). `sites`: the registry
-/// a commit handed on ([`EnvironmentSync::sync_sites`]), if any.
+/// a commit handed on ([`EnvironmentSync::sync_sites`]), if any. Any other failure of the sync is
+/// returned, also one that came after the pending hosts change (a busy port, a failed start).
 pub(crate) async fn sync_without_elevation(env: &dyn EnvironmentSync, sites: Option<SiteSnapshot>, ctx: &CallContext) -> AppResult<()> {
     let ctx = CallContext { origin: ctx.origin, elevation: ElevationPolicy::Deny };
     let synced = match sites {
         Some(sites) => env.sync_sites(sites, &ctx).await,
         None => env.sync(&ctx).await,
     };
-    match synced {
-        Ok(_) => Ok(()),
-        Err(e) if e.code == ErrorCode::ElevationRequired => {
-            tracing::info!("hosts file left unchanged: {}", e.message);
-            Ok(())
-        }
-        Err(e) => Err(e),
+    let Err(e) = synced else { return Ok(()) };
+    if e.code == ErrorCode::ElevationRequired {
+        tracing::info!("hosts file left unchanged: {}", e.message);
     }
+    first_failure_other_than(e, ErrorCode::ElevationRequired).map_or(Ok(()), Err)
 }

@@ -11,7 +11,7 @@ use lampo_domain::PortError;
 use super::service_catalog::ServiceCatalog;
 use super::service_leases::ServiceLease;
 use super::services::ServiceEnsurer;
-use super::support::{load_site, mysql_endpoint, validation};
+use super::support::{lease_mysql, leased_endpoint, load_site, mysql_endpoint, validation};
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
 
@@ -53,8 +53,7 @@ impl DatabaseService {
     async fn target(&self, site: &str) -> AppResult<Target> {
         let (site_id, project, worktree) = load_site(self.projects.as_ref(), self.worktrees.as_ref(), site)?;
         let series = project.environment.mysql().ok_or_else(|| validation(format!("`{site_id}` does not use MySQL")))?;
-        let endpoint = mysql_endpoint(self.installed.as_ref(), &self.settings.load()?, &self.catalog, series)?;
-        let lease = self.services.ensure_running(series.service_id()).await?;
+        let (endpoint, lease) = lease_mysql(self.services.as_ref(), self.installed.as_ref(), &self.settings.load()?, &self.catalog, series).await?;
         let site_database = match &worktree {
             Some(w) => w.database_name(&project).cloned(),
             None => project.database().cloned(),
@@ -117,7 +116,7 @@ impl DatabaseService {
             }
         };
         let created = match self.services.ensure_running(series.service_id()).await {
-            Ok(_lease) => match self.admin.create(&endpoint, &name).await {
+            Ok(lease) => match self.admin.create(&leased_endpoint(endpoint, &lease), &name).await {
                 Ok(()) => Ok(DatabaseSetupStatusDto::Created),
                 Err(PortError::AlreadyExists { .. }) => Ok(DatabaseSetupStatusDto::AlreadyExists),
                 Err(e) => Err(AppError::from(e)),

@@ -50,7 +50,7 @@ installare, Lampo ferma Apache, MySQL e gli altri servizi in modo pulito.
 | `apps/desktop/src-tauri/capabilities/default.json` | Permessi `updater:default` e `process:allow-restart` |
 | `apps/desktop/src-tauri/src/lib.rs` | Registra i plugin `updater` e `process` (dopo `single-instance`) |
 | `apps/desktop/src-tauri/src/commands/app.rs` | Comandi `prepare_update` / `cancel_update` |
-| `crates/lampo-application/src/use_cases/lifecycle.rs` | `Shutdown` + `ShutdownGate` (pipe chiusa alle mutazioni), `Startup` (posizione dell'app, refresh shim) |
+| `crates/lampo-application/src/use_cases/lifecycle.rs` | `Shutdown` + `ShutdownGate` (pipe chiusa alle mutazioni; condiviso con `ApplyEnvironment`, che da allora non avvia né riavvia servizi), `Startup` (posizione dell'app, refresh shim) |
 | `crates/lampo-infra-store/src/shim_installer.rs` | `ShimInstaller::refresh` (shim e copia della CLI) |
 | `crates/lampo-infra-store/src/app_location.rs` | `app-location.txt`: dove la copia della CLI trova l'app |
 | `apps/desktop/src/lib/backend/ports.ts` | Porta `Updater` del `Backend` (reale in `tauri.ts`, simulata in `mock/`) |

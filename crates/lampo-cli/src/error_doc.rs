@@ -55,7 +55,7 @@ pub fn hint(error: &AppError) -> String {
     own.to_string()
 }
 
-/// `true` when `details.errors` (`[{code, message}]`) lists `code`.
+/// `true` when `details.errors` (`[{code, message, details?}]`) lists `code`.
 fn also_failed_with(error: &AppError, code: ErrorCode) -> bool {
     let Ok(wanted) = serde_json::to_value(code) else { return false };
     let errors = error.details.as_ref().and_then(|d| d.get("errors")).and_then(Value::as_array);

@@ -117,6 +117,8 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     // --- use cases ---
     // One scanner for the whole app: it caches the modules compiled into each PHP build.
     let php_extensions = Arc::new(PhpExtensionsQuery::new(installed.clone(), Arc::new(packages::FsPhpExtensionScanner::default())));
+    // Closed by `Shutdown`: the control pipe, the crash watchdog and the environment sync check it.
+    let shutdown_gate = Arc::new(ShutdownGate::default());
     let environment = Arc::new(ApplyEnvironment::new(ApplyEnvironmentDeps {
         projects: projects.clone(),
         worktrees: worktrees.clone(),
@@ -134,6 +136,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
         paths: paths.clone(),
         events: events.clone(),
         mysql_accounts: Arc::new(MysqlAccounts::new(mysql_admin, passwords)),
+        gate: shutdown_gate.clone(),
     }));
     let env: Arc<dyn EnvironmentSync> = environment.clone();
 
@@ -230,7 +233,7 @@ pub fn build(handle: AppHandle) -> Result<Built, lampo_application::AppError> {
     }));
     let worktree_down = Arc::new(WorktreeDown::new(worktrees.clone(), allocator.clone(), worktree_databases.clone(), env.clone(), events.clone()));
     let prune_worktrees = Arc::new(PruneWorktrees::new(projects.clone(), worktrees.clone(), allocator.clone(), fs.clone(), worktree_databases, env.clone(), events.clone()));
-    let shutdown = Arc::new(Shutdown::new(runners, service_catalog.clone(), settings.clone()));
+    let shutdown = Arc::new(Shutdown::new(runners, service_catalog.clone(), settings.clone(), shutdown_gate));
     let shims = Arc::new(ShimSetup::new(shim_installer.clone(), user_path.clone(), locator.clone(), paths.clone(), shim_tools.clone()));
     // Claude Code: user scope only, never under an isolated data root (`LAMPO_HOME`).
     let claude_code = Arc::new(ClaudeCodeSetup::new(ClaudeCodeSetupDeps {

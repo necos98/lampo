@@ -22,6 +22,7 @@ use lampo_domain::PortError;
 use super::allocation::SiteSnapshot;
 use super::mysql_accounts::MysqlAccounts;
 use super::generation::{ConfigSnapshot, php_ini_specs, runner_for, shim_index, web_config};
+use super::lifecycle::ShutdownGate;
 use super::php_extensions::PhpExtensionsQuery;
 use super::service_catalog::ServiceCatalog;
 use super::service_leases::{ServiceLease, ServiceLeases};
@@ -36,6 +37,7 @@ use crate::error::{AppError, AppResult, ErrorCode};
 
 mod accounts;
 mod revival;
+mod service_lifecycle;
 
 /// "Make the machine match the config." Called after every mutation by the use cases that
 /// change projects, worktrees, settings or packages (dependency inversion: they do not know
@@ -66,13 +68,15 @@ pub trait ServiceLifecycle: Send + Sync {
     async fn ensure(&self, service: &ServiceId) -> AppResult<bool>;
 
     /// [`Self::ensure`], then a lease keeping `service` running as it is until dropped: syncs
-    /// postpone stopping or restarting it, and apply that once the last lease is released.
+    /// postpone stopping or restarting it, and apply that once the last lease is released. The
+    /// lease names the port the instance runs on ([`ServiceLease::port`]).
     async fn lease(&self, service: &ServiceId) -> AppResult<ServiceLease>;
 
     /// Restarts `service` with its current configuration. `Conflict` while it is leased.
     async fn restart(&self, service: &ServiceId) -> AppResult<()>;
 
-    /// Stops `service` unless it is stopped. `Ok(true)` when it was stopped now; `Conflict`
+    /// Stops `service` unless it is stopped; a start of it still waiting for readiness is given
+    /// up at once (`Cancelled` for that start). `Ok(true)` when it was stopped now; `Conflict`
     /// while it is leased.
     async fn stop(&self, service: &ServiceId) -> AppResult<bool>;
 }
@@ -98,6 +102,9 @@ pub struct ApplyEnvironmentDeps {
     pub events: Arc<dyn EventPublisher>,
     /// Root's password and the projects' accounts on the running MySQL instances.
     pub mysql_accounts: Arc<MysqlAccounts>,
+    /// Closed by [`super::Shutdown`]: from then on no sync and no single-service call starts or
+    /// restarts a service (`AppUnavailable`).
+    pub gate: Arc<ShutdownGate>,
 }
 
 #[derive(Default)]
@@ -142,7 +149,9 @@ pub(crate) fn is_up(state: ServiceState) -> bool {
 ///    only when `ctx.elevation == Allow`, otherwise remember the failure and continue;
 /// 5. `plan_services`: stop unneeded services, start missing ones (port check first), restart
 ///    the ones whose configuration changed (Apache: config or php.ini). A leased service is
-///    neither stopped nor restarted: a warning says so and the change waits for the release;
+///    neither stopped nor restarted: a warning says so and the change waits for the release. A
+///    start given up because the service was stopped meanwhile is a warning too. Once the
+///    shutdown gate is closed nothing more starts (`AppUnavailable`);
 /// 6. return the report, or the first failure (`ConfigRejected`, `ElevationRequired`,
 ///    `ElevationDenied`, `PortInUse`, …) with the report in `details.report` and every failure
 ///    in `details.errors`.
@@ -276,39 +285,43 @@ impl ApplyEnvironment {
         self.deps.services.launch(id, &self.deps.settings.load()?, &self.deps.installed.list()?, &self.deps.paths)
     }
 
-    /// `PortInUse` if one of `ports` is taken, otherwise `prepare` + `start`.
+    /// `AppUnavailable` once the shutdown gate is closed: the services are being stopped for
+    /// good, a start now would be killed with the process.
+    fn refuse_if_going_away(&self) -> AppResult<()> {
+        if !self.deps.gate.is_closed() {
+            return Ok(());
+        }
+        Err(AppError::new(ErrorCode::AppUnavailable, "the Lampo app is shutting down (quit or update in progress): no service starts"))
+    }
+
+    /// `PortInUse` if one of `ports` is taken, otherwise `prepare` + `start`. The shutdown gate
+    /// is checked before each step (preparing can take a while: a new MySQL data dir).
     async fn start_with(&self, runner: &dyn ServiceRunner, launch: &ServiceLaunch, ports: &[Port]) -> AppResult<()> {
+        self.refuse_if_going_away()?;
         if let Some(busy) = self.port_busy(ports) {
             return Err(busy);
         }
         runner.prepare(launch).await?;
+        self.refuse_if_going_away()?;
         Ok(runner.start(launch).await?)
     }
 
-    async fn restart_with(runner: &dyn ServiceRunner, launch: &ServiceLaunch) -> AppResult<()> {
+    /// `prepare` + `restart`, with the shutdown gate checked as in [`Self::start_with`].
+    async fn restart_with(&self, runner: &dyn ServiceRunner, launch: &ServiceLaunch) -> AppResult<()> {
+        self.refuse_if_going_away()?;
         runner.prepare(launch).await?;
+        self.refuse_if_going_away()?;
         Ok(runner.restart(launch).await?)
     }
 
-    /// `Conflict` while `id` is leased.
-    fn refuse_if_leased(&self, id: &ServiceId, action: &str) -> AppResult<()> {
-        if !self.leases.is_leased(id) {
-            return Ok(());
+    /// A (re)start of `id` that failed with `error`: a start given up because the service was
+    /// stopped meanwhile (`lampo down`, the GUI, the shutdown) is only a warning.
+    fn start_failed(id: &ServiceId, error: AppError, out: &mut Outcome) {
+        if error.code == ErrorCode::Cancelled {
+            out.report.warnings.push(format!("{id} was stopped while it was starting"));
+        } else {
+            out.fail(error);
         }
-        Err(AppError::new(ErrorCode::Conflict, format!("{id} is in use by a running database operation (import, export, clone): {action} it when the operation finishes")))
-    }
-
-    /// [`ServiceLifecycle::ensure`], with the lock held.
-    async fn ensure_locked(&self, state: &mut SyncState, id: &ServiceId) -> AppResult<bool> {
-        let runner = self.runner(id)?;
-        if is_up(runner.status(id).state) {
-            return Ok(false);
-        }
-        let launch = self.current_launch(id)?;
-        self.start_with(runner.as_ref(), &launch, &launch.ports()).await?;
-        state.started(id.clone(), launch);
-        self.provision_started_mysql(state, id).await;
-        Ok(true)
     }
 
     async fn sync_services(&self, snap: &ConfigSnapshot, state: &mut SyncState, web_changed: bool, out: &mut Outcome) {
@@ -339,6 +352,11 @@ impl ApplyEnvironment {
             needed.push(ServiceId::apache());
         }
         for id in needed {
+            // The app may have started going away while an earlier service was starting.
+            if let Err(going_away) = self.refuse_if_going_away() {
+                out.fail(going_away);
+                break;
+            }
             let launch = match catalog.launch(&id, &snap.settings, &snap.installed, &self.deps.paths) {
                 Ok(l) => l,
                 Err(e) if e.code == ErrorCode::PackageMissing => {
@@ -368,9 +386,9 @@ impl ApplyEnvironment {
                         out.report.warnings.push(format!("{id} keeps its previous configuration while a database operation is using it: it restarts when the operation finishes"));
                         continue;
                     }
-                    match Self::restart_with(runner.as_ref(), &launch).await {
+                    match self.restart_with(runner.as_ref(), &launch).await {
                         Ok(()) => out.report.restarted.push(id.to_string()),
-                        Err(e) => out.fail(e),
+                        Err(e) => Self::start_failed(&id, e, out),
                     }
                 }
             } else {
@@ -379,7 +397,7 @@ impl ApplyEnvironment {
                     None => launch.ports(),
                 };
                 if let Err(e) = self.start_with(runner.as_ref(), &launch, &ports).await {
-                    out.fail(e);
+                    Self::start_failed(&id, e, out);
                     continue;
                 }
                 out.report.started.push(id.to_string());
@@ -439,42 +457,5 @@ impl EnvironmentSync for ApplyEnvironment {
 
     async fn sync_without(&self, retiring: &PackageId, ctx: &CallContext) -> AppResult<SyncReportDto> {
         self.reconcile(Some(retiring), None, ctx).await
-    }
-}
-
-#[async_trait]
-impl ServiceLifecycle for ApplyEnvironment {
-    async fn ensure(&self, service: &ServiceId) -> AppResult<bool> {
-        let mut state = self.lock.lock().await;
-        self.ensure_locked(&mut state, service).await
-    }
-
-    async fn lease(&self, service: &ServiceId) -> AppResult<ServiceLease> {
-        let mut state = self.lock.lock().await;
-        self.ensure_locked(&mut state, service).await?;
-        // Taken before the lock is released: no sync can slip in between.
-        Ok(self.leases.acquire(service.clone()))
-    }
-
-    async fn restart(&self, service: &ServiceId) -> AppResult<()> {
-        let mut state = self.lock.lock().await;
-        self.refuse_if_leased(service, "restart")?;
-        let runner = self.runner(service)?;
-        let launch = self.current_launch(service)?;
-        Self::restart_with(runner.as_ref(), &launch).await?;
-        state.launches.insert(service.clone(), launch);
-        Ok(())
-    }
-
-    async fn stop(&self, service: &ServiceId) -> AppResult<bool> {
-        let mut state = self.lock.lock().await;
-        self.refuse_if_leased(service, "stop")?;
-        let runner = self.runner(service)?;
-        let stopped = runner.status(service).state != ServiceState::Stopped;
-        if stopped {
-            runner.stop(service).await?;
-        }
-        state.forget(service);
-        Ok(stopped)
     }
 }

@@ -3,6 +3,7 @@
 //! instance from being restarted or stopped by a sync.
 
 use std::sync::atomic::Ordering;
+use std::future::Future;
 use std::time::Duration;
 
 use lampo_domain::mysql::MysqlSeries;
@@ -12,12 +13,14 @@ use lampo_domain::service::{ServiceId, ServiceState};
 use lampo_domain::tcp_port::Port;
 
 use super::{cli, gui};
-use crate::dto::{DatabaseImportRequest, ServicesRequest};
+use crate::dto::{DatabaseImportRequest, DatabaseRequest, ServicesRequest};
 use crate::error::ErrorCode;
 use crate::testing::{RecordingProgress, World};
 use crate::use_cases::{EnvironmentSync, ServiceEnsurer};
 
 const POSTPONED_CHANGE_TIMEOUT: Duration = Duration::from_secs(5);
+/// A held start never completes by itself: a stop that waited for it would never return.
+const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn default_mysql() -> ServiceId {
     MysqlSeries::DEFAULT.service_id()
@@ -49,6 +52,11 @@ async fn apply_postponed_until(w: &World, done: impl Fn() -> bool) {
         () = w.env.apply_deferred_changes() => unreachable!("the loop never ends"),
         result = tokio::time::timeout(POSTPONED_CHANGE_TIMEOUT, applied) => result.expect("the postponed change was never applied"),
     }
+}
+
+/// Runs `first` and `second` concurrently; fails with `stuck` unless both complete in time.
+async fn together<A: Future, B: Future>(first: A, second: B, stuck: &str) -> (A::Output, B::Output) {
+    tokio::time::timeout(STOP_TIMEOUT, async { tokio::join!(first, second) }).await.expect(stuck)
 }
 
 #[tokio::test]
@@ -149,6 +157,99 @@ async fn a_lease_starts_a_stopped_service_and_ends_with_its_holder() {
     assert_eq!(report.restarted, ["mysql-8.4"]);
     let report = w.service_control.down(services(&[&default_mysql()])).await.unwrap();
     assert_eq!(report.stopped, ["mysql-8.4"]);
+}
+
+#[tokio::test]
+async fn a_database_operation_reaches_mysql_on_the_port_it_runs_on_while_its_restart_waits() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", false);
+    w.hosts_in_sync();
+    w.env.sync(&gui()).await.unwrap();
+    w.db.hold_import.store(true, Ordering::SeqCst);
+    let db = w.database_service();
+    let (progress, cancel) = (RecordingProgress::default(), CancelFlag::new());
+    let request = DatabaseImportRequest { site: "shop".into(), name: None, file: "D:\\dump.sql".into(), allow_database_switch: false, compat: None };
+
+    let during_import = async {
+        w.db.import_started.notified().await;
+        move_default_mysql_to(&w, 3316);
+        w.env.sync(&gui()).await.unwrap();
+        let created = db.create(&DatabaseRequest { site: "shop".into(), name: Some("extra".into()) }).await;
+        w.db.import_resumed.notify_one();
+        created
+    };
+    let (imported, created) = tokio::join!(db.import(&request, &progress, &cancel), during_import);
+
+    imported.unwrap();
+    created.unwrap();
+    assert_eq!(w.db.calls().iter().filter(|c| c.starts_with("create:")).collect::<Vec<_>>(), ["create:3306:extra"], "the restart onto 3316 is still postponed");
+}
+
+#[tokio::test]
+async fn a_stop_gives_up_a_slow_manual_start_without_waiting_for_it() {
+    let w = World::with_basics();
+    w.hosts_in_sync();
+    w.mysql.hold_starts.store(true, Ordering::SeqCst);
+    let stop = async {
+        w.mysql.until_starting(&default_mysql()).await;
+        w.service_control.down(services(&[&default_mysql()])).await
+    };
+    let (started, stopped) = together(w.service_control.up(services(&[&default_mysql()]), &cli()), stop, "the stop waited for the start").await;
+
+    assert_eq!(started.unwrap_err().code, ErrorCode::Cancelled);
+    assert_eq!(stopped.unwrap().stopped, ["mysql-8.4"]);
+    assert_eq!(w.mysql.state(&default_mysql()), ServiceState::Stopped);
+}
+
+#[tokio::test]
+async fn a_stop_gives_up_the_slow_start_of_a_sync() {
+    let w = World::with_basics();
+    w.hosts_in_sync();
+    w.mysql.hold_starts.store(true, Ordering::SeqCst);
+    let stop = async {
+        w.mysql.until_starting(&default_mysql()).await;
+        w.service_control.down(services(&[&default_mysql()])).await
+    };
+    let (synced, stopped) = together(w.env.sync(&gui()), stop, "the stop waited for the sync").await;
+
+    let report = synced.unwrap();
+    assert!(report.started.is_empty(), "{report:?}");
+    assert!(report.warnings.iter().any(|m| m.contains("mysql-8.4") && m.contains("stopped while it was starting")), "{:?}", report.warnings);
+    assert_eq!(stopped.unwrap().stopped, ["mysql-8.4"]);
+    assert_eq!(w.mysql.state(&default_mysql()), ServiceState::Stopped);
+}
+
+#[tokio::test]
+async fn a_sync_running_when_the_app_goes_away_starts_nothing_more() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", true);
+    w.hosts_in_sync();
+    w.mysql.hold_starts.store(true, Ordering::SeqCst);
+    let shutdown = w.shutdown();
+    let quit = async {
+        w.mysql.until_starting(&default_mysql()).await;
+        shutdown.run().await
+    };
+    let (synced, quitted) = together(w.env.sync(&gui()), quit, "the shutdown waited for the sync").await;
+
+    quitted.unwrap();
+    assert_eq!(synced.unwrap_err().code, ErrorCode::AppUnavailable);
+    assert!(!w.apache.calls().contains(&"start:apache".to_string()), "{:?}", w.apache.calls());
+    assert_eq!(w.mysql.state(&default_mysql()), ServiceState::Stopped);
+    assert_eq!(w.apache.state(&ServiceId::apache()), ServiceState::Stopped);
+}
+
+#[tokio::test]
+async fn once_the_app_goes_away_no_sync_start_or_lease_brings_a_service_up() {
+    let w = World::with_basics();
+    w.project("shop", "C:\\sites\\shop", true);
+    w.hosts_in_sync();
+    w.shutdown().run().await.unwrap();
+
+    assert_eq!(w.env.sync(&gui()).await.unwrap_err().code, ErrorCode::AppUnavailable);
+    assert_eq!(w.service_control.up(services(&[&default_mysql()]), &cli()).await.unwrap_err().code, ErrorCode::AppUnavailable);
+    assert_eq!(w.service_control.ensure_running(default_mysql()).await.unwrap_err().code, ErrorCode::AppUnavailable);
+    assert!(w.all_calls().iter().all(|c| !c.starts_with("start:") && !c.starts_with("restart:")), "{:?}", w.all_calls());
 }
 
 #[tokio::test]

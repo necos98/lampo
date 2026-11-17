@@ -9,8 +9,8 @@ export type ServiceAction = 'start' | 'stop' | 'restart';
 /** Live status of Apache, MySQL instances and Redis, plus start/stop/restart. */
 export class ServicesStore {
 	readonly list: Resource<ServiceStatus[]>;
-	/** Services with a user-triggered action in flight. */
-	busy = $state<Record<string, boolean>>({});
+	/** The user-triggered action in flight per service. */
+	busy = $state<Record<string, ServiceAction>>({});
 	/** Last failed action per service, to show port-in-use / config output. */
 	failures = $state<Record<string, unknown>>({});
 
@@ -29,10 +29,15 @@ export class ServicesStore {
 		return (this.list.data ?? []).some((s) => s.state === 'running' || s.state === 'starting');
 	}
 
-	/** An empty `services` array acts on every planned service. */
+	/** Whether `action` may run on `names` now: none has an action in flight, except a start that a stop gives up. */
+	canAct(action: ServiceAction, names: string[]): boolean {
+		return names.every((n) => this.busy[n] === undefined || (action === 'stop' && this.busy[n] === 'start'));
+	}
+
+	/** An empty `services` array acts on every planned service. A start given up by a stop is no failure. */
 	async act(action: ServiceAction, services: string[] = []): Promise<void> {
 		const names = services.length ? services : (this.list.data ?? []).map((s) => s.service);
-		for (const n of names) this.busy[n] = true;
+		for (const n of names) this.busy[n] = action;
 		const cmd = this.#backend.commands;
 		const call = action === 'start' ? cmd.startServices : action === 'stop' ? cmd.stopServices : cmd.restartServices;
 		const result = await this.#runner.run(() => call({ services }), {
@@ -40,9 +45,10 @@ export class ServicesStore {
 			retry: () => this.act(action, services),
 			serviceLogs: () => this.#failedAmong(names)
 		});
-		for (const n of names) delete this.busy[n];
+		// A stop that overtook this action (giving up its start) owns the flag now.
+		for (const n of names) if (this.busy[n] === action) delete this.busy[n];
 		for (const n of names) {
-			if (result.ok) delete this.failures[n];
+			if (result.ok || result.error.code === 'cancelled') delete this.failures[n];
 			else if (services.length) this.failures[n] = result.error;
 		}
 		await this.list.load();

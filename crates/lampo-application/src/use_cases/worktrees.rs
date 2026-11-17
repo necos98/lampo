@@ -22,7 +22,7 @@ use super::environment::EnvironmentSync;
 use super::service_catalog::ServiceCatalog;
 use super::service_leases::ServiceLease;
 use super::services::ServiceEnsurer;
-use super::support::{load_project, mysql_endpoint, sync_without_elevation, validation, worktree_dto};
+use super::support::{lease_mysql, load_project, sync_without_elevation, validation, worktree_dto};
 use crate::context::CallContext;
 use crate::dto::*;
 use crate::error::{AppError, AppResult, ErrorCode};
@@ -100,13 +100,12 @@ impl WorktreeDatabases {
         Self { projects, settings, installed, database, services, catalog }
     }
 
-    /// Starts the parent's MySQL instance if needed and returns its endpoint, with the lease
-    /// that keeps it running (no sync restarts it) while the caller uses it.
+    /// Starts the parent's MySQL instance if needed and returns its endpoint (on the port the
+    /// instance runs on), with the lease that keeps it running (no sync restarts it) while the
+    /// caller uses it.
     async fn mysql_for(&self, parent: &Project) -> AppResult<(lampo_domain::ports::MysqlEndpoint, ServiceLease)> {
         let series = parent.environment.mysql().ok_or_else(|| validation(format!("project `{}` does not use MySQL", parent.id)))?;
-        let endpoint = mysql_endpoint(self.installed.as_ref(), &self.settings.load()?, &self.catalog, series)?;
-        let lease = self.services.ensure_running(series.service_id()).await?;
-        Ok((endpoint, lease))
+        lease_mysql(self.services.as_ref(), self.installed.as_ref(), &self.settings.load()?, &self.catalog, series).await
     }
 
     /// The databases already on the parent's instance, which a new environment's own database

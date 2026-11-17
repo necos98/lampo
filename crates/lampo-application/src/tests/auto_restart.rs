@@ -19,7 +19,7 @@ use super::{cli, gui};
 use crate::dto::ServicesRequest;
 use crate::error::{AppError, AppResult};
 use crate::testing::{ManualClock, RecordingEvents, World};
-use crate::use_cases::{Crash, CrashRecovery, CrashRelay, EnvironmentSync, Revival, ServiceAutoRestart, ServiceAutoRestartDeps, Shutdown, ShutdownGate};
+use crate::use_cases::{Crash, CrashRecovery, CrashRelay, EnvironmentSync, Revival, ServiceAutoRestart, ServiceAutoRestartDeps, ShutdownGate};
 
 const STABLE_MS: u64 = 60_000;
 
@@ -163,7 +163,7 @@ async fn nothing_restarts_when_the_setting_is_off() {
 #[tokio::test]
 async fn nothing_restarts_while_the_app_goes_away() {
     let w = World::with_basics();
-    let shutdown = Shutdown::new(Vec::new(), w.services.clone(), w.settings.clone());
+    let shutdown = w.shutdown();
     shutdown.run().await.unwrap();
     let recovery = ScriptedRecovery::answering([]);
     let dog = watchdog(&w, recovery.clone(), shutdown.gate());

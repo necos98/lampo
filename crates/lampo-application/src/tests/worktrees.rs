@@ -3,15 +3,17 @@
 use std::sync::atomic::Ordering;
 
 use lampo_domain::events::DomainEvent;
-use lampo_domain::ports::WorktreeRepository;
+use lampo_domain::mysql::MysqlSeries;
+use lampo_domain::ports::{SettingsRepository, WorktreeRepository};
 use lampo_domain::progress::CancelFlag;
 use lampo_domain::project::ProjectRoot;
+use lampo_domain::tcp_port::Port;
 
 use super::gui;
 use crate::dto::*;
 use crate::error::ErrorCode;
 use crate::testing::{RecordingProgress, World};
-use crate::use_cases::WorktreeQueries;
+use crate::use_cases::{EnvironmentSync, ServiceEnsurer, WorktreeQueries};
 
 fn setup() -> World {
     let w = World::with_basics();
@@ -285,4 +287,33 @@ async fn up_picks_a_slug_whose_alias_no_project_uses() {
     let result = up(&w, r"D:\wt\login", DatabaseModeDto::Shared).await.unwrap();
     assert_eq!(result.environment.site, "shop@feature-login-2");
     assert_eq!(result.environment.urls[1], "http://feature-login-2.shop.localhost");
+}
+
+#[tokio::test]
+async fn up_reports_a_failure_that_comes_after_an_unrelated_pending_hosts_change() {
+    let w = setup();
+    // An unrelated hosts change is pending (a project without its hosts entry yet) and the
+    // hosts step runs before the services.
+    w.project("blog", r"C:\sites\blog", true);
+    w.ports.busy(80, "nginx.exe (pid 9)");
+    let err = up(&w, r"D:\wt\login", DatabaseModeDto::Shared).await.unwrap_err();
+    assert_eq!(err.code, ErrorCode::PortInUse, "{err}");
+    assert_eq!(err.details.unwrap()["port"], 80, "with its own details");
+    assert_eq!(w.hosts.writes.load(Ordering::SeqCst), 0, "still no UAC prompt");
+}
+
+#[tokio::test]
+async fn up_creates_its_database_on_the_port_mysql_runs_on_while_its_restart_waits() {
+    let w = setup();
+    w.env.sync(&gui()).await.unwrap();
+    let lease = w.service_control.ensure_running(MysqlSeries::DEFAULT.service_id()).await.unwrap();
+    let mut settings = w.settings.load().unwrap();
+    settings.services[0].port = Port::of(3316);
+    w.settings.save(&settings).unwrap();
+    w.env.sync(&gui()).await.unwrap();
+
+    up(&w, r"D:\wt\login", DatabaseModeDto::Fresh).await.unwrap();
+    let creates: Vec<String> = w.db.calls().into_iter().filter(|c| c.starts_with("create:")).collect();
+    assert!(creates.len() == 1 && creates[0].starts_with("create:3306:"), "the restart onto 3316 is still postponed: {creates:?}");
+    drop(lease);
 }

@@ -91,7 +91,8 @@ impl Startup {
 }
 
 /// Closed while the app is going away (quit, or an update about to replace it): front-ends
-/// that could start services again (the control pipe) refuse mutating requests meanwhile.
+/// that could start services again (the control pipe) refuse mutating requests meanwhile, and
+/// the environment sync ([`super::ApplyEnvironment`]) starts and restarts nothing.
 #[derive(Debug, Default)]
 pub struct ShutdownGate(AtomicBool);
 
@@ -117,8 +118,9 @@ pub struct Shutdown {
 
 impl Shutdown {
     /// `settings` + `catalog` tell which services are configured (every MySQL series, every kind).
-    pub fn new(runners: Vec<Arc<dyn ServiceRunner>>, catalog: Arc<ServiceCatalog>, settings: Arc<dyn SettingsRepository>) -> Self {
-        Self { runners, catalog, settings, gate: Arc::default() }
+    /// `gate`: the one the environment sync checks too ([`super::ApplyEnvironmentDeps::gate`]).
+    pub fn new(runners: Vec<Arc<dyn ServiceRunner>>, catalog: Arc<ServiceCatalog>, settings: Arc<dyn SettingsRepository>, gate: Arc<ShutdownGate>) -> Self {
+        Self { runners, catalog, settings, gate }
     }
 
     /// Closed by [`Shutdown::run`], for the front-ends to check.
@@ -132,9 +134,10 @@ impl Shutdown {
         self.gate.set(false);
     }
 
-    /// Closes the gate, then stops Apache first and the rest of the configured services. Tries
-    /// every service; returns the first error. Unreadable settings are an error (the Job Object
-    /// still kills whatever is left when the app exits).
+    /// Closes the gate (no sync or single-service call starts anything from then on), then stops
+    /// Apache first and the rest of the configured services, giving up the starts still waiting
+    /// for readiness. Tries every service; returns the first error. Unreadable settings are an
+    /// error (the Job Object still kills whatever is left when the app exits).
     pub async fn run(&self) -> AppResult<()> {
         self.gate.set(true);
         let ids = self.catalog.configured(&self.settings.load()?);

@@ -18,8 +18,11 @@
 
 	const tones: Record<ServiceState, Tone> = { running: 'ok', starting: 'busy', stopping: 'busy', stopped: 'idle', failed: 'error', unknown: 'idle' };
 	const label = $derived(service.label || service.service);
-	const busy = $derived(services.busy[service.service] === true || service.state === 'starting' || service.state === 'stopping');
+	const busy = $derived(!services.canAct('start', [service.service]) || service.state === 'starting' || service.state === 'stopping');
 	const running = $derived(service.state === 'running');
+	/** A start still waiting for readiness (a long MySQL recovery) can be given up. */
+	const stoppable = $derived(running || service.state === 'starting');
+	const stopBusy = $derived(!services.canAct('stop', [service.service]) || service.state === 'stopping');
 	const stateLabel = $derived(service.state === 'starting' && service.message ? t.startingWith(service.message) : t.states[service.state]);
 	const failure = $derived(services.failures[service.service]);
 	const reason = $derived(service.required && service.requiredBy.length === 0 ? t.requiredBySystem : service.requiredBy.length ? t.requiredBy(service.requiredBy) : t.unused);
@@ -39,9 +42,9 @@
 				<!-- The web UI (Mailpit's caught mail) opens in the default browser. -->
 				<Button variant="ghost" size="icon-xs" disabled={!running} title={t.openUi(label)} onclick={() => openExternal(service.uiUrl ?? '')} aria-label={t.openUi(label)}><ExternalLink /></Button>
 			{/if}
-			{#if running}
+			{#if stoppable}
 				<Button variant="ghost" size="icon-xs" disabled={busy} onclick={() => services.act('restart', [service.service])} aria-label="{t.restart} {label}"><RotateCw /></Button>
-				<Button variant="ghost" size="icon-xs" disabled={busy} onclick={() => services.act('stop', [service.service])} aria-label="{t.stop} {label}"><Square /></Button>
+				<Button variant="ghost" size="icon-xs" disabled={stopBusy} onclick={() => services.act('stop', [service.service])} aria-label="{t.stop} {label}"><Square /></Button>
 			{:else}
 				<Button variant="ghost" size="icon-xs" disabled={busy} onclick={() => services.act('start', [service.service])} aria-label="{t.start} {label}"><Play /></Button>
 			{/if}
