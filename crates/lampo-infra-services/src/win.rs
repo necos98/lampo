@@ -13,7 +13,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use tokio::sync::oneshot;
-use windows_sys::Win32::Foundation::{BOOLEAN, CloseHandle, ERROR_INSUFFICIENT_BUFFER, HANDLE, HLOCAL, INVALID_HANDLE_VALUE, LocalFree, NO_ERROR, SYSTEMTIME, WAIT_OBJECT_0};
+use windows_sys::Win32::Foundation::{CloseHandle, ERROR_INSUFFICIENT_BUFFER, HANDLE, HLOCAL, INVALID_HANDLE_VALUE, LocalFree, NO_ERROR, SYSTEMTIME, WAIT_OBJECT_0};
 use windows_sys::Win32::NetworkManagement::IpHelper::{GetExtendedTcpTable, MIB_TCP6TABLE_OWNER_PID, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_LISTENER};
 use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6};
 use windows_sys::Win32::Security::Authorization::{ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT};
@@ -173,7 +173,7 @@ pub(crate) fn is_owned_by_current_user(handle: HANDLE) -> io::Result<bool> {
 pub(crate) async fn wait_for_exit(process: &OwnedHandle) -> io::Result<()> {
     type Slot = Mutex<Option<oneshot::Sender<()>>>;
 
-    unsafe extern "system" fn on_signal(context: *mut c_void, _timed_out: BOOLEAN) {
+    unsafe extern "system" fn on_signal(context: *mut c_void, _timed_out: bool) {
         // SAFETY: `context` is the boxed slot, alive until the wait is unregistered (Guard).
         let slot = unsafe { &*(context as *const Slot) };
         if let Some(tx) = slot.lock().ok().and_then(|mut s| s.take()) {

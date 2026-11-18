@@ -9,7 +9,8 @@
 /// process.
 #[cfg(windows)]
 pub fn survive_ctrl_c() {
-    use windows_sys::Win32::Foundation::{BOOL, TRUE};
+    use windows_sys::Win32::Foundation::TRUE;
+    use windows_sys::core::BOOL;
     use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler};
 
     unsafe extern "system" fn handler(event: u32) -> BOOL {

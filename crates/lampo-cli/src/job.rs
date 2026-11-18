@@ -50,7 +50,8 @@ mod win {
     use std::process::Child;
     use std::sync::{Mutex, MutexGuard, Once, PoisonError};
 
-    use windows_sys::Win32::Foundation::{BOOL, FALSE, HANDLE, TRUE};
+    use windows_sys::Win32::Foundation::{FALSE, HANDLE, TRUE};
+    use windows_sys::core::BOOL;
     use windows_sys::Win32::System::Console::{CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT, SetConsoleCtrlHandler};
     use windows_sys::Win32::System::JobObjects::{
         AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
