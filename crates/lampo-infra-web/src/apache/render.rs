@@ -8,6 +8,8 @@ use lampo_domain::project::{ApacheDirectives, TlsMode};
 use lampo_domain::tcp_port::Port;
 use lampo_domain::web::{VirtualHost, WebServerConfig};
 use lampo_domain::{PortError, PortResult};
+use minijinja::syntax::SyntaxConfig;
+use minijinja::value::Serde;
 use minijinja::{Environment, UndefinedBehavior};
 use serde::Serialize;
 
@@ -247,9 +249,7 @@ impl ApacheConfigRenderer {
         let mut env = Environment::new();
         env.set_auto_escape_callback(|_| minijinja::AutoEscape::None);
         env.set_undefined_behavior(UndefinedBehavior::Strict);
-        env.set_trim_blocks(true);
-        env.set_lstrip_blocks(true);
-        env.set_keep_trailing_newline(true);
+        env.set_syntax(SyntaxConfig::builder().trim_blocks(true).lstrip_blocks(true).keep_trailing_newline(true).build().expect("default delimiters are valid"));
         env.add_template("httpd.conf", templates::httpd_conf()).expect("valid httpd.conf template");
         env.add_template("vhost.conf", templates::vhost_conf()).expect("valid vhost.conf template");
         Self { env, options }
@@ -290,7 +290,7 @@ impl ApacheConfigRenderer {
             idle: FcgidIdle::new(config.php_idle_timeout, self.options.fcgid.idle_scan_interval_secs),
             server_root,
         };
-        self.env.get_template("httpd.conf").and_then(|t| t.render(minijinja::context! { main => view })).map_err(render_error)
+        self.env.get_template("httpd.conf").and_then(|t| t.render(minijinja::context! { main => Serde(view) })).map_err(render_error)
     }
 
     /// One site's file.
@@ -345,7 +345,7 @@ impl ApacheConfigRenderer {
             project_env: project_env(vhost)?,
             custom_directives: rendered_directives(&vhost.custom_directives),
         };
-        self.env.get_template("vhost.conf").and_then(|t| t.render(minijinja::context! { vhost => view })).map_err(render_error)
+        self.env.get_template("vhost.conf").and_then(|t| t.render(minijinja::context! { vhost => Serde(view) })).map_err(render_error)
     }
 
     /// `Listen` arguments: the shared port on the loopback(s), then each dedicated port.
