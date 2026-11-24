@@ -51,7 +51,7 @@ flate2 = "1"
 minijinja = { version = "3", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
-winreg = "0.55"
+winreg = "0.56"
 windows-sys = "0.61"
 # TypeScript declarations of the DTOs (test-only: see lampo-application `ts_bindings`).
 ts-rs = "12"
